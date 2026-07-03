@@ -557,7 +557,7 @@
                 <button type="button" class="close-btn" onclick="document.getElementById('discountModal').classList.remove('active')">×</button>
             </div>
             <p style="color:var(--text-muted); margin-bottom:20px; font-size:13px;">Select discount type and enter the value for this specific order.</p>
-            <form id="discountForm" onsubmit="return window.applyDiscountForm(event);">
+            <div>
                 <div style="display:flex; gap:10px; margin-bottom:15px;">
                     <button type="button" class="p-btn disc-type-btn selected" id="discTypePctBtn" onclick="window.setDiscountType('percent')" style="flex:1; font-weight:800; border-color:var(--primary); color:var(--primary); background:rgba(67,24,255,0.05);">% Percentage</button>
                     <button type="button" class="p-btn disc-type-btn" id="discTypeFixedBtn" onclick="window.setDiscountType('fixed')" style="flex:1; font-weight:800;">₨ Fixed Amount</button>
@@ -567,10 +567,10 @@
                 <input type="number" id="discValueInput" step="0.01" min="0" placeholder="0.00" class="pos-input"
                     style="font-size:24px; text-align:center; padding:15px; font-weight:800; color:var(--danger); width:100%; margin-bottom:15px;">
                 <div style="display:flex; gap:10px;">
-                    <button type="submit" class="primary-btn" style="flex:2;">APPLY DISCOUNT</button>
-                    <button type="button" class="primary-btn" onclick="window.clearDiscount()" style="flex:1; background:var(--text-muted);">REMOVE</button>
+                    <button type="button" class="primary-btn" onclick="window.applyDiscountForm()" style="flex:2; margin-top:0;">APPLY DISCOUNT</button>
+                    <button type="button" class="primary-btn" onclick="window.clearDiscount()" style="flex:1; margin-top:0; background:var(--text-muted);">REMOVE</button>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
 
@@ -582,7 +582,7 @@
                 <button type="button" class="close-btn" onclick="document.getElementById('taxModal').classList.remove('active')">×</button>
             </div>
             <p style="color:var(--text-muted); margin-bottom:20px; font-size:13px;">This tax percentage will remain active for all consecutive orders until changed.</p>
-            <form id="taxForm" onsubmit="return window.applyTaxForm(event);">
+            <div>
                 <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:15px;">
                     <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(0)" style="padding:10px; font-weight:800;">0% None</button>
                     <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(5)" style="padding:10px; font-weight:800;">5% GST</button>
@@ -594,8 +594,8 @@
                 <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:5px;">CUSTOM TAX PERCENTAGE (%)</label>
                 <input type="number" id="taxValueInput" step="0.01" min="0" max="100" placeholder="0.00" class="pos-input"
                     style="font-size:24px; text-align:center; padding:15px; font-weight:800; color:var(--primary); width:100%; margin-bottom:15px;">
-                <button type="submit" class="primary-btn">SAVE TAX SETTING</button>
-            </form>
+                <button type="button" class="primary-btn" onclick="window.applyTaxForm()" style="margin-top:0;">SAVE TAX SETTING</button>
+            </div>
         </div>
     </div>
 
@@ -612,7 +612,7 @@
         </div>
     </div>
 
-    <script src="{% static 'pos.js' %}?v=4.6"></script>
+    <script src="{% static 'pos.js' %}?v=4.7"></script>
     <script data-cfasync="false" src="{% static 'shared-nav.js' %}?v=4.2"></script>
 </body>
 

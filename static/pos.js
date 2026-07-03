@@ -60,32 +60,28 @@ window.selectTaxPreset = (rate) => {
     });
 };
 
-window.applyDiscountForm = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+window.applyDiscountForm = () => {
     const val = parseFloat(document.getElementById('discValueInput')?.value || '0');
     if (isNaN(val) || val < 0) {
         alert("Please enter a valid discount value.");
-        return false;
+        return;
     }
     orderDiscountValue = val;
     orderDiscountType = document.getElementById('discType')?.value || 'percent';
     document.getElementById('discountModal')?.classList.remove('active');
     if (typeof window.renderCart === 'function') window.renderCart();
-    return false;
 };
 
-window.applyTaxForm = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+window.applyTaxForm = () => {
     const val = parseFloat(document.getElementById('taxValueInput')?.value || '0');
     if (isNaN(val) || val < 0 || val > 100) {
         alert("Please enter a valid tax percentage (0-100).");
-        return false;
+        return;
     }
     shiftTaxRate = val;
     localStorage.setItem('pos_tax_rate', val.toString());
     document.getElementById('taxModal')?.classList.remove('active');
     if (typeof window.renderCart === 'function') window.renderCart();
-    return false;
 };
 
 function initPOS() {
@@ -591,9 +587,6 @@ function initPOS() {
         receiptModal.classList.remove('active');
         document.body.style.background = ''; // restore bg
     });
-
-    document.getElementById('discountForm')?.addEventListener('submit', window.applyDiscountForm);
-    document.getElementById('taxForm')?.addEventListener('submit', window.applyTaxForm);
 
     // Initialize tax UI from localStorage
     const taxInputEl = document.getElementById('taxValueInput');
