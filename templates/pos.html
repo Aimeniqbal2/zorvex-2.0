@@ -445,7 +445,10 @@
     <!-- 1. Session Opening Modal (Guard) -->
     <div class="modal-overlay" id="sessionModal">
         <div class="modal-box">
-            <h2 style="margin-bottom:10px;">Open POS Session</h2>
+            <div class="modal-header">
+                <h3 style="font-size:20px; font-weight:800;">Open POS Session</h3>
+                <button type="button" class="close-btn" id="closeOpenSessionBtn" title="Return to Dashboard">×</button>
+            </div>
             <p style="color:var(--text-muted); margin-bottom:25px; font-size:14px;">Enter the starting cash balance in
                 your drawer today.</p>
             <form id="sessionForm">
@@ -455,6 +458,7 @@
                     style="font-size:24px; text-align:center; padding:20px; font-weight:800; color:var(--primary);"
                     required>
                 <button type="submit" class="primary-btn">INITIALIZE TERMINAL</button>
+                <button type="button" id="cancelOpenSessionBtn" style="width: 100%; padding: 16px; border-radius: 14px; background: transparent; border: 2px solid var(--border-light); color: var(--text-muted); font-weight: 700; cursor: pointer; margin-top: 12px; transition: 0.3s;">Cancel & Return to Dashboard</button>
             </form>
         </div>
     </div>
@@ -462,7 +466,10 @@
     <!-- 2. Session Closing Modal (Reconciliation) -->
     <div class="modal-overlay" id="closeSessionModal">
         <div class="modal-box">
-            <h2 style="margin-bottom:10px;">End Shift & Reconcile</h2>
+            <div class="modal-header">
+                <h3 style="font-size:20px; font-weight:800;">End Shift & Reconcile</h3>
+                <button type="button" class="close-btn" id="closeReconcileModalBtn">×</button>
+            </div>
             <p style="color:var(--text-muted); margin-bottom:25px; font-size:14px;">Count the physical cash in your
                 drawer to close session.</p>
             <form id="reconcileForm">
@@ -472,6 +479,7 @@
                     style="font-size:24px; text-align:center; padding:20px; font-weight:800; color:var(--danger);"
                     required>
                 <button type="submit" class="primary-btn" style="background:var(--danger);">CLOSE & SYNC LEDGER</button>
+                <button type="button" id="cancelReconcileBtn" style="width: 100%; padding: 16px; border-radius: 14px; background: transparent; border: 2px solid var(--border-light); color: var(--text-muted); font-weight: 700; cursor: pointer; margin-top: 12px; transition: 0.3s;">Cancel</button>
             </form>
         </div>
     </div>

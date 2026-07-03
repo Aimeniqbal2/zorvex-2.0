@@ -80,6 +80,18 @@ function initPOS() {
         }
     });
 
+    const exitPOS = () => {
+        if (document.referrer && document.referrer.includes(window.location.host) && !document.referrer.includes('/pos')) {
+            window.history.back();
+        } else {
+            window.location.href = '/';
+        }
+    };
+    document.getElementById('closeOpenSessionBtn')?.addEventListener('click', exitPOS);
+    document.getElementById('cancelOpenSessionBtn')?.addEventListener('click', exitPOS);
+    document.getElementById('closeReconcileModalBtn')?.addEventListener('click', () => closeSessionModal.classList.remove('active'));
+    document.getElementById('cancelReconcileBtn')?.addEventListener('click', () => closeSessionModal.classList.remove('active'));
+
     // ─── 2. Terminal Initialization ──────────────────────────────────────────────
     async function initTerminal() {
         try {
