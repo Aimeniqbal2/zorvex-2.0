@@ -422,12 +422,22 @@
                             <span>Subtotal</span><span id="cartSubtotal">PKR0.00</span>
                         </div>
                         <div
-                            style="display:flex; justify-content:space-between; font-size:14px; font-weight:600; color:var(--danger); margin-bottom:8px;">
-                            <span>Discount Override</span><span id="cartDiscount">-PKR0.00</span>
+                            style="display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:600; color:var(--danger); margin-bottom:10px;">
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span>Discount</span>
+                                <span id="discountRateBadge" style="font-size:11px; background:rgba(239,68,68,0.15); color:var(--danger); padding:2px 6px; border-radius:4px; display:none;"></span>
+                                <button type="button" id="openDiscountModalBtn" onclick="document.getElementById('discountModal').classList.add('active')" style="background:rgba(239,68,68,0.15); border:1px solid var(--danger); color:var(--danger); border-radius:6px; padding:2px 8px; font-size:11px; font-weight:800; cursor:pointer; transition:0.2s;" title="Add or modify discount">+ SET DISC</button>
+                            </div>
+                            <span id="cartDiscount">-PKR0.00</span>
                         </div>
                         <div
-                            style="display:flex; justify-content:space-between; font-size:14px; font-weight:600; color:var(--text-muted); margin-bottom:15px; border-bottom:1px dashed var(--border-light); padding-bottom:15px;">
-                            <span>Calculated Tax</span><span id="cartTax">+PKR0.00</span>
+                            style="display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:600; color:var(--text-muted); margin-bottom:15px; border-bottom:1px dashed var(--border-light); padding-bottom:15px;">
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span>Tax</span>
+                                <span id="taxRateBadge" style="font-size:11px; background:rgba(67,24,255,0.15); color:var(--primary); padding:2px 6px; border-radius:4px;">(0%)</span>
+                                <button type="button" id="openTaxModalBtn" onclick="document.getElementById('taxModal').classList.add('active')" style="background:rgba(67,24,255,0.15); border:1px solid var(--primary); color:var(--primary); border-radius:6px; padding:2px 8px; font-size:11px; font-weight:800; cursor:pointer; transition:0.2s;" title="Set shift tax percentage">+ SET TAX %</button>
+                            </div>
+                            <span id="cartTax">+PKR0.00</span>
                         </div>
 
                         <div class="total-row">
@@ -539,6 +549,56 @@
         </div>
     </div>
 
+    <!-- Discount Modal -->
+    <div class="modal-overlay" id="discountModal">
+        <div class="modal-box" style="width: 400px;">
+            <div class="modal-header">
+                <h3 style="font-size:20px; font-weight:800;">Add Order Discount</h3>
+                <button type="button" class="close-btn" onclick="document.getElementById('discountModal').classList.remove('active')">×</button>
+            </div>
+            <p style="color:var(--text-muted); margin-bottom:20px; font-size:13px;">Select discount type and enter the value for this specific order.</p>
+            <form id="discountForm">
+                <div style="display:flex; gap:10px; margin-bottom:15px;">
+                    <button type="button" class="p-btn disc-type-btn selected" id="discTypePctBtn" onclick="window.setDiscountType('percent')" style="flex:1; font-weight:800; border-color:var(--primary); color:var(--primary); background:rgba(67,24,255,0.05);">% Percentage</button>
+                    <button type="button" class="p-btn disc-type-btn" id="discTypeFixedBtn" onclick="window.setDiscountType('fixed')" style="flex:1; font-weight:800;">₨ Fixed Amount</button>
+                </div>
+                <input type="hidden" id="discType" value="percent">
+                <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:5px;" id="discInputLabel">DISCOUNT PERCENTAGE (%)</label>
+                <input type="number" id="discValueInput" step="0.01" min="0" placeholder="0.00" class="pos-input"
+                    style="font-size:24px; text-align:center; padding:15px; font-weight:800; color:var(--danger); width:100%; margin-bottom:15px;">
+                <div style="display:flex; gap:10px;">
+                    <button type="submit" class="primary-btn" style="flex:2;">APPLY DISCOUNT</button>
+                    <button type="button" class="primary-btn" onclick="window.clearDiscount()" style="flex:1; background:var(--text-muted);">REMOVE</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Tax Modal -->
+    <div class="modal-overlay" id="taxModal">
+        <div class="modal-box" style="width: 400px;">
+            <div class="modal-header">
+                <h3 style="font-size:20px; font-weight:800;">Set Shift Tax Percentage</h3>
+                <button type="button" class="close-btn" onclick="document.getElementById('taxModal').classList.remove('active')">×</button>
+            </div>
+            <p style="color:var(--text-muted); margin-bottom:20px; font-size:13px;">This tax percentage will remain active for all consecutive orders until changed.</p>
+            <form id="taxForm">
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:15px;">
+                    <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(0)" style="padding:10px; font-weight:800;">0% None</button>
+                    <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(5)" style="padding:10px; font-weight:800;">5% GST</button>
+                    <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(10)" style="padding:10px; font-weight:800;">10% Tax</button>
+                    <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(16)" style="padding:10px; font-weight:800;">16% PST</button>
+                    <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(18)" style="padding:10px; font-weight:800;">18% GST</button>
+                    <button type="button" class="p-btn tax-preset-btn" onclick="window.selectTaxPreset(25)" style="padding:10px; font-weight:800;">25% Luxury</button>
+                </div>
+                <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:5px;">CUSTOM TAX PERCENTAGE (%)</label>
+                <input type="number" id="taxValueInput" step="0.01" min="0" max="100" placeholder="0.00" class="pos-input"
+                    style="font-size:24px; text-align:center; padding:15px; font-weight:800; color:var(--primary); width:100%; margin-bottom:15px;">
+                <button type="submit" class="primary-btn">SAVE TAX SETTING</button>
+            </form>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="receiptModal">
         <div class="modal-box" style="width:400px; padding:0; overflow:hidden;">
             <div id="receiptContent"
@@ -552,7 +612,7 @@
         </div>
     </div>
 
-    <script src="{% static 'pos.js' %}?v=4.3"></script>
+    <script src="{% static 'pos.js' %}?v=4.4"></script>
     <script data-cfasync="false" src="{% static 'shared-nav.js' %}?v=4.2"></script>
 </body>
 

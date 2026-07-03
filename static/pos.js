@@ -11,6 +11,9 @@ function initPOS() {
 
     let products = [], cart = [], customers = [], activeSession = null;
     let selectedCustomerId = null;
+    let orderDiscountValue = 0;
+    let orderDiscountType = 'percent';
+    let shiftTaxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
 
     // UI Bridges
     const grid = document.getElementById('productGrid'), cartContainer = document.getElementById('cartContainer');
@@ -228,19 +231,45 @@ function initPOS() {
     }
 
     function updateFinancials(sub) {
-        const discountRaw = parseFloat(document.getElementById('discountInput')?.value || 0);
-        const discountAmt = Math.min(Math.max(discountRaw, 0), sub);
-        const afterDiscount = sub - discountAmt;
-        const tax = 0;  // Set to e.g. afterDiscount * 0.15 if you charge 15% tax
+        let discountAmt = 0;
+        if (orderDiscountType === 'percent') {
+            discountAmt = sub * (orderDiscountValue / 100);
+        } else {
+            discountAmt = orderDiscountValue;
+        }
+        discountAmt = Math.min(Math.max(discountAmt, 0), sub);
+        const afterDiscount = Math.max(0, sub - discountAmt);
+
+        const taxRate = shiftTaxRate || 0;
+        const tax = afterDiscount * (taxRate / 100);
         const total = parseFloat((afterDiscount + tax).toFixed(2));
-        if (discNode) discNode.innerText = `PKR${discountAmt.toFixed(2)}`;
-        subNode.innerText = `PKR${sub.toFixed(2)}`;
-        taxNode.innerText = `PKR${tax.toFixed(2)}`;
-        totNode.innerText = `PKR${total.toFixed(2)}`;
-        totNode.dataset.net      = total;
-        totNode.dataset.subtotal = sub.toFixed(2);
-        totNode.dataset.discount = discountAmt.toFixed(2);
-        totNode.dataset.tax      = tax.toFixed(2);
+
+        if (discNode) {
+            discNode.innerText = `-PKR${discountAmt.toFixed(2)}`;
+            const discBadge = document.getElementById('discountRateBadge');
+            if (discBadge) {
+                if (discountAmt > 0) {
+                    discBadge.innerText = orderDiscountType === 'percent' ? `(${orderDiscountValue}%)` : `(Fixed)`;
+                    discBadge.style.display = 'inline';
+                } else {
+                    discBadge.style.display = 'none';
+                }
+            }
+        }
+        if (subNode) subNode.innerText = `PKR${sub.toFixed(2)}`;
+        if (taxNode) {
+            taxNode.innerText = `+PKR${tax.toFixed(2)}`;
+            const taxBadge = document.getElementById('taxRateBadge');
+            if (taxBadge) taxBadge.innerText = `(${taxRate}%)`;
+        }
+        if (totNode) {
+            totNode.innerText = `PKR${total.toFixed(2)}`;
+            totNode.dataset.net      = total;
+            totNode.dataset.subtotal = sub.toFixed(2);
+            totNode.dataset.discount = discountAmt.toFixed(2);
+            totNode.dataset.tax      = tax.toFixed(2);
+            totNode.dataset.taxrate  = taxRate;
+        }
     }
 
     // ─── 5. CRM Advanced Searching ───────────────────────────────────────────────
@@ -367,6 +396,7 @@ function initPOS() {
             subtotal:        subtotal,
             discount_amount: discountAmt,
             tax_amount:      taxAmt,
+            tax_rate:        parseFloat(totNode.dataset.taxrate || '0'),
             total_amount:    totalAmt,
             payment_method:  method,
             received_amount: receivedAmt,
@@ -402,6 +432,9 @@ function initPOS() {
             paymentModal.classList.remove('active');
             printReceipt(sale, cart, payload);
             cart = []; 
+            orderDiscountValue = 0;
+            orderDiscountType = 'percent';
+            if (document.getElementById('discValueInput')) document.getElementById('discValueInput').value = '';
             clearCustomerBtn.click(); // Reset customer
             renderCart(); 
             initTerminal(); // Resync inventory logic
@@ -442,8 +475,12 @@ function initPOS() {
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                     <span>Subtotal:</span><span>PKR${meta.subtotal.toFixed(2)}</span>
                 </div>
+                ${meta.discount_amount > 0 ? `
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#e11d48;">
+                    <span>Discount:</span><span>-PKR${meta.discount_amount.toFixed(2)}</span>
+                </div>` : ''}
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span>Tax (15%):</span><span>PKR${meta.tax_amount.toFixed(2)}</span>
+                    <span>Tax (${meta.tax_rate || 0}%):</span><span>+PKR${meta.tax_amount.toFixed(2)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; margin-top:5px;">
                     <span>TOTAL:</span><span>PKR${meta.total_amount.toFixed(2)}</span>
@@ -468,6 +505,95 @@ function initPOS() {
         receiptModal.classList.remove('active');
         document.body.style.background = ''; // restore bg
     });
+
+    // Discount & Tax Modals
+    window.setDiscountType = (type) => {
+        orderDiscountType = type;
+        const discTypeEl = document.getElementById('discType');
+        if (discTypeEl) discTypeEl.value = type;
+        const pctBtn = document.getElementById('discTypePctBtn');
+        const fixBtn = document.getElementById('discTypeFixedBtn');
+        const label = document.getElementById('discInputLabel');
+        if (type === 'percent') {
+            pctBtn?.classList.add('selected');
+            pctBtn?.style.setProperty('border-color', 'var(--primary)');
+            pctBtn?.style.setProperty('color', 'var(--primary)');
+            pctBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
+            fixBtn?.classList.remove('selected');
+            fixBtn?.style.removeProperty('border-color');
+            fixBtn?.style.removeProperty('color');
+            fixBtn?.style.removeProperty('background');
+            if (label) label.innerText = 'DISCOUNT PERCENTAGE (%)';
+        } else {
+            fixBtn?.classList.add('selected');
+            fixBtn?.style.setProperty('border-color', 'var(--primary)');
+            fixBtn?.style.setProperty('color', 'var(--primary)');
+            fixBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
+            pctBtn?.classList.remove('selected');
+            pctBtn?.style.removeProperty('border-color');
+            pctBtn?.style.removeProperty('color');
+            pctBtn?.style.removeProperty('background');
+            if (label) label.innerText = 'DISCOUNT FIXED AMOUNT (PKR)';
+        }
+    };
+
+    window.clearDiscount = () => {
+        orderDiscountValue = 0;
+        orderDiscountType = 'percent';
+        const input = document.getElementById('discValueInput');
+        if (input) input.value = '';
+        window.setDiscountType('percent');
+        document.getElementById('discountModal')?.classList.remove('active');
+        const sub = parseFloat(totNode.dataset.subtotal || '0');
+        updateFinancials(sub);
+    };
+
+    window.selectTaxPreset = (rate) => {
+        const input = document.getElementById('taxValueInput');
+        if (input) input.value = rate;
+        document.querySelectorAll('.tax-preset-btn').forEach(b => {
+            if (parseFloat(b.innerText) === rate) {
+                b.style.background = 'var(--primary)';
+                b.style.color = '#fff';
+            } else {
+                b.style.background = '';
+                b.style.color = '';
+            }
+        });
+    };
+
+    document.getElementById('discountForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = parseFloat(document.getElementById('discValueInput')?.value || '0');
+        if (isNaN(val) || val < 0) {
+            alert("Please enter a valid discount value.");
+            return;
+        }
+        orderDiscountValue = val;
+        orderDiscountType = document.getElementById('discType')?.value || 'percent';
+        document.getElementById('discountModal')?.classList.remove('active');
+        const sub = parseFloat(totNode.dataset.subtotal || '0');
+        updateFinancials(sub);
+    });
+
+    document.getElementById('taxForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = parseFloat(document.getElementById('taxValueInput')?.value || '0');
+        if (isNaN(val) || val < 0 || val > 100) {
+            alert("Please enter a valid tax percentage (0-100).");
+            return;
+        }
+        shiftTaxRate = val;
+        localStorage.setItem('pos_tax_rate', val.toString());
+        document.getElementById('taxModal')?.classList.remove('active');
+        const sub = parseFloat(totNode.dataset.subtotal || '0');
+        updateFinancials(sub);
+    });
+
+    // Initialize tax UI from localStorage
+    const taxInputEl = document.getElementById('taxValueInput');
+    if (taxInputEl) taxInputEl.value = shiftTaxRate;
+    window.selectTaxPreset(shiftTaxRate);
 
     checkSession();
 }
