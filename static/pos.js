@@ -2,6 +2,92 @@ function formatCurrency(amount) {
     return "₨ " + Number(amount).toLocaleString('en-PK');
 }
 
+let orderDiscountValue = 0;
+let orderDiscountType = 'percent';
+let shiftTaxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
+
+window.setDiscountType = (type) => {
+    orderDiscountType = type;
+    const discTypeEl = document.getElementById('discType');
+    if (discTypeEl) discTypeEl.value = type;
+    const pctBtn = document.getElementById('discTypePctBtn');
+    const fixBtn = document.getElementById('discTypeFixedBtn');
+    const label = document.getElementById('discInputLabel');
+    if (type === 'percent') {
+        pctBtn?.classList.add('selected');
+        pctBtn?.style.setProperty('border-color', 'var(--primary)');
+        pctBtn?.style.setProperty('color', 'var(--primary)');
+        pctBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
+        fixBtn?.classList.remove('selected');
+        fixBtn?.style.removeProperty('border-color');
+        fixBtn?.style.removeProperty('color');
+        fixBtn?.style.removeProperty('background');
+        if (label) label.innerText = 'DISCOUNT PERCENTAGE (%)';
+    } else {
+        fixBtn?.classList.add('selected');
+        fixBtn?.style.setProperty('border-color', 'var(--primary)');
+        fixBtn?.style.setProperty('color', 'var(--primary)');
+        fixBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
+        pctBtn?.classList.remove('selected');
+        pctBtn?.style.removeProperty('border-color');
+        pctBtn?.style.removeProperty('color');
+        pctBtn?.style.removeProperty('background');
+        if (label) label.innerText = 'DISCOUNT FIXED AMOUNT (PKR)';
+    }
+};
+
+window.clearDiscount = () => {
+    orderDiscountValue = 0;
+    orderDiscountType = 'percent';
+    const input = document.getElementById('discValueInput');
+    if (input) input.value = '';
+    window.setDiscountType('percent');
+    document.getElementById('discountModal')?.classList.remove('active');
+    if (typeof window.renderCart === 'function') window.renderCart();
+};
+
+window.selectTaxPreset = (rate) => {
+    const input = document.getElementById('taxValueInput');
+    if (input) input.value = rate;
+    document.querySelectorAll('.tax-preset-btn').forEach(b => {
+        if (parseFloat(b.innerText) === rate) {
+            b.style.background = 'var(--primary)';
+            b.style.color = '#fff';
+        } else {
+            b.style.background = '';
+            b.style.color = '';
+        }
+    });
+};
+
+window.applyDiscountForm = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const val = parseFloat(document.getElementById('discValueInput')?.value || '0');
+    if (isNaN(val) || val < 0) {
+        alert("Please enter a valid discount value.");
+        return false;
+    }
+    orderDiscountValue = val;
+    orderDiscountType = document.getElementById('discType')?.value || 'percent';
+    document.getElementById('discountModal')?.classList.remove('active');
+    if (typeof window.renderCart === 'function') window.renderCart();
+    return false;
+};
+
+window.applyTaxForm = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const val = parseFloat(document.getElementById('taxValueInput')?.value || '0');
+    if (isNaN(val) || val < 0 || val > 100) {
+        alert("Please enter a valid tax percentage (0-100).");
+        return false;
+    }
+    shiftTaxRate = val;
+    localStorage.setItem('pos_tax_rate', val.toString());
+    document.getElementById('taxModal')?.classList.remove('active');
+    if (typeof window.renderCart === 'function') window.renderCart();
+    return false;
+};
+
 function initPOS() {
     const token = localStorage.getItem('access_token');
     if (!token) { window.location.href = '/login/'; return; }
@@ -11,9 +97,6 @@ function initPOS() {
 
     let products = [], cart = [], customers = [], activeSession = null;
     let selectedCustomerId = null;
-    let orderDiscountValue = 0;
-    let orderDiscountType = 'percent';
-    let shiftTaxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
 
     // UI Bridges
     const grid = document.getElementById('productGrid'), cartContainer = document.getElementById('cartContainer');
@@ -272,6 +355,9 @@ function initPOS() {
         }
     }
 
+    window.renderCart = renderCart;
+    window.updateFinancials = updateFinancials;
+
     // ─── 5. CRM Advanced Searching ───────────────────────────────────────────────
     function renderCustomerResults(query) {
         if(!query) { customerResults.style.display = 'none'; return; }
@@ -505,89 +591,6 @@ function initPOS() {
         receiptModal.classList.remove('active');
         document.body.style.background = ''; // restore bg
     });
-
-    // Discount & Tax Modals
-    window.setDiscountType = (type) => {
-        orderDiscountType = type;
-        const discTypeEl = document.getElementById('discType');
-        if (discTypeEl) discTypeEl.value = type;
-        const pctBtn = document.getElementById('discTypePctBtn');
-        const fixBtn = document.getElementById('discTypeFixedBtn');
-        const label = document.getElementById('discInputLabel');
-        if (type === 'percent') {
-            pctBtn?.classList.add('selected');
-            pctBtn?.style.setProperty('border-color', 'var(--primary)');
-            pctBtn?.style.setProperty('color', 'var(--primary)');
-            pctBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
-            fixBtn?.classList.remove('selected');
-            fixBtn?.style.removeProperty('border-color');
-            fixBtn?.style.removeProperty('color');
-            fixBtn?.style.removeProperty('background');
-            if (label) label.innerText = 'DISCOUNT PERCENTAGE (%)';
-        } else {
-            fixBtn?.classList.add('selected');
-            fixBtn?.style.setProperty('border-color', 'var(--primary)');
-            fixBtn?.style.setProperty('color', 'var(--primary)');
-            fixBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
-            pctBtn?.classList.remove('selected');
-            pctBtn?.style.removeProperty('border-color');
-            pctBtn?.style.removeProperty('color');
-            pctBtn?.style.removeProperty('background');
-            if (label) label.innerText = 'DISCOUNT FIXED AMOUNT (PKR)';
-        }
-    };
-
-    window.clearDiscount = () => {
-        orderDiscountValue = 0;
-        orderDiscountType = 'percent';
-        const input = document.getElementById('discValueInput');
-        if (input) input.value = '';
-        window.setDiscountType('percent');
-        document.getElementById('discountModal')?.classList.remove('active');
-        renderCart();
-    };
-
-    window.selectTaxPreset = (rate) => {
-        const input = document.getElementById('taxValueInput');
-        if (input) input.value = rate;
-        document.querySelectorAll('.tax-preset-btn').forEach(b => {
-            if (parseFloat(b.innerText) === rate) {
-                b.style.background = 'var(--primary)';
-                b.style.color = '#fff';
-            } else {
-                b.style.background = '';
-                b.style.color = '';
-            }
-        });
-    };
-
-    window.applyDiscountForm = (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        const val = parseFloat(document.getElementById('discValueInput')?.value || '0');
-        if (isNaN(val) || val < 0) {
-            alert("Please enter a valid discount value.");
-            return false;
-        }
-        orderDiscountValue = val;
-        orderDiscountType = document.getElementById('discType')?.value || 'percent';
-        document.getElementById('discountModal')?.classList.remove('active');
-        renderCart();
-        return false;
-    };
-
-    window.applyTaxForm = (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        const val = parseFloat(document.getElementById('taxValueInput')?.value || '0');
-        if (isNaN(val) || val < 0 || val > 100) {
-            alert("Please enter a valid tax percentage (0-100).");
-            return false;
-        }
-        shiftTaxRate = val;
-        localStorage.setItem('pos_tax_rate', val.toString());
-        document.getElementById('taxModal')?.classList.remove('active');
-        renderCart();
-        return false;
-    };
 
     document.getElementById('discountForm')?.addEventListener('submit', window.applyDiscountForm);
     document.getElementById('taxForm')?.addEventListener('submit', window.applyTaxForm);
