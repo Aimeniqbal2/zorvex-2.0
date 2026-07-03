@@ -447,7 +447,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3 style="font-size:20px; font-weight:800;">Open POS Session</h3>
-                <button type="button" class="close-btn" id="closeOpenSessionBtn" title="Return to Dashboard">×</button>
+                <button type="button" class="close-btn" id="closeOpenSessionBtn" title="Return to Dashboard" onclick="window.location.href='/'">×</button>
             </div>
             <p style="color:var(--text-muted); margin-bottom:25px; font-size:14px;">Enter the starting cash balance in
                 your drawer today.</p>
@@ -458,7 +458,7 @@
                     style="font-size:24px; text-align:center; padding:20px; font-weight:800; color:var(--primary);"
                     required>
                 <button type="submit" class="primary-btn">INITIALIZE TERMINAL</button>
-                <button type="button" id="cancelOpenSessionBtn" style="width: 100%; padding: 16px; border-radius: 14px; background: transparent; border: 2px solid var(--border-light); color: var(--text-muted); font-weight: 700; cursor: pointer; margin-top: 12px; transition: 0.3s;">Cancel & Return to Dashboard</button>
+                <button type="button" id="cancelOpenSessionBtn" onclick="window.location.href='/'" style="width: 100%; padding: 16px; border-radius: 14px; background: transparent; border: 2px solid var(--border-light); color: var(--text-muted); font-weight: 700; cursor: pointer; margin-top: 12px; transition: 0.3s;">Cancel & Return to Dashboard</button>
             </form>
         </div>
     </div>
@@ -468,7 +468,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3 style="font-size:20px; font-weight:800;">End Shift & Reconcile</h3>
-                <button type="button" class="close-btn" id="closeReconcileModalBtn">×</button>
+                <button type="button" class="close-btn" id="closeReconcileModalBtn" onclick="document.getElementById('closeSessionModal').classList.remove('active')">×</button>
             </div>
             <p style="color:var(--text-muted); margin-bottom:25px; font-size:14px;">Count the physical cash in your
                 drawer to close session.</p>
@@ -479,7 +479,7 @@
                     style="font-size:24px; text-align:center; padding:20px; font-weight:800; color:var(--danger);"
                     required>
                 <button type="submit" class="primary-btn" style="background:var(--danger);">CLOSE & SYNC LEDGER</button>
-                <button type="button" id="cancelReconcileBtn" style="width: 100%; padding: 16px; border-radius: 14px; background: transparent; border: 2px solid var(--border-light); color: var(--text-muted); font-weight: 700; cursor: pointer; margin-top: 12px; transition: 0.3s;">Cancel</button>
+                <button type="button" id="cancelReconcileBtn" onclick="document.getElementById('closeSessionModal').classList.remove('active')" style="width: 100%; padding: 16px; border-radius: 14px; background: transparent; border: 2px solid var(--border-light); color: var(--text-muted); font-weight: 700; cursor: pointer; margin-top: 12px; transition: 0.3s;">Cancel</button>
             </form>
         </div>
     </div>
@@ -552,10 +552,8 @@
         </div>
     </div>
 
-    <script src="{% static 'pos.js' %}?v=4.2"></script>
+    <script src="{% static 'pos.js' %}?v=4.3"></script>
     <script data-cfasync="false" src="{% static 'shared-nav.js' %}?v=4.2"></script>
 </body>
-
-</html>
 
 </html>
