@@ -544,8 +544,7 @@ function initPOS() {
         if (input) input.value = '';
         window.setDiscountType('percent');
         document.getElementById('discountModal')?.classList.remove('active');
-        const sub = parseFloat(totNode.dataset.subtotal || '0');
-        updateFinancials(sub);
+        renderCart();
     };
 
     window.selectTaxPreset = (rate) => {
@@ -562,33 +561,36 @@ function initPOS() {
         });
     };
 
-    document.getElementById('discountForm')?.addEventListener('submit', (e) => {
-        e.preventDefault();
+    window.applyDiscountForm = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
         const val = parseFloat(document.getElementById('discValueInput')?.value || '0');
         if (isNaN(val) || val < 0) {
             alert("Please enter a valid discount value.");
-            return;
+            return false;
         }
         orderDiscountValue = val;
         orderDiscountType = document.getElementById('discType')?.value || 'percent';
         document.getElementById('discountModal')?.classList.remove('active');
-        const sub = parseFloat(totNode.dataset.subtotal || '0');
-        updateFinancials(sub);
-    });
+        renderCart();
+        return false;
+    };
 
-    document.getElementById('taxForm')?.addEventListener('submit', (e) => {
-        e.preventDefault();
+    window.applyTaxForm = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
         const val = parseFloat(document.getElementById('taxValueInput')?.value || '0');
         if (isNaN(val) || val < 0 || val > 100) {
             alert("Please enter a valid tax percentage (0-100).");
-            return;
+            return false;
         }
         shiftTaxRate = val;
         localStorage.setItem('pos_tax_rate', val.toString());
         document.getElementById('taxModal')?.classList.remove('active');
-        const sub = parseFloat(totNode.dataset.subtotal || '0');
-        updateFinancials(sub);
-    });
+        renderCart();
+        return false;
+    };
+
+    document.getElementById('discountForm')?.addEventListener('submit', window.applyDiscountForm);
+    document.getElementById('taxForm')?.addEventListener('submit', window.applyTaxForm);
 
     // Initialize tax UI from localStorage
     const taxInputEl = document.getElementById('taxValueInput');
