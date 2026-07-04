@@ -2,93 +2,6 @@ function formatCurrency(amount) {
     return "₨ " + Number(amount).toLocaleString('en-PK');
 }
 
-let orderDiscountValue = 0;
-let orderDiscountType = 'percent';
-let shiftTaxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
-let globalRenderCart = null;
-
-window.setDiscountType = (type) => {
-    orderDiscountType = type;
-    const discTypeEl = document.getElementById('discType');
-    if (discTypeEl) discTypeEl.value = type;
-    const pctBtn = document.getElementById('discTypePctBtn');
-    const fixBtn = document.getElementById('discTypeFixedBtn');
-    const label = document.getElementById('discInputLabel');
-    if (type === 'percent') {
-        pctBtn?.classList.add('selected');
-        pctBtn?.style.setProperty('border-color', 'var(--primary)');
-        pctBtn?.style.setProperty('color', 'var(--primary)');
-        pctBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
-        fixBtn?.classList.remove('selected');
-        fixBtn?.style.removeProperty('border-color');
-        fixBtn?.style.removeProperty('color');
-        fixBtn?.style.removeProperty('background');
-        if (label) label.innerText = 'DISCOUNT PERCENTAGE (%)';
-    } else {
-        fixBtn?.classList.add('selected');
-        fixBtn?.style.setProperty('border-color', 'var(--primary)');
-        fixBtn?.style.setProperty('color', 'var(--primary)');
-        fixBtn?.style.setProperty('background', 'rgba(67,24,255,0.05)');
-        pctBtn?.classList.remove('selected');
-        pctBtn?.style.removeProperty('border-color');
-        pctBtn?.style.removeProperty('color');
-        pctBtn?.style.removeProperty('background');
-        if (label) label.innerText = 'DISCOUNT FIXED AMOUNT (PKR)';
-    }
-};
-
-window.clearDiscount = () => {
-    orderDiscountValue = 0;
-    orderDiscountType = 'percent';
-    const input = document.getElementById('discValueInput');
-    if (input) input.value = '';
-    window.setDiscountType('percent');
-    document.getElementById('discountModal')?.classList.remove('active');
-    if (typeof window.renderCart === 'function') window.renderCart();
-    else if (typeof globalRenderCart === 'function') globalRenderCart();
-};
-
-window.selectTaxPreset = (rate) => {
-    const input = document.getElementById('taxValueInput');
-    if (input) input.value = rate;
-    document.querySelectorAll('.tax-preset-btn').forEach(b => {
-        if (parseFloat(b.innerText) === rate) {
-            b.style.background = 'var(--primary)';
-            b.style.color = '#fff';
-        } else {
-            b.style.background = '';
-            b.style.color = '';
-        }
-    });
-};
-
-window.applyDiscountForm = () => {
-    const val = parseFloat(document.getElementById('discValueInput')?.value || '0');
-    if (isNaN(val) || val < 0) {
-        alert("Please enter a valid discount value.");
-        return;
-    }
-    orderDiscountValue = val;
-    orderDiscountType = document.getElementById('discType')?.value || 'percent';
-    document.getElementById('discountModal')?.classList.remove('active');
-    if (typeof window.renderCart === 'function') window.renderCart();
-    else if (typeof globalRenderCart === 'function') globalRenderCart();
-};
-
-window.applyTaxForm = () => {
-    const val = parseFloat(document.getElementById('taxValueInput')?.value || '0');
-    if (isNaN(val) || val < 0 || val > 100) {
-        alert("Please enter a valid tax percentage (0-100).");
-        return;
-    }
-    shiftTaxRate = val;
-    localStorage.setItem('pos_tax_rate', val.toString());
-    window.selectTaxPreset(val);
-    document.getElementById('taxModal')?.classList.remove('active');
-    if (typeof window.renderCart === 'function') window.renderCart();
-    else if (typeof globalRenderCart === 'function') globalRenderCart();
-};
-
 function initPOS() {
     const token = localStorage.getItem('access_token');
     if (!token) { window.location.href = '/login/'; return; }
@@ -98,11 +11,6 @@ function initPOS() {
 
     let products = [], cart = [], customers = [], activeSession = null;
     let selectedCustomerId = null;
-
-    // Immediately expose core renderers so modal buttons never fail even if DOM lookups throw later
-    window.renderCart = () => { if (typeof renderCart === 'function') renderCart(); };
-    window.updateFinancials = (sub) => { if (typeof updateFinancials === 'function') updateFinancials(sub); };
-    globalRenderCart = window.renderCart;
 
     // UI Bridges
     const grid = document.getElementById('productGrid'), cartContainer = document.getElementById('cartContainer');
@@ -139,7 +47,7 @@ function initPOS() {
         } catch (e) { console.error("Session Check Failed", e); }
     }
 
-    document.getElementById('sessionForm')?.addEventListener('submit', async (e) => {
+    document.getElementById('sessionForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const opening = document.getElementById('openingCash').value;
         const resp = await fetch(`${API}/sales/sessions/`, {
@@ -156,8 +64,8 @@ function initPOS() {
         }
     });
 
-    document.getElementById('closeSessionBtn')?.addEventListener('click', () => closeSessionModal?.classList.add('active'));
-    document.getElementById('reconcileForm')?.addEventListener('submit', async (e) => {
+    document.getElementById('closeSessionBtn').addEventListener('click', () => closeSessionModal.classList.add('active'));
+    document.getElementById('reconcileForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const closing = document.getElementById('closingCash').value;
         const resp = await fetch(`${API}/sales/sessions/${activeSession.id}/`, {
@@ -230,7 +138,7 @@ function initPOS() {
     // ─── 3. Global & Top Bar Searching ──────────────────────────────────────────
     
     // Laser Keyboard Binding
-    barcodeScanner?.addEventListener('keypress', (e) => {
+    barcodeScanner.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             const val = barcodeScanner.value.trim().toLowerCase();
             if(!val) return;
@@ -253,9 +161,9 @@ function initPOS() {
     });
 
     // Top Bar General Search
-    posSearch?.addEventListener('input', (e) => {
+    posSearch.addEventListener('input', (e) => {
         const q = e.target.value.toLowerCase();
-        const cat = categoryFilter?.value;
+        const cat = categoryFilter.value;
         const filtered = products.filter(p => {
             const matchQuery = !q || p.brand.toLowerCase().includes(q) || p.model_name.toLowerCase().includes(q) || (p.barcode && p.barcode.toLowerCase().includes(q));
             const matchCat = !cat || p.category_name === cat;
@@ -264,8 +172,8 @@ function initPOS() {
         renderGrid(filtered);
     });
 
-    categoryFilter?.addEventListener('change', () => {
-        posSearch?.dispatchEvent(new Event('input')); // trigger combined filter
+    categoryFilter.addEventListener('change', () => {
+        posSearch.dispatchEvent(new Event('input')); // trigger combined filter
     });
 
     // ─── 4. Cart Management ──────────────────────────────────────────────────────
@@ -319,58 +227,82 @@ function initPOS() {
         updateFinancials(subtotal);
     }
 
-    function updateFinancials(sub) {
-        let discountAmt = 0;
-        if (orderDiscountType === 'percent') {
-            discountAmt = sub * (orderDiscountValue / 100);
-        } else {
-            discountAmt = orderDiscountValue;
-        }
-        discountAmt = Math.min(Math.max(discountAmt, 0), sub);
-        const afterDiscount = Math.max(0, sub - discountAmt);
+    // ─── Tax & Discount State ─────────────────────────────────────────────────────
+    // TAX: persists in localStorage, survives page refresh
+    let taxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
+    // DISCOUNT: per-order only, reset after each sale
+    let orderDiscount = { type: 'percent', value: 0 }; // type: 'percent'|'flat'
 
-        const taxRate = shiftTaxRate || 0;
-        const tax = afterDiscount * (taxRate / 100);
-        const total = parseFloat((afterDiscount + tax).toFixed(2));
-
-        if (discNode) {
-            discNode.innerText = `-PKR${discountAmt.toFixed(2)}`;
-            const discBadge = document.getElementById('discountRateBadge');
-            if (discBadge) {
-                if (discountAmt > 0 || orderDiscountValue > 0) {
-                    discBadge.innerText = orderDiscountType === 'percent' ? `(${orderDiscountValue}%)` : `(Fixed)`;
-                    discBadge.style.display = 'inline';
-                } else {
-                    discBadge.style.display = 'none';
-                }
-            }
-        }
-        if (subNode) subNode.innerText = `PKR${sub.toFixed(2)}`;
-        if (taxNode) {
-            taxNode.innerText = `+PKR${tax.toFixed(2)}`;
-            const taxBadge = document.getElementById('taxRateBadge');
-            if (taxBadge) {
-                if (taxRate > 0) {
-                    taxBadge.innerText = `(${taxRate}%)`;
-                    taxBadge.style.display = 'inline';
-                } else {
-                    taxBadge.style.display = 'none';
-                }
-            }
-        }
-        if (totNode) {
-            totNode.innerText = `PKR${total.toFixed(2)}`;
-            totNode.dataset.net      = total;
-            totNode.dataset.subtotal = sub.toFixed(2);
-            totNode.dataset.discount = discountAmt.toFixed(2);
-            totNode.dataset.tax      = tax.toFixed(2);
-            totNode.dataset.taxrate  = taxRate;
-        }
+    function applyTaxRate(rate) {
+        taxRate = Math.max(0, Math.min(100, parseFloat(rate) || 0));
+        localStorage.setItem('pos_tax_rate', taxRate);
+        document.getElementById('taxRateLabel').textContent = taxRate + '%';
+        document.getElementById('cartTaxLabel').textContent = `Tax (${taxRate}%)`;
+        // Update chip highlights
+        document.querySelectorAll('.tax-chip').forEach(c => {
+            const active = parseFloat(c.dataset.val) === taxRate;
+            c.style.background = active ? 'var(--primary)' : 'var(--input-bg)';
+            c.style.color = active ? '#fff' : 'var(--text-main)';
+            c.style.borderColor = active ? 'var(--primary)' : 'var(--border-light)';
+        });
+        renderCart();
     }
 
-    window.renderCart = renderCart;
-    window.updateFinancials = updateFinancials;
-    globalRenderCart = renderCart;
+    function resetOrderDiscount() {
+        orderDiscount = { type: 'percent', value: 0 };
+        const di = document.getElementById('discountInput');
+        if (di) di.value = '';
+        document.getElementById('discPreviewAmt').textContent = '-PKR 0.00';
+        // Update discount button label
+        document.getElementById('openDiscountBtn').querySelector('span').textContent = 'DISCOUNT';
+    }
+
+    function updateFinancials(sub) {
+        // 1. Calculate discount amount
+        let discountAmt = 0;
+        if (orderDiscount.value > 0) {
+            if (orderDiscount.type === 'percent') {
+                discountAmt = (sub * orderDiscount.value) / 100;
+            } else {
+                discountAmt = orderDiscount.value;
+            }
+        }
+        discountAmt = Math.min(Math.max(discountAmt, 0), sub); // clamp to [0, subtotal]
+
+        // 2. After discount, apply tax
+        const afterDiscount = sub - discountAmt;
+        const taxAmt = parseFloat(((afterDiscount * taxRate) / 100).toFixed(2));
+
+        // 3. Final total
+        const total = parseFloat((afterDiscount + taxAmt).toFixed(2));
+
+        // 4. Update DOM
+        subNode.innerText = `PKR${sub.toFixed(2)}`;
+
+        // Show/hide discount row
+        const discRow = document.getElementById('cartDiscountRow');
+        if (discountAmt > 0) {
+            discNode.innerText = `-PKR${discountAmt.toFixed(2)}`;
+            discRow.style.display = 'flex';
+        } else {
+            discRow.style.display = 'none';
+        }
+
+        // Show/hide tax row
+        const taxRow = document.getElementById('cartTaxRow');
+        if (taxRate > 0) {
+            taxNode.innerText = `+PKR${taxAmt.toFixed(2)}`;
+            taxRow.style.display = 'flex';
+        } else {
+            taxRow.style.display = 'none';
+        }
+
+        totNode.innerText = `PKR${total.toFixed(2)}`;
+        totNode.dataset.net      = total;
+        totNode.dataset.subtotal = sub.toFixed(2);
+        totNode.dataset.discount = discountAmt.toFixed(2);
+        totNode.dataset.tax      = taxAmt.toFixed(2);
+    }
 
     // ─── 5. CRM Advanced Searching ───────────────────────────────────────────────
     function renderCustomerResults(query) {
@@ -496,7 +428,6 @@ function initPOS() {
             subtotal:        subtotal,
             discount_amount: discountAmt,
             tax_amount:      taxAmt,
-            tax_rate:        parseFloat(totNode.dataset.taxrate || '0'),
             total_amount:    totalAmt,
             payment_method:  method,
             received_amount: receivedAmt,
@@ -532,10 +463,8 @@ function initPOS() {
             paymentModal.classList.remove('active');
             printReceipt(sale, cart, payload);
             cart = []; 
-            orderDiscountValue = 0;
-            orderDiscountType = 'percent';
-            if (document.getElementById('discValueInput')) document.getElementById('discValueInput').value = '';
             clearCustomerBtn.click(); // Reset customer
+            resetOrderDiscount();     // Clear per-order discount
             renderCart(); 
             initTerminal(); // Resync inventory logic
         } catch (e) {
@@ -554,6 +483,14 @@ function initPOS() {
 
     function printReceipt(sale, items, meta) {
         const rc = document.getElementById('receiptContent');
+        const discLine = meta.discount_amount > 0 ? `
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#c00;">
+                    <span>Discount:</span><span>-PKR${meta.discount_amount.toFixed(2)}</span>
+                </div>` : '';
+        const taxLine = meta.tax_amount > 0 ? `
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span>Tax (${taxRate}%):</span><span>+PKR${meta.tax_amount.toFixed(2)}</span>
+                </div>` : '';
         let html = `
             <div style="text-align:center; margin-bottom:15px; border-bottom:1px dashed #000; padding-bottom:10px;">
                 <h2 style="margin:0; font-family:monospace; font-size:20px; font-weight:800;">ZORVEX ERP</h2>
@@ -575,14 +512,9 @@ function initPOS() {
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                     <span>Subtotal:</span><span>PKR${meta.subtotal.toFixed(2)}</span>
                 </div>
-                ${meta.discount_amount > 0 ? `
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#e11d48;">
-                    <span>Discount:</span><span>-PKR${meta.discount_amount.toFixed(2)}</span>
-                </div>` : ''}
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span>Tax (${meta.tax_rate || 0}%):</span><span>+PKR${meta.tax_amount.toFixed(2)}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; margin-top:5px;">
+                ${discLine}
+                ${taxLine}
+                <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; margin-top:5px; border-top:1px solid #000; padding-top:6px;">
                     <span>TOTAL:</span><span>PKR${meta.total_amount.toFixed(2)}</span>
                 </div>
             </div>
@@ -599,17 +531,140 @@ function initPOS() {
         document.body.style.background = '#fff';
     }
 
+    // ─── 7. Tax & Discount Modal Logic ───────────────────────────────────────────
+    const taxModal      = document.getElementById('taxModal');
+    const discountModal = document.getElementById('discountModal');
+
+    // Initialize UI from saved tax rate
+    applyTaxRate(taxRate);
+
+    // Open / Close Tax Modal
+    document.getElementById('openTaxBtn').addEventListener('click', () => {
+        document.getElementById('taxRateInput').value = taxRate || '';
+        applyTaxRate(taxRate); // highlight correct chip
+        taxModal.classList.add('active');
+    });
+    document.getElementById('closeTaxModal').addEventListener('click', () => taxModal.classList.remove('active'));
+
+    // Tax preset chips
+    document.querySelectorAll('.tax-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.getElementById('taxRateInput').value = chip.dataset.val;
+            // highlight immediately
+            document.querySelectorAll('.tax-chip').forEach(c => {
+                c.style.background = 'var(--input-bg)'; c.style.color = 'var(--text-main)'; c.style.borderColor = 'var(--border-light)';
+            });
+            chip.style.background = 'var(--primary)'; chip.style.color = '#fff'; chip.style.borderColor = 'var(--primary)';
+        });
+    });
+
+    // Apply tax
+    document.getElementById('applyTaxBtn').addEventListener('click', () => {
+        const v = parseFloat(document.getElementById('taxRateInput').value) || 0;
+        applyTaxRate(v);
+        taxModal.classList.remove('active');
+    });
+
+    // ── Discount Modal ─────────────────────────────────────────────────────────
+    let discountType = 'percent'; // 'percent' | 'flat'
+
+    function refreshDiscPreview() {
+        const sub = parseFloat(totNode.dataset.subtotal || '0');
+        const val = parseFloat(document.getElementById('discountInput').value) || 0;
+        let amt = 0;
+        if (discountType === 'percent') {
+            amt = (sub * val) / 100;
+        } else {
+            amt = val;
+        }
+        amt = Math.min(Math.max(amt, 0), sub);
+        document.getElementById('discPreviewAmt').textContent = `-PKR ${amt.toFixed(2)}`;
+    }
+
+    function setDiscountType(type) {
+        discountType = type;
+        const pBtn = document.getElementById('discTypePercent');
+        const fBtn = document.getElementById('discTypeFlat');
+        const chips = document.getElementById('discPercentChips');
+        const unitLbl = document.getElementById('discUnitLabel');
+        const inp = document.getElementById('discountInput');
+
+        if (type === 'percent') {
+            pBtn.style.background = 'var(--primary-light)'; pBtn.style.color = 'var(--primary)'; pBtn.style.borderColor = 'var(--primary)';
+            fBtn.style.background = 'var(--input-bg)'; fBtn.style.color = 'var(--text-muted)'; fBtn.style.borderColor = 'var(--border-light)';
+            chips.style.display = 'grid';
+            unitLbl.textContent = '%';
+            inp.max = '100';
+        } else {
+            pBtn.style.background = 'var(--input-bg)'; pBtn.style.color = 'var(--text-muted)'; pBtn.style.borderColor = 'var(--border-light)';
+            fBtn.style.background = 'var(--danger-light, #fff1f0)'; fBtn.style.color = 'var(--danger)'; fBtn.style.borderColor = 'var(--danger)';
+            chips.style.display = 'none';
+            unitLbl.textContent = '₨';
+            inp.removeAttribute('max');
+        }
+        refreshDiscPreview();
+    }
+
+    // Open discount modal
+    document.getElementById('openDiscountBtn').addEventListener('click', () => {
+        // Pre-populate with current values
+        setDiscountType(orderDiscount.type);
+        document.getElementById('discountInput').value = orderDiscount.value || '';
+        refreshDiscPreview();
+        discountModal.classList.add('active');
+    });
+    document.getElementById('closeDiscountModal').addEventListener('click', () => discountModal.classList.remove('active'));
+
+    // Type toggle
+    document.getElementById('discTypePercent').addEventListener('click', () => setDiscountType('percent'));
+    document.getElementById('discTypeFlat').addEventListener('click', () => setDiscountType('flat'));
+
+    // Percent quick chips
+    document.querySelectorAll('.disc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.getElementById('discountInput').value = chip.dataset.val;
+            document.querySelectorAll('.disc-chip').forEach(c => { c.style.background = 'var(--input-bg)'; c.style.borderColor = 'var(--border-light)'; c.style.color = 'var(--text-main)'; });
+            chip.style.background = 'var(--danger)'; chip.style.color = '#fff'; chip.style.borderColor = 'var(--danger)';
+            refreshDiscPreview();
+        });
+    });
+
+    document.getElementById('discountInput').addEventListener('input', refreshDiscPreview);
+
+    // Apply discount
+    document.getElementById('applyDiscountBtn').addEventListener('click', () => {
+        const val = parseFloat(document.getElementById('discountInput').value) || 0;
+        orderDiscount = { type: discountType, value: val };
+
+        // Update the discount button label
+        const btnSpan = document.getElementById('openDiscountBtn').querySelector('span');
+        if (val > 0) {
+            btnSpan.textContent = discountType === 'percent' ? `DISC: ${val}%` : `DISC: ₨${val.toFixed(0)}`;
+            document.getElementById('openDiscountBtn').style.borderColor = 'var(--danger)';
+            document.getElementById('openDiscountBtn').style.color = 'var(--danger)';
+        } else {
+            btnSpan.textContent = 'DISCOUNT';
+            document.getElementById('openDiscountBtn').style.borderColor = 'var(--border-light)';
+            document.getElementById('openDiscountBtn').style.color = 'var(--text-muted)';
+        }
+
+        discountModal.classList.remove('active');
+        renderCart(); // Immediately recalculate
+    });
+
+    // Clear discount
+    document.getElementById('clearDiscountBtn').addEventListener('click', () => {
+        document.getElementById('discountInput').value = '';
+        document.getElementById('discPreviewAmt').textContent = '-PKR 0.00';
+        document.querySelectorAll('.disc-chip').forEach(c => { c.style.background = 'var(--input-bg)'; c.style.borderColor = 'var(--border-light)'; c.style.color = 'var(--text-main)'; });
+    });
+
     // Standard Listeners
     document.getElementById('closePaymentBtn').addEventListener('click', () => paymentModal.classList.remove('active'));
     document.getElementById('closeReceiptBtn').addEventListener('click', () => { 
         receiptModal.classList.remove('active');
         document.body.style.background = ''; // restore bg
     });
-
-    // Initialize tax UI from localStorage
-    const taxInputEl = document.getElementById('taxValueInput');
-    if (taxInputEl) taxInputEl.value = shiftTaxRate;
-    window.selectTaxPreset(shiftTaxRate);
 
     checkSession();
 }
