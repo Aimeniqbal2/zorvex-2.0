@@ -80,6 +80,7 @@ window.applyTaxForm = () => {
     }
     shiftTaxRate = val;
     localStorage.setItem('pos_tax_rate', val.toString());
+    window.selectTaxPreset(val);
     document.getElementById('taxModal')?.classList.remove('active');
     if (typeof window.renderCart === 'function') window.renderCart();
 };
@@ -327,7 +328,7 @@ function initPOS() {
             discNode.innerText = `-PKR${discountAmt.toFixed(2)}`;
             const discBadge = document.getElementById('discountRateBadge');
             if (discBadge) {
-                if (discountAmt > 0) {
+                if (discountAmt > 0 || orderDiscountValue > 0) {
                     discBadge.innerText = orderDiscountType === 'percent' ? `(${orderDiscountValue}%)` : `(Fixed)`;
                     discBadge.style.display = 'inline';
                 } else {
@@ -339,7 +340,14 @@ function initPOS() {
         if (taxNode) {
             taxNode.innerText = `+PKR${tax.toFixed(2)}`;
             const taxBadge = document.getElementById('taxRateBadge');
-            if (taxBadge) taxBadge.innerText = `(${taxRate}%)`;
+            if (taxBadge) {
+                if (taxRate > 0) {
+                    taxBadge.innerText = `(${taxRate}%)`;
+                    taxBadge.style.display = 'inline';
+                } else {
+                    taxBadge.style.display = 'none';
+                }
+            }
         }
         if (totNode) {
             totNode.innerText = `PKR${total.toFixed(2)}`;
