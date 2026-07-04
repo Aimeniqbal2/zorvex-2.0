@@ -5,6 +5,7 @@ function formatCurrency(amount) {
 let orderDiscountValue = 0;
 let orderDiscountType = 'percent';
 let shiftTaxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
+let globalRenderCart = null;
 
 window.setDiscountType = (type) => {
     orderDiscountType = type;
@@ -44,6 +45,7 @@ window.clearDiscount = () => {
     window.setDiscountType('percent');
     document.getElementById('discountModal')?.classList.remove('active');
     if (typeof window.renderCart === 'function') window.renderCart();
+    else if (typeof globalRenderCart === 'function') globalRenderCart();
 };
 
 window.selectTaxPreset = (rate) => {
@@ -70,6 +72,7 @@ window.applyDiscountForm = () => {
     orderDiscountType = document.getElementById('discType')?.value || 'percent';
     document.getElementById('discountModal')?.classList.remove('active');
     if (typeof window.renderCart === 'function') window.renderCart();
+    else if (typeof globalRenderCart === 'function') globalRenderCart();
 };
 
 window.applyTaxForm = () => {
@@ -83,6 +86,7 @@ window.applyTaxForm = () => {
     window.selectTaxPreset(val);
     document.getElementById('taxModal')?.classList.remove('active');
     if (typeof window.renderCart === 'function') window.renderCart();
+    else if (typeof globalRenderCart === 'function') globalRenderCart();
 };
 
 function initPOS() {
@@ -94,6 +98,11 @@ function initPOS() {
 
     let products = [], cart = [], customers = [], activeSession = null;
     let selectedCustomerId = null;
+
+    // Immediately expose core renderers so modal buttons never fail even if DOM lookups throw later
+    window.renderCart = () => { if (typeof renderCart === 'function') renderCart(); };
+    window.updateFinancials = (sub) => { if (typeof updateFinancials === 'function') updateFinancials(sub); };
+    globalRenderCart = window.renderCart;
 
     // UI Bridges
     const grid = document.getElementById('productGrid'), cartContainer = document.getElementById('cartContainer');
@@ -130,7 +139,7 @@ function initPOS() {
         } catch (e) { console.error("Session Check Failed", e); }
     }
 
-    document.getElementById('sessionForm').addEventListener('submit', async (e) => {
+    document.getElementById('sessionForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const opening = document.getElementById('openingCash').value;
         const resp = await fetch(`${API}/sales/sessions/`, {
@@ -147,8 +156,8 @@ function initPOS() {
         }
     });
 
-    document.getElementById('closeSessionBtn').addEventListener('click', () => closeSessionModal.classList.add('active'));
-    document.getElementById('reconcileForm').addEventListener('submit', async (e) => {
+    document.getElementById('closeSessionBtn')?.addEventListener('click', () => closeSessionModal?.classList.add('active'));
+    document.getElementById('reconcileForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const closing = document.getElementById('closingCash').value;
         const resp = await fetch(`${API}/sales/sessions/${activeSession.id}/`, {
@@ -221,7 +230,7 @@ function initPOS() {
     // ─── 3. Global & Top Bar Searching ──────────────────────────────────────────
     
     // Laser Keyboard Binding
-    barcodeScanner.addEventListener('keypress', (e) => {
+    barcodeScanner?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             const val = barcodeScanner.value.trim().toLowerCase();
             if(!val) return;
@@ -244,9 +253,9 @@ function initPOS() {
     });
 
     // Top Bar General Search
-    posSearch.addEventListener('input', (e) => {
+    posSearch?.addEventListener('input', (e) => {
         const q = e.target.value.toLowerCase();
-        const cat = categoryFilter.value;
+        const cat = categoryFilter?.value;
         const filtered = products.filter(p => {
             const matchQuery = !q || p.brand.toLowerCase().includes(q) || p.model_name.toLowerCase().includes(q) || (p.barcode && p.barcode.toLowerCase().includes(q));
             const matchCat = !cat || p.category_name === cat;
@@ -255,8 +264,8 @@ function initPOS() {
         renderGrid(filtered);
     });
 
-    categoryFilter.addEventListener('change', () => {
-        posSearch.dispatchEvent(new Event('input')); // trigger combined filter
+    categoryFilter?.addEventListener('change', () => {
+        posSearch?.dispatchEvent(new Event('input')); // trigger combined filter
     });
 
     // ─── 4. Cart Management ──────────────────────────────────────────────────────
@@ -361,6 +370,7 @@ function initPOS() {
 
     window.renderCart = renderCart;
     window.updateFinancials = updateFinancials;
+    globalRenderCart = renderCart;
 
     // ─── 5. CRM Advanced Searching ───────────────────────────────────────────────
     function renderCustomerResults(query) {
