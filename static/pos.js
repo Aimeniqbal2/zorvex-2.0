@@ -12,6 +12,10 @@ function initPOS() {
     let products = [], cart = [], customers = [], activeSession = null;
     let selectedCustomerId = null;
 
+    // ─── Tax & Discount State (declared early so renderCart/updateFinancials can use them) ───
+    let taxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
+    let orderDiscount = { type: 'percent', value: 0 };
+
     // UI Bridges
     const grid = document.getElementById('productGrid'), cartContainer = document.getElementById('cartContainer');
     const subNode = document.getElementById('cartSubtotal'), discNode = document.getElementById('cartDiscount');
@@ -227,12 +231,7 @@ function initPOS() {
         updateFinancials(subtotal);
     }
 
-    // ─── Tax & Discount State ─────────────────────────────────────────────────────
-    // TAX: persists in localStorage, survives page refresh
-    let taxRate = parseFloat(localStorage.getItem('pos_tax_rate') || '0');
-    // DISCOUNT: per-order only, reset after each sale
-    let orderDiscount = { type: 'percent', value: 0 }; // type: 'percent'|'flat'
-
+    // ─── Tax & Discount Functions ─────────────────────────────────────────────────
     function applyTaxRate(rate) {
         taxRate = Math.max(0, Math.min(100, parseFloat(rate) || 0));
         localStorage.setItem('pos_tax_rate', taxRate);
@@ -535,13 +534,24 @@ function initPOS() {
     const taxModal      = document.getElementById('taxModal');
     const discountModal = document.getElementById('discountModal');
 
-    // Initialize UI from saved tax rate
-    applyTaxRate(taxRate);
+    // Initialize UI labels from saved tax rate on page load
+    (function initTaxUI() {
+        const lbl = document.getElementById('taxRateLabel');
+        if (lbl) lbl.textContent = taxRate + '%';
+        const cartLbl = document.getElementById('cartTaxLabel');
+        if (cartLbl) cartLbl.textContent = `Tax (${taxRate}%)`;
+    })();
 
     // Open / Close Tax Modal
     document.getElementById('openTaxBtn').addEventListener('click', () => {
-        document.getElementById('taxRateInput').value = taxRate || '';
-        applyTaxRate(taxRate); // highlight correct chip
+        document.getElementById('taxRateInput').value = taxRate > 0 ? taxRate : '';
+        // Highlight correct chip
+        document.querySelectorAll('.tax-chip').forEach(c => {
+            const active = parseFloat(c.dataset.val) === taxRate;
+            c.style.background = active ? 'var(--primary)' : 'var(--input-bg)';
+            c.style.color = active ? '#fff' : 'var(--text-main)';
+            c.style.borderColor = active ? 'var(--primary)' : 'var(--border-light)';
+        });
         taxModal.classList.add('active');
     });
     document.getElementById('closeTaxModal').addEventListener('click', () => taxModal.classList.remove('active'));
@@ -566,7 +576,7 @@ function initPOS() {
     });
 
     // ── Discount Modal ─────────────────────────────────────────────────────────
-    let discountType = 'percent'; // 'percent' | 'flat'
+    let discountType = orderDiscount.type || 'percent'; // 'percent' | 'flat'
 
     function refreshDiscPreview() {
         const sub = parseFloat(totNode.dataset.subtotal || '0');
