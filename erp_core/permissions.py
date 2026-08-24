@@ -24,6 +24,21 @@ class RolePermission(BasePermission):
         if role == 'super_admin':
             return True
 
+        # Check granular permissions first
+        company_role = getattr(request.user, 'company_role', None)
+        
+        if company_role:
+            if request.method in ('GET', 'HEAD', 'OPTIONS'):
+                req_perms = getattr(view, 'required_read_permissions', getattr(view, 'required_permissions', []))
+            else:
+                req_perms = getattr(view, 'required_write_permissions', getattr(view, 'required_permissions', []))
+                
+            if req_perms:
+                if any(perm in company_role.permissions for perm in req_perms):
+                    return True
+                return False # strictly enforce if view has required_permissions defined
+            # If no req_perms defined, allow fallback to legacy for now
+
         # For safe GET methods — allow all authenticated company members
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             allowed_reads = getattr(

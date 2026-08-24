@@ -71,6 +71,11 @@ INSTALLED_APPS = [
     'finance',
     'reports',
     'notifications',
+    'platform_core',
+    'crm',
+    'purchasing',
+    'operations',
+    'billing',
 ]
 
 MIDDLEWARE = [
@@ -122,6 +127,9 @@ DATABASES = {
         'PASSWORD': env('DB_PASSWORD'),
         'HOST': env('DB_HOST'),
         'PORT': env('DB_PORT'),
+        'TEST': {
+            'NAME': 'test_erp_db3',
+        }
     }
 }
 # Password validation
@@ -223,3 +231,44 @@ LOGGING = {
 }
 
 STATICFILES_STORAGE = 'whitenoise.storage.StaticFilesStorage'
+
+# CELERY Configuration
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# CACHES Configuration
+# In test environment, fallback to LocMemCache. Otherwise use Redis.
+if env('REDIS_URL', default=None) or 'redis' in CELERY_BROKER_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': env('REDIS_URL', default='redis://localhost:6379/1'),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+                'IGNORE_EXCEPTIONS': True, # Cache failures must not break ERP functionality
+            }
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
+        }
+    }
+
+# EMAIL Configuration
+EMAIL_BACKEND = env('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='reports@zorvex.com')
+
+# CELERY BEAT Configuration
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'dispatch-due-reports-every-minute': {
+        'task': 'reports.tasks.dispatch_due_reports',
+        'schedule': crontab(minute='*'), # runs every minute
+    },
+}

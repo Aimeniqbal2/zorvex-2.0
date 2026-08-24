@@ -53,3 +53,33 @@ class BaseModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class DocumentSequence(BaseModel):
+    """
+    Enterprise-safe numbering mechanism for generic documents.
+    Provides transaction-safe, concurrency-safe, gap-less sequence numbers.
+    """
+    document_type = models.CharField(max_length=50, help_text="e.g. JOURNAL, PO, INVOICE")
+    prefix = models.CharField(max_length=50, help_text="e.g. GEN-20260806")
+    current_number = models.PositiveIntegerField(default=0)
+
+    class Meta(BaseModel.Meta):
+        app_label = 'platform_core'
+        constraints = [
+            models.UniqueConstraint(fields=['company', 'document_type', 'prefix'], name='unique_company_doc_seq')
+        ]
+
+    @classmethod
+    def get_next_number(cls, company, document_type, prefix):
+        from django.db import transaction
+        with transaction.atomic():
+            seq, created = cls.objects.select_for_update().get_or_create(
+                company=company,
+                document_type=document_type,
+                prefix=prefix,
+                defaults={'current_number': 0}
+            )
+            seq.current_number += 1
+            seq.save(update_fields=['current_number'])
+            return f"{prefix}-{seq.current_number}"

@@ -1,0 +1,28 @@
+COMMAND: venv\Scripts\python manage.py test scratch.test_phase6g_smoke --noinput
+========================================
+STDOUT:
+Found 7 test(s).
+[DATA MIGRATION] Migrated 0 technician(s) -> hardware_technician
+System check identified no issues (0 silenced).
+
+STDERR:
+Creating test database for alias 'default'...
+
+Got an error creating the test database: database "test_erp_db" already exists
+
+
+Destroying old test database for alias 'default'...
+
+Universal Finance journal entry failed for sale baf72c3e-5904-4c21-81df-705265ba1b60: ['No accounting period found for the sale date.']
+Universal Finance ledger journal failed for d5c6ef9e-46f5-4569-972b-7a727bce51ba: {'entry_date': ['No accounting period found for the given entry date.']}
+...Universal Finance journal entry failed for sale 28ad0bcf-3c27-4e9b-975d-8e86f51f1725: ['No accounting period found for the sale date.']
+..Universal Finance journal entry failed for sale 954488b8-3686-4fa7-8daf-9f0720cee80b: ['No accounting period found for the sale date.']
+..
+----------------------------------------------------------------------
+Ran 7 tests in 5.643s
+
+OK
+Destroying test database for alias 'default'...
+
+
+RETURN CODE: 0

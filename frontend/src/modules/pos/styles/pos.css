@@ -1,0 +1,9 @@
+/* POS Specific Layout Styles */
+/* Most styles should rely on existing CSS variables and utility classes */
+
+@media (max-width: 768px) {
+    /* Mobile stacked layout logic if needed */
+    .pos-workspace-container {
+        flex-direction: column !important;
+    }
+}

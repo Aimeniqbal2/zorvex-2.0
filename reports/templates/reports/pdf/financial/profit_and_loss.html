@@ -1,0 +1,49 @@
+{% extends "reports/pdf/base.html" %}
+
+{% block content %}
+<table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+    <thead>
+        <tr>
+            <th style="width: 70%;">Account</th>
+            <th style="width: 30%; text-align: right;">Amount</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for category, info in details.items %}
+            {% if info.accounts %}
+                <tr>
+                    <td colspan="2" class="section-header">{{ category }}</td>
+                </tr>
+                {% for acc in info.accounts %}
+                <tr>
+                    <td class="level-1">{{ acc.account_name }} ({{ acc.account_code }})</td>
+                    <td class="amount">{{ acc.amount|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+                <tr class="total-row">
+                    <td style="text-align: right;">Total {{ category }}:</td>
+                    <td class="amount">{{ info.total|floatformat:2 }}</td>
+                </tr>
+                <tr><td colspan="2" style="height: 10px; border-bottom: none;"></td></tr>
+            {% endif %}
+        {% empty %}
+            <tr>
+                <td colspan="2" class="empty-state">No data available for the selected period.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if details %}
+<table style="width: 50%; border-collapse: collapse; margin-top: 30px; margin-left: auto;">
+    <tr>
+        <td style="font-weight: bold;">Gross Profit:</td>
+        <td class="amount" style="font-weight: bold;">{{ gross_profit|floatformat:2 }}</td>
+    </tr>
+    <tr>
+        <td style="font-weight: bold; background-color: #f1f3f5; border-top: 2px solid #dddddd;">Net Profit:</td>
+        <td class="amount" style="font-weight: bold; background-color: #f1f3f5; border-top: 2px solid #dddddd;">{{ net_profit|floatformat:2 }}</td>
+    </tr>
+</table>
+{% endif %}
+{% endblock %}

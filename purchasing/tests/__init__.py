@@ -1,0 +1,1 @@
+# Purchasing tests package initialization

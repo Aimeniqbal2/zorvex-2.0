@@ -1,0 +1,15 @@
+COMMAND: venv\Scripts\python manage.py audit_finance_bridge
+========================================
+STDOUT:
+Starting Phase 6C Finance Bridge Audit...
+--- WARNINGS ---
+[WARNING] 5 Sales found without JournalEntry bridges (Legacy records).
+
+--- ERRORS ---
+No errors found.
+
+Audit PASS: All bridges valid.
+
+STDERR:
+
+RETURN CODE: 0

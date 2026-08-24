@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{{ report_title|default:"Report" }}</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 2cm;
+            margin-top: 3.5cm;
+            margin-bottom: 2.5cm;
+            
+            @frame header {
+                -pdf-frame-content: header_content;
+                top: 1cm;
+                margin-left: 2cm;
+                margin-right: 2cm;
+                height: 2cm;
+            }
+            @frame footer {
+                -pdf-frame-content: footer_content;
+                bottom: 1cm;
+                margin-left: 2cm;
+                margin-right: 2cm;
+                height: 1cm;
+            }
+        }
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 10pt;
+            color: #333333;
+        }
+        .header {
+            width: 100%;
+            border-bottom: 1px solid #dddddd;
+            padding-bottom: 10px;
+        }
+        .company-name {
+            font-size: 16pt;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .report-title {
+            font-size: 12pt;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        .meta-info {
+            text-align: right;
+            font-size: 9pt;
+            color: #95a5a6;
+        }
+        .footer {
+            width: 100%;
+            border-top: 1px solid #dddddd;
+            padding-top: 5px;
+            font-size: 8pt;
+            color: #7f8c8d;
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 6px;
+            text-align: left;
+            border-bottom: 1px solid #eeeeee;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            border-bottom: 2px solid #dddddd;
+        }
+        .amount {
+            text-align: right;
+        }
+        .total-row {
+            font-weight: bold;
+            background-color: #f1f3f5;
+        }
+        .section-header {
+            background-color: #e9ecef;
+            font-weight: bold;
+        }
+        .level-1 { padding-left: 10px; }
+        .level-2 { padding-left: 20px; }
+        .level-3 { padding-left: 30px; }
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            font-style: italic;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+
+<div id="header_content">
+    <table class="header">
+        <tr>
+            <td style="width: 15%; vertical-align: top;">
+                {% if company_logo_path %}
+                <img src="{{ company_logo_path }}" style="max-height: 50px; max-width: 100px;">
+                {% endif %}
+            </td>
+            <td style="width: 45%; vertical-align: top;">
+                <div class="company-name">{{ company_name|default:"ZORVEX ERP" }}</div>
+                {% if company_address %}<div style="font-size: 8pt;">{{ company_address }}</div>{% endif %}
+                {% if company_phone %}<div style="font-size: 8pt;">Tel: {{ company_phone }}</div>{% endif %}
+                {% if company_tax_id %}<div style="font-size: 8pt;">Tax ID: {{ company_tax_id }}</div>{% endif %}
+                
+                <div class="report-title" style="margin-top: 5px;">{{ report_title|default:"Report" }}</div>
+                {% if period_display %}
+                <div style="font-size: 9pt; margin-top: 3px;">Period: {{ period_display }}</div>
+                {% endif %}
+            </td>
+            <td class="meta-info" style="width: 40%; vertical-align: top;">
+                <div>Generated: {{ generated_at }}</div>
+                {% if branch_name %}
+                <div>Branch: {{ branch_name }}</div>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+</div>
+
+<div id="footer_content">
+    <table class="footer">
+        <tr>
+            <td style="text-align: left; width: 50%;">{{ company_name|default:"ZORVEX ERP" }}</td>
+            <td style="text-align: right; width: 50%;">Page <pdf:pagenumber> of <pdf:pagecount></td>
+        </tr>
+    </table>
+</div>
+
+{% block content %}{% endblock %}
+
+</body>
+</html>

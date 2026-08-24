@@ -1,0 +1,92 @@
+{% extends "reports/pdf/base.html" %}
+
+{% block content %}
+<table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+    <thead>
+        <tr>
+            <th style="width: 60%;">KPI</th>
+            <th style="width: 40%; text-align: right;">Value</th>
+        </tr>
+    </thead>
+    <tbody>
+        <!-- Financial KPIs -->
+        <tr><td colspan="2" class="section-header">Financial Performance</td></tr>
+        <tr>
+            <td class="level-1">Total Revenue</td>
+            <td class="amount">{{ total_revenue|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <td class="level-1">Total Expenses</td>
+            <td class="amount">{{ total_expenses|floatformat:2 }}</td>
+        </tr>
+        <tr class="total-row">
+            <td class="level-1">Net Profit</td>
+            <td class="amount">{{ net_profit|floatformat:2 }}</td>
+        </tr>
+        
+        <!-- Receivables / Payables -->
+        <tr><td colspan="2" class="section-header" style="margin-top: 15px;">Accounts Receivable & Payable</td></tr>
+        <tr>
+            <td class="level-1">Total Receivables</td>
+            <td class="amount">{{ total_receivables|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <td class="level-1">Open Invoices Count</td>
+            <td class="amount">{{ open_invoices_count }}</td>
+        </tr>
+        <tr>
+            <td class="level-1">Total Payables</td>
+            <td class="amount">{{ total_payables|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <td class="level-1">Open POs Count</td>
+            <td class="amount">{{ open_pos_count }}</td>
+        </tr>
+        
+        <!-- Operations -->
+        <tr><td colspan="2" class="section-header" style="margin-top: 15px;">Operations & Inventory</td></tr>
+        <tr>
+            <td class="level-1">Low Stock Items</td>
+            <td class="amount">{{ low_stock_count }}</td>
+        </tr>
+        
+        <!-- HR -->
+        <tr><td colspan="2" class="section-header" style="margin-top: 15px;">Human Resources</td></tr>
+        <tr>
+            <td class="level-1">Active Employees</td>
+            <td class="amount">{{ active_employees }}</td>
+        </tr>
+        
+    </tbody>
+</table>
+
+{% if kpi_changes %}
+<div style="margin-top: 30px;">
+    <h3 style="color: #2c3e50;">Trend Analysis</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr>
+                <th style="width: 40%;">Metric</th>
+                <th style="width: 20%; text-align: right;">Current</th>
+                <th style="width: 20%; text-align: right;">Previous</th>
+                <th style="width: 20%; text-align: right;">Change %</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Revenue</td>
+                <td class="amount">{{ kpi_changes.revenue.current|floatformat:2 }}</td>
+                <td class="amount">{{ kpi_changes.revenue.previous|floatformat:2 }}</td>
+                <td class="amount">{{ kpi_changes.revenue.pct|floatformat:2 }}%</td>
+            </tr>
+            <tr>
+                <td>Profit</td>
+                <td class="amount">{{ kpi_changes.profit.current|floatformat:2 }}</td>
+                <td class="amount">{{ kpi_changes.profit.previous|floatformat:2 }}</td>
+                <td class="amount">{{ kpi_changes.profit.pct|floatformat:2 }}%</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,73 @@
+COMMAND: venv\Scripts\python manage.py test finance --noinput
+========================================
+STDOUT:
+Found 43 test(s).
+[DATA MIGRATION] Migrated 0 technician(s) -> hardware_technician
+System check identified no issues (0 silenced).
+Starting Phase 6D: Sales to Finance Migration...
+
+Company: Company 6D
+  Migrated: 2
+  Skipped: 0
+  Warnings: 0
+  Errors: 0
+
+Company: Company 6D 2
+  [WARNING] Sale 9ae06bf4-9bec-4490-b757-acccac519af1 skipped: ['Sale must have a customer.']
+  Migrated: 0
+  Skipped: 1
+  Warnings: 1
+  Errors: 0
+
+--- Final Totals ---
+Total Migrated: 2
+Total Skipped: 1
+Total Warnings: 1
+Total Errors: 0
+Rolling back Phase 6D: Sales to Finance Migration...
+Company Company 6D: Unlinked 2 Sales, 2 CCLs. Deleted 6 JournalEntries.
+Rollback complete.
+Starting Phase 6D: Sales to Finance Migration...
+
+Company: Company 6D
+  Migrated: 2
+  Skipped: 0
+  Warnings: 0
+  Errors: 0
+
+Company: Company 6D 2
+  [WARNING] Sale 9ae06bf4-9bec-4490-b757-acccac519af1 skipped: ['Sale must have a customer.']
+  Migrated: 0
+  Skipped: 1
+  Warnings: 1
+  Errors: 0
+
+--- Final Totals ---
+Total Migrated: 2
+Total Skipped: 1
+Total Warnings: 1
+Total Errors: 0
+
+STDERR:
+Creating test database for alias 'default'...
+
+Got an error creating the test database: database "test_erp_db" already exists
+
+
+Destroying old test database for alias 'default'...
+
+....................Universal Finance journal entry failed for sale 038ec758-aa36-4996-af22-eaf4dc376187: ['Sale must have a customer.']
+Universal Finance journal entry failed for sale 038ec758-aa36-4996-af22-eaf4dc376187: ['Sale must have a customer.']
+.Universal Finance journal entry failed for sale ed5b344c-b98b-4f24-8dba-0c376f69b1a5: ['Customer must be linked to a CRMEntity.']
+...Universal Finance journal entry failed for sale 7b922eb9-5dff-4fd6-b4ac-651de4b27448: ['Customer must be linked to a CRMEntity.']
+...Universal Finance journal entry failed for sale 9ae06bf4-9bec-4490-b757-acccac519af1: ['Sale must have a customer.']
+..Universal Finance journal entry failed for sale 5cbc5ba6-609f-438b-9dba-fa089a2b24d7: ['Sale must have a customer.']
+..............
+----------------------------------------------------------------------
+Ran 43 tests in 50.929s
+
+OK
+Destroying test database for alias 'default'...
+
+
+RETURN CODE: 0

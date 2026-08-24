@@ -1,0 +1,27 @@
+COMMAND: venv\Scripts\python manage.py verify_sales_finance_migration
+========================================
+STDOUT:
+Starting Phase 6D: Sales to Finance Verification...
+
+Verifying Company: DigiCreatix
+  [WARNING] 5 Sales missing journal bridges.
+  [WARNING] 5 Sales missing CRMEntity.
+  [WARNING] Missing active SalesAccountingConfiguration.
+  [WARNING] Missing AccountingPeriod.
+  Summary: 0 CRITICAL, 12 WARNINGS
+
+Verifying Company: C2
+  [WARNING] Missing active SalesAccountingConfiguration.
+  [WARNING] Missing AccountingPeriod.
+  Summary: 0 CRITICAL, 2 WARNINGS
+
+Verifying Company: C1
+  [WARNING] Missing active SalesAccountingConfiguration.
+  [WARNING] Missing AccountingPeriod.
+  Summary: 0 CRITICAL, 2 WARNINGS
+
+Verification Complete.
+
+STDERR:
+
+RETURN CODE: 0

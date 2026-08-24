@@ -64,114 +64,136 @@
 
         var navItems = [
             { href: '/',              icon: 'bxs-dashboard',  label: 'Dashboard',     minRole: 'staff',   hide: false },
-            { href: '/pos/',          icon: 'bx-credit-card', label: 'POS Sales',     minRole: 'cashier', hide: isTechnicianUser },
-            { href: '/service-logs/', icon: 'bx-wrench',      label: 'Service Orders',minRole: 'cashier', hide: false },
-            { href: '/transactions/', icon: 'bx-receipt',     label: 'Transactions',  minRole: 'cashier', hide: isTechnicianUser },
-            { href: '/analytics/',    icon: 'bx-trending-up', label: 'Analytics',     minRole: 'manager', hide: false },
-            { href: '/inventory/',    icon: 'bx-box',         label: 'Inventory',     minRole: 'manager', hide: false },
-            { href: '/vendors/',      icon: 'bx-buildings',   label: 'Vendors',       minRole: 'manager', hide: false },
-            { href: '/credit/',       icon: 'bx-book',        label: 'Credit Ledger', minRole: 'manager', hide: isTechnicianUser },
-            { href: '/team/',         icon: 'bx-group',       label: 'Team',          minRole: 'admin',   hide: false }
+            { href: '/pos/',          icon: 'bx-credit-card', label: 'POS Sales',     minRole: 'cashier', hide: isTechnicianUser, requiredModule: 'pos' },
+            { href: '/service-logs/', icon: 'bx-wrench',      label: 'Service Orders',minRole: 'cashier', hide: false, requiredModule: 'services' },
+            { href: '/transactions/', icon: 'bx-receipt',     label: 'Transactions',  minRole: 'cashier', hide: isTechnicianUser, requiredModule: 'sales' },
+            { href: '/analytics/',    icon: 'bx-trending-up', label: 'Analytics',     minRole: 'manager', hide: false, requiredModule: 'analytics' },
+            { href: '/inventory/',    icon: 'bx-box',         label: 'Inventory',     minRole: 'manager', hide: false, requiredModule: 'inventory' },
+            { href: '/vendors/',      icon: 'bx-buildings',   label: 'Vendors',       minRole: 'manager', hide: false, requiredModule: 'purchasing' },
+            { href: '/credit/',       icon: 'bx-book',        label: 'Credit Ledger', minRole: 'manager', hide: isTechnicianUser, requiredModule: 'finance' },
+            { href: '/team/',         icon: 'bx-group',       label: 'Team',          minRole: 'admin',   hide: false, requiredModule: 'hr' }
         ];
 
-        function buildNav() {
-            return navItems
-                .filter(function (item) { return canAccess(item.minRole) && !item.hide; })
-                .map(function (item) {
-                    var isActive = currentPage === item.href;
-                    var activeClass = isActive ? ' active' : '';
-                    return '<a href="' + item.href + '" class="nav-item' + activeClass + '" title="' + item.label + '">' +
-                        '<span class="nav-icon"><i class="bx ' + item.icon + '"></i></span>' +
-                        '<span class="nav-label">' + item.label + '</span>' +
-                        '</a>';
-                }).join('');
-        }
+        function renderSidebar(enabledModules) {
+            function buildNav() {
+                return navItems
+                    .filter(function (item) { 
+                        var roleAllows = canAccess(item.minRole) && !item.hide;
+                        var moduleAllows = !item.requiredModule || enabledModules[item.requiredModule] === true;
+                        return roleAllows && moduleAllows;
+                    })
+                    .map(function (item) {
+                        var isActive = currentPage === item.href;
+                        var activeClass = isActive ? ' active' : '';
+                        return '<a href="' + item.href + '" class="nav-item' + activeClass + '" title="' + item.label + '">' +
+                            '<span class="nav-icon"><i class="bx ' + item.icon + '"></i></span>' +
+                            '<span class="nav-label">' + item.label + '</span>' +
+                            '</a>';
+                    }).join('');
+            }
 
-        var avatarUrl = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(username) + '&background=4318ff&color=fff&rounded=true&size=32';
-        var roleDisplay = userRole.replace(/_/g, ' ');
+            var avatarUrl = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(username) + '&background=4318ff&color=fff&rounded=true&size=32';
+            var roleDisplay = userRole.replace(/_/g, ' ');
 
-        var isSidebarCollapsed = localStorage.getItem('sidebar_collapsed') === 'true';
-        if (window.innerWidth <= 1024) {
-            isSidebarCollapsed = true; // Force icon logo on tablet/mobile by default
-        }
-        var sidebarClass = isSidebarCollapsed ? 'sidebar collapsed' : 'sidebar';
-        var logoSrc = isSidebarCollapsed ? '/static/assets/logo-icon.png' : '/static/assets/logo-full.png';
+            var isSidebarCollapsed = localStorage.getItem('sidebar_collapsed') === 'true';
+            if (window.innerWidth <= 1024) {
+                isSidebarCollapsed = true; // Force icon logo on tablet/mobile by default
+            }
+            var sidebarClass = isSidebarCollapsed ? 'sidebar collapsed' : 'sidebar';
+            var logoSrc = isSidebarCollapsed ? '/static/assets/logo-icon.png' : '/static/assets/logo-full.png';
 
-        var sidebarHTML = '' +
-            '<aside class="' + sidebarClass + '" id="mainSidebar">' +
-            '<div class="brand">' +
-            '<img src="' + logoSrc + '" alt="Zorvex ERP" class="brand-logo-img">' +
-            '</div>' +
-            '<p class="section-label">Main Menu</p>' +
-            '<nav class="nav-menu" id="mainNav">' + buildNav() + '</nav>' +
-            '<div style="margin-top:auto;padding-top:20px;border-top:1px solid var(--border-light);margin:auto 0 0 0;">' +
-            '<div class="user-info-container" style="padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
-            '<img src="' + avatarUrl + '" alt="' + username + '" style="width:32px;height:32px;border-radius:50%;">' +
-            '<div class="user-details" style="display:flex;flex-direction:column;">' +
-            '<span style="font-size:13px;font-weight:700;color:var(--text-main);line-height:1;">' + username + '</span>' +
-            '<span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:3px;">' + roleDisplay + '</span>' +
-            '</div>' +
-            '</div>' +
-            '<nav class="nav-menu">' +
-            '<a href="#" class="nav-item" id="logoutBtn">' +
-            '<span class="nav-icon"><i class="bx bx-lock-alt"></i></span>' +
-            '<span class="nav-label">Logout</span>' +
-            '</a>' +
-            '</nav>' +
-            '</div>' +
-            '</aside>';
+            var sidebarHTML = '' +
+                '<aside class="' + sidebarClass + '" id="mainSidebar">' +
+                '<div class="brand">' +
+                '<img src="' + logoSrc + '" alt="Zorvex ERP" class="brand-logo-img">' +
+                '</div>' +
+                '<p class="section-label">Main Menu</p>' +
+                '<nav class="nav-menu" id="mainNav">' + buildNav() + '</nav>' +
+                '<div style="margin-top:auto;padding-top:20px;border-top:1px solid var(--border-light);margin:auto 0 0 0;">' +
+                '<div class="user-info-container" style="padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+                '<img src="' + avatarUrl + '" alt="' + username + '" style="width:32px;height:32px;border-radius:50%;">' +
+                '<div class="user-details" style="display:flex;flex-direction:column;">' +
+                '<span style="font-size:13px;font-weight:700;color:var(--text-main);line-height:1;">' + username + '</span>' +
+                '<span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:3px;">' + roleDisplay + '</span>' +
+                '</div>' +
+                '</div>' +
+                '<nav class="nav-menu">' +
+                '<a href="#" class="nav-item" id="logoutBtn">' +
+                '<span class="nav-icon"><i class="bx bx-lock-alt"></i></span>' +
+                '<span class="nav-label">Logout</span>' +
+                '</a>' +
+                '</nav>' +
+                '</div>' +
+                '</aside>';
 
-        // Inject sidebar
-        var existingSidebar = document.querySelector('aside.sidebar, aside#mainSidebar');
-        if (existingSidebar) {
-            existingSidebar.outerHTML = sidebarHTML;
-        } else {
-            document.body.insertAdjacentHTML('afterbegin', sidebarHTML);
-        }
+            // Inject sidebar
+            var existingSidebar = document.querySelector('aside.sidebar, aside#mainSidebar');
+            if (existingSidebar) {
+                existingSidebar.outerHTML = sidebarHTML;
+            } else {
+                document.body.insertAdjacentHTML('afterbegin', sidebarHTML);
+            }
 
-        // Attach logout handler
-        var logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', function (e) {
-                e.preventDefault();
-                localStorage.clear();
-                window.location.href = '/login/';
-            });
-        }
+            // Attach logout handler
+            var logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    localStorage.clear();
+                    window.location.href = '/login/';
+                });
+            }
 
-        // Sidebar toggle button
-        var headerActions = document.querySelector('.header-actions');
-        if (headerActions) {
-            var toggleBtn = document.createElement('button');
-            toggleBtn.className = 'icon-btn sidebar-toggle-btn';
-            toggleBtn.innerHTML = '<i class="bx bx-menu"></i>';
-            toggleBtn.title = 'Toggle Sidebar Visibility';
-            toggleBtn.addEventListener('click', function () {
-                var sidebar = document.querySelector('.sidebar');
-                if (!sidebar) return;
-                
-                if (window.innerWidth <= 1024) {
-                    var isMobileOpen = sidebar.classList.toggle('mobile-open');
-                    document.body.classList.toggle('tablet-drawer-open', isMobileOpen);
-                    var logo = sidebar.querySelector('.brand img');
-                    if (logo) {
-                        logo.src = isMobileOpen
-                            ? '/static/assets/logo-full.png'
-                            : '/static/assets/logo-icon.png';
+            // Sidebar toggle button
+            var headerActions = document.querySelector('.header-actions');
+            if (headerActions && !document.querySelector('.sidebar-toggle-btn')) {
+                var toggleBtn = document.createElement('button');
+                toggleBtn.className = 'icon-btn sidebar-toggle-btn';
+                toggleBtn.innerHTML = '<i class="bx bx-menu"></i>';
+                toggleBtn.title = 'Toggle Sidebar Visibility';
+                toggleBtn.addEventListener('click', function () {
+                    var sidebar = document.querySelector('.sidebar');
+                    if (!sidebar) return;
+                    
+                    if (window.innerWidth <= 1024) {
+                        var isMobileOpen = sidebar.classList.toggle('mobile-open');
+                        document.body.classList.toggle('tablet-drawer-open', isMobileOpen);
+                        var logo = sidebar.querySelector('.brand img');
+                        if (logo) {
+                            logo.src = isMobileOpen
+                                ? '/static/assets/logo-full.png'
+                                : '/static/assets/logo-icon.png';
+                        }
+                    } else {
+                        var isCollapsedNow = sidebar.classList.toggle('collapsed');
+                        localStorage.setItem('sidebar_collapsed', isCollapsedNow);
+                        var logo = sidebar.querySelector('.brand img');
+                        if (logo) {
+                            logo.src = isCollapsedNow
+                                ? '/static/assets/logo-icon.png'
+                                : '/static/assets/logo-full.png';
+                        }
                     }
-                } else {
-                    var isCollapsedNow = sidebar.classList.toggle('collapsed');
-                    localStorage.setItem('sidebar_collapsed', isCollapsedNow);
-                    var logo = sidebar.querySelector('.brand img');
-                    if (logo) {
-                        logo.src = isCollapsedNow
-                            ? '/static/assets/logo-icon.png'
-                            : '/static/assets/logo-full.png';
-                    }
-                }
-            });
-            headerActions.insertBefore(toggleBtn, headerActions.firstChild);
+                });
+                headerActions.insertBefore(toggleBtn, headerActions.firstChild);
+            }
         }
+
+        // Fetch module state
+        fetch('/api/platform/module-state/', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        })
+        .then(function(res) {
+            if (res.ok) return res.json();
+            throw new Error('Module state fetch failed');
+        })
+        .then(function(data) {
+            renderSidebar(data || {});
+        })
+        .catch(function(err) {
+            console.warn(err);
+            renderSidebar({});
+        });
 
         // Global Search with Debounce (300ms)
         var searchBoxes = document.querySelectorAll('.search-box[data-global-search], .global-search-input');

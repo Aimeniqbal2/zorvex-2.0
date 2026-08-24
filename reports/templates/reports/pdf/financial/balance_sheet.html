@@ -1,0 +1,82 @@
+{% extends "reports/pdf/base.html" %}
+
+{% block content %}
+<table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+    <thead>
+        <tr>
+            <th style="width: 70%;">Account</th>
+            <th style="width: 30%; text-align: right;">Amount</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if not assets.items and not liabilities.items and not equity.items %}
+            <tr>
+                <td colspan="2" class="empty-state">No data available for the selected period.</td>
+            </tr>
+        {% else %}
+            <!-- ASSETS -->
+            <tr><td colspan="2" class="section-header">ASSETS</td></tr>
+            {% for acc in assets.items %}
+            <tr>
+                <td class="level-1">{{ acc.account_name }} ({{ acc.account_code }})</td>
+                <td class="amount">{{ acc.amount|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2" class="level-1 empty-state" style="padding:10px;">No assets</td></tr>
+            {% endfor %}
+            <tr class="total-row">
+                <td style="text-align: right;">Total Assets:</td>
+                <td class="amount">{{ assets.total|floatformat:2 }}</td>
+            </tr>
+            <tr><td colspan="2" style="height: 15px; border-bottom: none;"></td></tr>
+
+            <!-- LIABILITIES -->
+            <tr><td colspan="2" class="section-header">LIABILITIES</td></tr>
+            {% for acc in liabilities.items %}
+            <tr>
+                <td class="level-1">{{ acc.account_name }} ({{ acc.account_code }})</td>
+                <td class="amount">{{ acc.amount|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2" class="level-1 empty-state" style="padding:10px;">No liabilities</td></tr>
+            {% endfor %}
+            <tr class="total-row">
+                <td style="text-align: right;">Total Liabilities:</td>
+                <td class="amount">{{ liabilities.total|floatformat:2 }}</td>
+            </tr>
+            <tr><td colspan="2" style="height: 15px; border-bottom: none;"></td></tr>
+
+            <!-- EQUITY -->
+            <tr><td colspan="2" class="section-header">EQUITY</td></tr>
+            {% for acc in equity.items %}
+            <tr>
+                <td class="level-1">{{ acc.account_name }} ({{ acc.account_code }})</td>
+                <td class="amount">{{ acc.amount|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+            <tr>
+                <td class="level-1">Retained Earnings</td>
+                <td class="amount">{{ equity.retained_earnings|floatformat:2 }}</td>
+            </tr>
+            <tr class="total-row">
+                <td style="text-align: right;">Total Equity:</td>
+                <td class="amount">{{ equity.total|floatformat:2 }}</td>
+            </tr>
+            <tr><td colspan="2" style="height: 15px; border-bottom: none;"></td></tr>
+        {% endif %}
+    </tbody>
+</table>
+
+{% if assets.items or liabilities.items or equity.items %}
+<table style="width: 50%; border-collapse: collapse; margin-top: 20px; margin-left: auto;">
+    <tr>
+        <td style="font-weight: bold;">Total Assets:</td>
+        <td class="amount" style="font-weight: bold;">{{ assets.total|floatformat:2 }}</td>
+    </tr>
+    <tr>
+        <td style="font-weight: bold; background-color: #f1f3f5; border-top: 2px solid #dddddd;">Total Liabilities & Equity:</td>
+        <td class="amount" style="font-weight: bold; background-color: #f1f3f5; border-top: 2px solid #dddddd;">{{ total_liabilities_and_equity|floatformat:2 }}</td>
+    </tr>
+</table>
+{% endif %}
+{% endblock %}

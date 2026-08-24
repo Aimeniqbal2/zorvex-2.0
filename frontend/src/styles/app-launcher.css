@@ -1,0 +1,101 @@
+/* app-launcher.css */
+.desktop-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: url('/bg-blur.png') no-repeat center/cover;
+    background-color: var(--color-background);
+}
+
+.desktop-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    overflow-y: auto;
+}
+
+.app-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 32px 48px;
+    max-width: 1000px;
+    width: 100%;
+    justify-content: center;
+    align-content: center;
+}
+
+/* Fallback for exact grid layout if auto-fit doesn't look like Odoo */
+@media (min-width: 1024px) {
+    .app-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+@media (max-width: 1023px) and (min-width: 768px) {
+    .app-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+@media (max-width: 767px) {
+    .app-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 24px;
+    }
+}
+
+.app-icon-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: transform 0.2s ease;
+}
+
+.app-icon-wrapper:hover {
+    transform: translateY(-4px) scale(1.02);
+}
+
+.app-icon-box {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    background-color: var(--color-surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border: 1px solid var(--color-border);
+    transition: box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+[data-theme='dark'] .app-icon-box {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.app-icon-wrapper:hover .app-icon-box {
+    box-shadow: 0 8px 24px rgba(67, 24, 255, 0.15);
+    border-color: var(--color-primary);
+}
+
+.app-icon-box i {
+    font-size: 36px;
+    color: var(--color-primary);
+}
+
+.app-icon-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text);
+    max-width: 90px;
+    word-wrap: break-word;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5);
+}
+
+[data-theme='dark'] .app-icon-label {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}

@@ -27,10 +27,20 @@ class Migration(migrations.Migration):
             name='saleitem',
             options={'ordering': ['created_at']},
         ),
-        migrations.AddField(
-            model_name='sale',
-            name='profit',
-            field=models.DecimalField(decimal_places=2, default=0, max_digits=12),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name='sale',
+                    name='profit',
+                    field=models.DecimalField(decimal_places=2, default=0, max_digits=12),
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql='ALTER TABLE "sales_sale" ADD COLUMN IF NOT EXISTS "profit" numeric(12, 2) DEFAULT 0 NOT NULL;',
+                    reverse_sql='ALTER TABLE "sales_sale" DROP COLUMN IF EXISTS "profit";',
+                )
+            ]
         ),
         migrations.AddField(
             model_name='saleitem',

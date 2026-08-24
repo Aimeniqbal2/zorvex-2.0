@@ -12,8 +12,10 @@ from rest_framework.permissions import IsAuthenticated
 from erp_core.permissions import RolePermission
 from rest_framework.exceptions import ValidationError
 from erp_core.views import TenantModelViewSet
+from platform_core.permissions import ModulePermission
 from .models import Sale, SaleItem, Customer, CustomerCreditLedger, POSSession
 from .serializers import SaleSerializer, SaleItemSerializer, CustomerSerializer, CustomerCreditLedgerSerializer, POSSessionSerializer
+from inventory.models import Item, Product
 
 logger = logging.getLogger(__name__)
 
@@ -57,19 +59,7 @@ class CustomerViewSet(TenantModelViewSet):
             notes=notes or f'Payment received from {customer.name}'
         )
 
-        # Also create a finance journal entry for revenue tracking
-        try:
-            from finance.models import JournalEntry
-            JournalEntry.objects.create(
-                company_id=request.user.company_id,
-                entry_type='REVENUE',
-                amount=amount,
-                profit=amount,
-                reference=f"PMT-{str(entry.id)[:8].upper()}",
-                description=f"Credit payment received from {customer.name}"
-            )
-        except Exception as e:
-            logger.warning(f"Finance journal entry failed for payment {entry.id}: {e}")
+        # Finance journal entry is now automatically created by CustomerCreditLedger.save()
 
         # Refresh from DB to get updated balance after F() expression update
         customer.refresh_from_db()
@@ -121,15 +111,21 @@ class CustomerCreditLedgerViewSet(TenantModelViewSet):
         qs = super().get_queryset()
         # Allow filtering by customer: GET /api/sales/ledger/?customer=<id>
         customer_id = self.request.query_params.get('customer')
-        if customer_id:
+        crm_entity_id = self.request.query_params.get('crm_entity')
+        
+        if crm_entity_id:
+            qs = qs.filter(crm_entity_id=crm_entity_id)
+        elif customer_id:
             qs = qs.filter(customer_id=customer_id)
+            
         return qs.order_by('-created_at')
 
 
 class POSSessionViewSet(TenantModelViewSet):
+    required_module = 'pos'
     queryset = POSSession.objects.all()
     serializer_class = POSSessionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ModulePermission]
 
     def perform_create(self, serializer):
         active = POSSession.objects.filter(cashier=self.request.user, status='OPEN').first()
@@ -166,9 +162,10 @@ class POSSessionViewSet(TenantModelViewSet):
 
 
 class SaleViewSet(TenantModelViewSet):
-    queryset = Sale.objects.select_related('cashier', 'customer', 'service_order').prefetch_related('items').all()
+    required_module = 'sales'
+    queryset = Sale.objects.select_related('cashier', 'customer', 'service_order').prefetch_related('items__product', 'items__item').all()
     serializer_class = SaleSerializer
-    permission_classes = [IsAuthenticated, RolePermission]
+    permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     allowed_roles = ['admin', 'manager', 'cashier']
     allowed_reads = ['admin', 'manager', 'cashier']
 
@@ -206,7 +203,8 @@ class SaleViewSet(TenantModelViewSet):
 
         if payment_method == 'credit':
             customer_id = self.request.data.get('customer')
-            if not customer_id:
+            crm_entity_id = self.request.data.get('crm_entity')
+            if not customer_id and not crm_entity_id:
                 raise DRFValidationError(
                     "B2B Credit Sales require a linked customer profile. "
                     "Please search and select a customer before issuing credit."
@@ -218,40 +216,203 @@ class SaleViewSet(TenantModelViewSet):
             company_id=user.company_id
         )
 
+    def destroy(self, request, *args, **kwargs):
+        """Prevent deletion if Sale already owns POSTED JournalEntry."""
+        sale = self.get_object()
+        if sale.journal_entry and sale.journal_entry.status == 'POSTED':
+            return Response(
+                {"error": "Cannot delete sale with posted accounting records. Cancel it instead to reverse the journal."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=['post'])
+    def checkout(self, request, *args, **kwargs):
+        """Atomic checkout: Creates Sale, SaleItems, deductions, and journals."""
+        with transaction.atomic():
+            import decimal
+            user = self.request.user
+
+            session = POSSession.objects.filter(cashier=user, status='OPEN').first()
+            if not session:
+                from rest_framework.exceptions import ValidationError as DRFValidationError
+                raise DRFValidationError("No active POS Session. Please open a session before transacting.")
+
+            payment_method = request.data.get('payment_method', 'cash').lower().strip()
+            total_amount_raw = request.data.get('total_amount', 0)
+            received_amount_raw = request.data.get('received_amount', 0)
+
+            try:
+                total_amount = decimal.Decimal(str(total_amount_raw)).quantize(decimal.Decimal('0.01'))
+                received_amount = decimal.Decimal(str(received_amount_raw)).quantize(decimal.Decimal('0.01'))
+            except (decimal.InvalidOperation, TypeError):
+                total_amount = decimal.Decimal('0')
+                received_amount = decimal.Decimal('0')
+
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+
+            if payment_method in ('cash', 'card'):
+                if received_amount < total_amount:
+                    raise DRFValidationError(
+                        f"Insufficient payment for {payment_method.upper()}. "
+                        f"Required: PKR {total_amount} | Received: PKR {received_amount}"
+                    )
+
+            if payment_method == 'credit':
+                customer_id = request.data.get('customer')
+                crm_entity_id = request.data.get('crm_entity')
+                if not customer_id and not crm_entity_id:
+                    raise DRFValidationError(
+                        "B2B Credit Sales require a linked customer profile. "
+                        "Please search and select a customer before issuing credit."
+                    )
+
+            # Validate Sale metadata
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            sale = serializer.save(
+                cashier=user,
+                pos_session=session,
+                company_id=user.company_id
+            )
+
+            lines = request.data.get('lines', [])
+            if not lines:
+                raise DRFValidationError("Cannot process a sale with no items.")
+
+            from platform_core.models import Warehouse
+            from inventory.services.transaction_service import process_transaction
+            from inventory.services.compatibility import resolve_item_from_product
+            from inventory.services.exceptions import NegativeStockException
+            from inventory.models import Product
+
+            warehouse = Warehouse.objects.filter(company_id=user.company_id, is_default=True).first()
+            if not warehouse:
+                raise DRFValidationError("Company has no default warehouse.")
+
+            total_profit = decimal.Decimal('0')
+
+            for line_data in lines:
+                product_id = line_data.get('product')
+                item_id = line_data.get('item_id') or line_data.get('item')
+                
+                if not product_id and not item_id:
+                    raise DRFValidationError("Product ID or Item ID is required for all sale items.")
+                
+                product = None
+                item_entity = None
+                unit_cost = decimal.Decimal('0')
+                
+                if item_id:
+                    try:
+                        item_entity = Item.objects.get(id=item_id, company_id=user.company_id)
+                    except Item.DoesNotExist:
+                        raise DRFValidationError(f"Item with ID {item_id} not found.")
+                    unit_cost = item_entity.cost_price
+                elif product_id:
+                    try:
+                        product = Product.objects.get(id=product_id, company_id=user.company_id)
+                    except Product.DoesNotExist:
+                        raise DRFValidationError(f"Product with ID {product_id} not found.")
+                    item_entity = resolve_item_from_product(product)
+                    if not item_entity:
+                        raise DRFValidationError(f"Product {product.model_name} is not mapped to an Item.")
+                    unit_cost = product.cost_price
+
+                qty_raw = line_data.get('quantity', 1)
+                try:
+                    quantity = decimal.Decimal(str(qty_raw))
+                except (decimal.InvalidOperation, TypeError):
+                    raise DRFValidationError("Invalid quantity.")
+
+                unit_price_raw = line_data.get('unit_price')
+                try:
+                    unit_price = decimal.Decimal(str(unit_price_raw))
+                except (decimal.InvalidOperation, TypeError):
+                    raise DRFValidationError("Invalid unit_price.")
+                
+                try:
+                    process_transaction(
+                        company=user.company,
+                        item=item_entity,
+                        warehouse=warehouse,
+                        movement_type='SALE',
+                        quantity=quantity,
+                        reference=f"SALE-{str(sale.id)[:8].upper()}",
+                        user=user,
+                        notes="POS Sale deduction"
+                    )
+                except NegativeStockException as e:
+                    raise DRFValidationError(str(e))
+
+                sale_item = SaleItem(
+                    sale=sale,
+                    product=product,
+                    item=item_entity,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    unit_cost=unit_cost,
+                    company_id=user.company_id
+                )
+                sale_item.save()
+                total_profit += sale_item.line_profit
+
+            # Update Sale profit
+            sale.profit = total_profit
+            sale.save(update_fields=['profit'])
+            
+            # Return updated Sale
+            return Response(self.get_serializer(sale).data, status=status.HTTP_201_CREATED)
+
 
 class SaleItemViewSet(TenantModelViewSet):
-    queryset = SaleItem.objects.select_related('sale', 'product').all()
+    required_module = 'sales'
+    queryset = SaleItem.objects.select_related('sale', 'product', 'item').all()
     serializer_class = SaleItemSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ModulePermission]
 
     def perform_create(self, serializer):
         with transaction.atomic():
-            product = serializer.validated_data['product']
+            product = serializer.validated_data.get('product')
+            item = serializer.validated_data.get('item')
             quantity = serializer.validated_data.get('quantity', 1)
+            
+            if not product and not item:
+                raise ValidationError("SaleItem requires either a product or an item.")
 
-            if product.stock_quantity < quantity:
-                raise ValidationError(
-                    f"Insufficient stock for {product.brand} {product.model_name}. "
-                    f"Available: {product.stock_quantity}"
-                )
-
+            from platform_core.models import Warehouse
+            from inventory.services.transaction_service import process_transaction
+            from inventory.services.compatibility import resolve_item_from_product
+            from inventory.services.exceptions import NegativeStockException
+            
             # Capture cost_price at time of sale for profit calculation
-            unit_cost = product.cost_price
+            unit_cost = item.cost_price if item else product.cost_price
 
-            # Deduct inventory stock and record movement
-            product.stock_quantity -= quantity
-            product.save()
-
-            from inventory.models import StockMovement
+            # Deduct inventory stock and record movement via Inventory Engine
             sale = serializer.validated_data.get('sale')
-            StockMovement.objects.create(
-                company_id=self.request.user.company_id,
-                product=product,
-                quantity=quantity,
-                movement_type='OUT',
-                reference=f"SALE-{str(sale.id)[:8].upper()}" if sale else "",
-                notes=f"POS Sale deduction"
-            )
+            item_entity = item or resolve_item_from_product(product)
+            
+            if item_entity:
+                warehouse = Warehouse.objects.filter(company_id=self.request.user.company_id, is_default=True).first()
+                if not warehouse:
+                    raise ValidationError("Company has no default warehouse.")
+                
+                try:
+                    process_transaction(
+                        company=self.request.user.company,
+                        item=item_entity,
+                        warehouse=warehouse,
+                        movement_type='SALE',
+                        quantity=quantity,
+                        reference=f"SALE-{str(sale.id)[:8].upper()}" if sale else "",
+                        user=self.request.user,
+                        notes=f"POS Sale deduction"
+                    )
+                except NegativeStockException as e:
+                    raise ValidationError(str(e))
+            else:
+                raise ValidationError("Product is not mapped to an Item and no Item was provided.")
 
             # Save item with captured cost
             item = serializer.save(
@@ -267,4 +428,4 @@ class SaleItemViewSet(TenantModelViewSet):
             )
             sale.profit = total_profit
             sale.save(update_fields=['profit'])
-            logger.info(f"SaleItem saved: {product.model_name} x{quantity} | Profit: {item.line_profit}")
+            logger.info(f"SaleItem saved: {item_entity.name if item_entity else product.model_name} x{quantity} | Profit: {item.line_profit}")

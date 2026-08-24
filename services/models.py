@@ -7,14 +7,16 @@ services/models.py
   Phase 3 - Final: Delivery, payment, and invoice generation
 """
 import logging
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from erp_core.models import BaseModel
+from crm.mixins import CRMBridgeValidationMixin
+from purchasing.mixins import ProcurementBridgeValidationMixin
 
 logger = logging.getLogger(__name__)
 
 
-class ServiceOrder(BaseModel):
+class ServiceOrder(CRMBridgeValidationMixin, BaseModel):
     STATUS_CHOICES = (
         ('pending', 'Pending'),         # Phase 1 - just created
         ('in_progress', 'In Progress'), # Phase 2 - technician working
@@ -37,6 +39,7 @@ class ServiceOrder(BaseModel):
     # Customer Info
     customer_name = models.CharField(max_length=200)
     customer_phone = models.CharField(max_length=20)
+    crm_entity = models.ForeignKey('crm.CRMEntity', null=True, blank=True, on_delete=models.RESTRICT)
 
     # Device Details
     device_brand = models.CharField(max_length=100)
@@ -106,6 +109,19 @@ class ServiceOrder(BaseModel):
     def __str__(self):
         return f"SVC-{str(self.id)[:8].upper()} | {self.customer_name} | {self.device_brand} {self.device_model} ({self.status})"
 
+    def save(self, *args, **kwargs):
+        # -- Phase 4E: Auto-resolve CRM bridges --
+        from crm.services.compatibility import get_crm_entity, resolve_customer
+        if not self.crm_entity_id:
+            crm_obj = get_crm_entity(self)
+            if crm_obj:
+                self.crm_entity = crm_obj
+        # Note: ServiceOrder doesn't natively have a FK to legacy Customer, 
+        # but it uses customer_name/customer_phone strings. 
+        # No 'customer_id' to resolve from, but we still ensure crm_entity is synced if possible.
+        # ----------------------------------------
+        super().save(*args, **kwargs)
+
     class Meta(BaseModel.Meta):
         ordering = ['-created_at']
         indexes = [
@@ -144,7 +160,7 @@ class ServiceWorkLog(BaseModel):
         ordering = ['-created_at']
 
 
-class ServicePartUsed(BaseModel):
+class ServicePartUsed(CRMBridgeValidationMixin, ProcurementBridgeValidationMixin, BaseModel):
     """Phase 2: Tracks physical inventory or external vendor parts consumed during a repair."""
     SOURCE_CHOICES = (
         ('inventory', 'Internal Inventory'),
@@ -153,16 +169,18 @@ class ServicePartUsed(BaseModel):
     service_order = models.ForeignKey(ServiceOrder, on_delete=models.CASCADE, related_name='parts_used')
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='inventory')
     product = models.ForeignKey('inventory.Product', on_delete=models.CASCADE, null=True, blank=True)
+    item = models.ForeignKey('inventory.Item', on_delete=models.RESTRICT, null=True, blank=True, related_name='service_parts')
     # Vendor link: populated when source == 'vendor', triggers payable ledger entry
     vendor = models.ForeignKey(
         'inventory.Vendor',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
+        on_delete=models.SET_NULL, null=True, blank=True,
         related_name='service_parts',
         help_text='Vendor to pay when source is external'
     )
+    crm_entity = models.ForeignKey('crm.CRMEntity', null=True, blank=True, on_delete=models.RESTRICT)
+    procurement_line = models.ForeignKey('purchasing.ProcurementLine', null=True, blank=True, on_delete=models.RESTRICT)
     part_name = models.CharField(max_length=200, blank=True, help_text="Required if source is vendor")
-    quantity = models.IntegerField(default=1)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
     unit_cost = models.DecimalField(max_digits=10, decimal_places=2, help_text="Captured at time of use")
 
     @property
@@ -173,24 +191,73 @@ class ServicePartUsed(BaseModel):
     def get_product_name(self):
         if self.source == 'vendor':
             return self.part_name
+        if self.item:
+            return self.item.name
         return self.product.model_name if self.product else 'Unknown Part'
 
+    def clean(self):
+        super().clean()
+        if self.item and self.product:
+            if self.item.company_id != self.product.company_id:
+                from django.core.exceptions import ValidationError
+                raise ValidationError("Item and Product must belong to the same company.")
+        if self.item and self.item.company_id != self.service_order.company_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Item must belong to the service order's company.")
+        if self.product and self.product.company_id != self.service_order.company_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Product must belong to the service order's company.")
+
     def save(self, *args, **kwargs):
+        # -- Phase 4E & 5E: Auto-resolve CRM and Procurement bridges --
+        from crm.services.compatibility import get_crm_entity, resolve_vendor
+        from purchasing.services.compatibility import resolve_procurement_line
+
+        # Phase 5E: Automatically resolve upwards if procurement line exists
+        if not self.procurement_line_id:
+            proc_line = resolve_procurement_line(self)
+            if proc_line:
+                self.procurement_line = proc_line
+
+        if self.procurement_line_id:
+            if not self.crm_entity_id:
+                self.crm_entity_id = self.procurement_line.document.crm_entity_id
+            if not getattr(self, 'vendor_id', None):
+                from inventory.models import Vendor
+                vend_obj = Vendor.objects.filter(crm_entity_id=self.crm_entity_id).first()
+                if vend_obj:
+                    self.vendor = vend_obj
+
+        if not self.crm_entity_id:
+            crm_obj = get_crm_entity(self)
+            if crm_obj:
+                self.crm_entity = crm_obj
+        if not getattr(self, 'vendor_id', None):
+            vend_obj = resolve_vendor(self)
+            if vend_obj:
+                self.vendor = vend_obj
+        # ----------------------------------------
+        
         is_new = self._state.adding
         super().save(*args, **kwargs)
         if is_new and self.source == 'inventory' and self.product:
-            # Atomically decrement stock and record movement
-            from inventory.models import StockMovement
-            self.product.stock_quantity -= self.quantity
-            self.product.save()
-            StockMovement.objects.create(
-                company_id=self.company_id,
-                product=self.product,
-                quantity=self.quantity,
-                movement_type='OUT',
-                reference=f"SVC-{str(self.service_order_id)[:8].upper()}",
-                notes=f"Part used in Service Order {self.service_order_id}"
-            )
+            from platform_core.models import Warehouse
+            from inventory.services.transaction_service import process_transaction
+            from inventory.services.compatibility import resolve_item_from_product
+            
+            item_entity = resolve_item_from_product(self.product)
+            if item_entity:
+                warehouse = Warehouse.objects.filter(company_id=self.service_order.company_id, is_default=True).first()
+                if warehouse:
+                    process_transaction(
+                        company=self.service_order.company,
+                        item=item_entity,
+                        warehouse=warehouse,
+                        movement_type='SERVICE_USAGE',
+                        quantity=self.quantity,
+                        reference=f"SVC-{str(self.service_order_id)[:8].upper()}",
+                        notes=f"Part used in Service Order {self.service_order_id}"
+                    )
 
         if is_new and self.source == 'vendor' and self.vendor_id:
             # Create a Vendor Payable Ledger entry.

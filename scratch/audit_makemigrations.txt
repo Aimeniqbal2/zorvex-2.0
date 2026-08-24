@@ -1,0 +1,8 @@
+COMMAND: venv\Scripts\python manage.py makemigrations --check --dry-run
+========================================
+STDOUT:
+No changes detected
+
+STDERR:
+
+RETURN CODE: 0

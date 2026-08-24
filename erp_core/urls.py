@@ -43,12 +43,26 @@ urlpatterns = [
     path('api/finance/', include('finance.urls')),
     path('api/notifications/', include('notifications.urls')),
     path('api/reports/', include('reports.urls')),
+    path('api/crm/', include('crm.urls')),
+    path('api/purchasing/', include('purchasing.urls')),
+    path('api/operations/', include('operations.urls')),
+    path('api/billing/', include('billing.urls')),
+    path('api/platform/', include('platform_core.urls', namespace='platform_core')),
 
     # Global cross-module search
     path('api/search/', GlobalSearchView.as_view(), name='global_search'),
 ]
 
-# Serve media files in all environments (including DEBUG=False)
+from django.http import HttpResponseForbidden
+
+def block_sensitive_media(request, path):
+    return HttpResponseForbidden("Direct access to sensitive attachments is forbidden. Please use the authenticated API endpoint.")
+
 urlpatterns += [
+    re_path(r'^media/crm/(?P<path>.*)$', block_sensitive_media),
+    re_path(r'^media/operations/incidents/(?P<path>.*)$', block_sensitive_media),
+    re_path(r'^media/finance/(?P<path>.*)$', block_sensitive_media),
+    re_path(r'^media/purchasing/(?P<path>.*)$', block_sensitive_media),
+    re_path(r'^media/hrm/(?P<path>.*)$', block_sensitive_media),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ]

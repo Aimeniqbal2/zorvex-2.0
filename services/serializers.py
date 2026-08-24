@@ -15,13 +15,13 @@ class ServiceWorkLogSerializer(serializers.ModelSerializer):
 
 class ServicePartUsedSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='get_product_name', read_only=True)
-    product_brand = serializers.CharField(source='product.brand', read_only=True)
+    product_brand = serializers.CharField(source='product.brand', read_only=True, allow_null=True)
     total_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     vendor_name = serializers.CharField(source='vendor.name', read_only=True)
 
     class Meta:
         model = ServicePartUsed
-        fields = ['id', 'service_order', 'source', 'product', 'vendor', 'vendor_name',
+        fields = ['id', 'service_order', 'source', 'product', 'item', 'vendor', 'vendor_name', 'crm_entity', 'procurement_line',
                   'part_name', 'product_name', 'product_brand',
                   'quantity', 'unit_cost', 'total_cost', 'created_at']
         read_only_fields = ['company', 'created_at']
@@ -54,7 +54,7 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceOrder
         fields = [
-            'id', 'company',
+            'id', 'company', 'crm_entity',
             # Phase 1 - Entry
             'customer_name', 'customer_phone',
             'device_brand', 'device_model', 'device_color', 'device_imei',
@@ -89,7 +89,7 @@ class ServiceOrderListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceOrder
         fields = [
-            'id', 'customer_name', 'customer_phone',
+            'id', 'crm_entity', 'customer_name', 'customer_phone',
             'device_brand', 'device_model',
             'status', 'department',
             'technician_name', 'technician_username',

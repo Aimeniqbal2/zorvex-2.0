@@ -19,6 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from erp_core.permissions import RolePermission
 from erp_core.views import TenantModelViewSet
 from erp_core.rbac import IsManagerOrAdmin, IsTechnician, IsCashier, TECHNICIAN_ROLES
+from platform_core.permissions import ModulePermission
 from notifications.models import Notification
 from .models import ServiceOrder, ServiceMedia, ServiceWorkLog, ServicePartUsed
 from .serializers import (
@@ -33,10 +34,11 @@ PRIVILEGED_ROLES = ('admin', 'manager', 'super_admin', 'cashier')
 
 
 class ServiceOrderViewSet(TenantModelViewSet):
+    required_module = 'services'
     queryset = ServiceOrder.objects.select_related(
         'technician', 'assigned_technician'
-    ).prefetch_related('work_logs', 'parts_used', 'media').all()
-    permission_classes = [IsAuthenticated, RolePermission]
+    ).prefetch_related('work_logs__technician', 'parts_used__product', 'parts_used__item', 'parts_used__vendor', 'media__uploaded_by').all()
+    permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     allowed_roles  = ['admin', 'manager', 'cashier']
     allowed_reads  = ['admin', 'manager', 'hardware_technician', 'software_technician', 'cashier', 'staff']
 
@@ -335,18 +337,20 @@ class TechnicianListView(TenantModelViewSet):
 
 
 class ServiceWorkLogViewSet(TenantModelViewSet):
+    required_module = 'services'
     queryset = ServiceWorkLog.objects.select_related('technician').all()
     serializer_class = ServiceWorkLogSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ModulePermission]
 
     def perform_create(self, serializer):
         serializer.save(company_id=self.request.user.company_id, technician=self.request.user)
 
 
 class ServicePartUsedViewSet(TenantModelViewSet):
+    required_module = 'services'
     queryset = ServicePartUsed.objects.select_related('product', 'vendor', 'service_order').all()
     serializer_class = ServicePartUsedSerializer
-    permission_classes = [IsAuthenticated, RolePermission]
+    permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     allowed_roles = ['admin', 'manager', *TECHNICIAN_ROLES]
 
     def perform_create(self, serializer):
@@ -354,9 +358,10 @@ class ServicePartUsedViewSet(TenantModelViewSet):
 
 
 class ServiceMediaViewSet(TenantModelViewSet):
+    required_module = 'services'
     queryset = ServiceMedia.objects.select_related('service_order', 'uploaded_by').all()
     serializer_class = ServiceMediaSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ModulePermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def perform_create(self, serializer):
