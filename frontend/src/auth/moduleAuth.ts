@@ -14,18 +14,27 @@ export function isModuleAuthorized(
     const userLevel = ROLE_LEVELS[userRole] || 0;
     const minLevel = ROLE_LEVELS[module.minRole] || 0;
 
-    // 1. Check Role Level
-    if (userLevel < minLevel) return false;
+    const engineToCheck = module.engine || module.code;
 
-    // 2. Technician special logic (like legacy)
+    // 1. Core platform/settings apps rely strictly on explicit role boundaries
+    if (['platform', 'settings'].includes(engineToCheck)) {
+        return userLevel >= minLevel;
+    }
+
+    // 2. Technician legacy logic
     if (isTechnician) {
         if (['pos', 'sales', 'finance'].includes(module.code)) return false;
     }
 
-    // 3. Backend Module State
-    if (module.code !== 'dashboard' && module.code !== 'settings' && module.code !== 'hr') {
-        if (enabledModules && !enabledModules[module.code]) return false;
+    // 3. Backend Module State - if the backend explicitly granted it via Custom Access or Full Company, allow it!
+    if (enabledModules[engineToCheck]) {
+        return true;
     }
 
-    return true;
+    // 4. Default open for basic core apps like dashboard/reports, subject to legacy minRole
+    if (['dashboard', 'reports', 'core'].includes(engineToCheck)) {
+        return userLevel >= minLevel;
+    }
+    
+    return false;
 }

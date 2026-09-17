@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './authStore';
 import { TokenManager } from './tokenManager';
 import { apiClient } from '../api/client';
+import { ZorvexLoadingScreen } from '../components/ui/ZorvexLoadingScreen';
 import './Login.css';
 
 const MESSAGES = [
@@ -129,15 +130,16 @@ export const Login: React.FC = () => {
             
             if (response.data && response.data.access) {
                 TokenManager.setTokens(response.data.access, response.data.refresh);
-                setAuth(response.data.access);
                 
+                // Show compulsory dark loading screen upon login
                 setShowGlobalLoader(true);
                 
                 setTimeout(() => {
+                    setAuth(response.data.access);
                     // Navigate to intended destination or root
                     const from = location.state?.from?.pathname || '/';
                     navigate(from, { replace: true });
-                }, 800);
+                }, 1600);
             }
         } catch (err: any) {
             if (err.response) {
@@ -160,7 +162,7 @@ export const Login: React.FC = () => {
                 <div className={`card minimal-card ${isShaking ? 'shake' : ''}`}>
                     <div className="left">
                         <div className="logo">
-                            <img src="/assets/logo-full.png" alt="ZORVEX Logo" />
+                            <img src="/app/assets/zorvex-logo.png" alt="ZORVEX Logo" />
                         </div>
 
                         <div style={{ color: '#ff6b6b', fontSize: '13px', textAlign: 'center', marginBottom: '10px', opacity: errorMsg ? 1 : 0, transition: '0.3s' }}>
@@ -227,11 +229,14 @@ export const Login: React.FC = () => {
                 </div>
             </div>
 
-            {/* Smooth Global Loader */}
-            <div className={`globalLoader ${showGlobalLoader ? 'active' : ''}`}>
-                <img src="/assets/logo-full.png" alt="ZORVEX Logo" />
-                <div className="loader-spinner"></div>
-            </div>
+            {/* Full-screen Dark Zorvex Loading Screen on Login */}
+            {showGlobalLoader && (
+                <ZorvexLoadingScreen 
+                    variant="dark" 
+                    fullScreen={true} 
+                    message="Initializing Zorvex Workspace..."
+                />
+            )}
 
             {/* Marketing Popups */}
             <div className="marketing-popups">

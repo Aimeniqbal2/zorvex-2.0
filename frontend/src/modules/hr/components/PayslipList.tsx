@@ -100,7 +100,6 @@ export const PayslipList: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0 }}>Payslips</h3>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <Button variant="secondary" onClick={() => {}}>Generate PDFs</Button>
                 </div>
             </div>
             <DataTable columns={columns} data={payslips} keyExtractor={(item: any) => item.id} />

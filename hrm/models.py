@@ -1,5 +1,7 @@
+from datetime import date
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.core.exceptions import ValidationError
 from erp_core.models import BaseModel
 from crm.mixins import CRMBridgeValidationMixin
@@ -95,7 +97,42 @@ class Employee(BaseModel):
     designation = models.ForeignKey(Designation, on_delete=models.SET_NULL, null=True, blank=True, related_name='active_employees')
     branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True, related_name='active_employees')
     
+    # Phase S-5A Additions
+    classification = models.CharField(
+        max_length=20,
+        choices=[('DIRECT', 'Direct - Field / Operational'), ('INDIRECT', 'Indirect - Office / Management')],
+        default='DIRECT',
+        help_text="DIRECT = Field guards/supervisors, INDIRECT = Office/Management staff"
+    )
+    father_name = models.CharField(max_length=100, blank=True, default='')
+    cnic_number = models.CharField(max_length=50, blank=True, default='')
+    permanent_address = models.TextField(blank=True, default='')
+    current_address = models.TextField(blank=True, default='')
+    education = models.CharField(max_length=100, blank=True, default='')
+    marital_status = models.CharField(
+        max_length=20,
+        choices=[('SINGLE', 'Single'), ('MARRIED', 'Married'), ('DIVORCED', 'Divorced'), ('WIDOWED', 'Widowed')],
+        default='SINGLE'
+    )
+    background_type = models.CharField(
+        max_length=20,
+        choices=[('CIVILIAN', 'Civilian'), ('EX_ARMY', 'Ex-Army'), ('OTHER', 'Other')],
+        default='CIVILIAN'
+    )
+    employment_status = models.CharField(
+        max_length=20,
+        choices=[('ACTIVE', 'Active'), ('INACTIVE', 'Inactive'), ('SUSPENDED', 'Suspended'), ('RESIGNED', 'Resigned'), ('TERMINATED', 'Terminated'), ('JUMP', 'Jump')],
+        default='ACTIVE'
+    )
+    
     is_active = models.BooleanField(default=True)
+
+    # Phase S-5H Lifecycle Dates
+    confirmation_date = models.DateField(null=True, blank=True)
+    resignation_date = models.DateField(null=True, blank=True)
+    termination_date = models.DateField(null=True, blank=True)
+    last_working_date = models.DateField(null=True, blank=True)
+    rehire_date = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ['first_name', 'last_name']
@@ -106,6 +143,30 @@ class Employee(BaseModel):
                 name='unique_active_company_employee_code'
             )
         ]
+
+    @property
+    def joining_date(self):
+        return self.hire_date
+
+    @joining_date.setter
+    def joining_date(self, value):
+        self.hire_date = value
+
+    @property
+    def age(self):
+        if not self.date_of_birth:
+            return None
+        from datetime import date
+        today = date.today()
+        return today.year - self.date_of_birth.year - ((today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day))
+
+    @property
+    def training_completed(self):
+        return self.trainings.filter(status='COMPLETED', is_deleted=False).exists()
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}".strip()
 
     def clean(self):
         super().clean()
@@ -123,11 +184,211 @@ class Employee(BaseModel):
             raise ValidationError({'branch': 'Branch must belong to the same company.'})
 
     def save(self, *args, **kwargs):
+        from erp_core.models import DocumentSequence
+        if not self.employee_code and self.company_id:
+            self.employee_code = DocumentSequence.get_next_number(self.company, "EMPLOYEE", "EMP")
+        self.clean()
+        
+        # Track historical changes
+        is_new = self._state.adding
+        old_inst = None
+        if not is_new and self.pk:
+            try:
+                old_inst = Employee.objects.get(pk=self.pk)
+            except Employee.DoesNotExist:
+                pass
+                
+        super().save(*args, **kwargs)
+
+        if getattr(self, '_skip_history_log', False):
+            return
+
+        # Log history events if changed
+        if not is_new and old_inst:
+            changes = []
+            if old_inst.cnic_number != self.cnic_number:
+                changes.append(('CNIC_CHANGE', f"CNIC: {old_inst.cnic_number} -> {self.cnic_number}"))
+            if old_inst.designation_id != self.designation_id:
+                old_d = old_inst.designation.name if old_inst.designation else "None"
+                new_d = self.designation.name if self.designation else "None"
+                changes.append(('DESIGNATION_CHANGE', f"Designation: {old_d} -> {new_d}"))
+            if old_inst.department_id != self.department_id:
+                old_dept = old_inst.department.name if old_inst.department else "None"
+                new_dept = self.department.name if self.department else "None"
+                changes.append(('DEPARTMENT_CHANGE', f"Department: {old_dept} -> {new_dept}"))
+            if old_inst.classification != self.classification:
+                changes.append(('CLASSIFICATION_CHANGE', f"Classification: {old_inst.classification} -> {self.classification}"))
+            if old_inst.employment_status != self.employment_status:
+                changes.append(('STATUS_CHANGE', f"Status: {old_inst.employment_status} -> {self.employment_status}"))
+            
+            for event_type, msg in changes:
+                EmploymentHistory.objects.create(
+                    company=self.company,
+                    employee=self,
+                    event_type=event_type,
+                    notes=msg
+                )
+        elif is_new:
+            EmploymentHistory.objects.create(
+                company=self.company,
+                employee=self,
+                event_type='JOINING',
+                notes=f"Employee created with status {self.employment_status} and code {self.employee_code}"
+            )
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name}".strip()
+
+
+class EmployeeNextOfKin(BaseModel):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='next_of_kin')
+    name = models.CharField(max_length=255)
+    cnic_number = models.CharField(max_length=50, blank=True, default='')
+    relationship = models.CharField(max_length=100)
+    contact_number = models.CharField(max_length=50)
+    is_primary = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-is_primary', 'name']
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        if self.is_primary and self.employee_id:
+            EmployeeNextOfKin.objects.filter(company_id=self.company_id, employee_id=self.employee_id, is_primary=True, is_deleted=False).exclude(pk=self.pk).update(is_primary=False)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.relationship}) - {self.employee}"
+
+
+class EmployeeDocumentType(models.TextChoices):
+    CNIC = 'CNIC', 'CNIC'
+    POLICE_VERIFICATION = 'POLICE_VERIFICATION', 'Police Verification'
+    OTHER_VERIFICATION = 'OTHER_VERIFICATION', 'Other Verification'
+    CRO = 'CRO', 'Criminal Records Office (CRO)'
+    FINGERPRINT = 'FINGERPRINT', 'Fingerprint Record'
+    EMPLOYMENT_CONTRACT = 'EMPLOYMENT_CONTRACT', 'Employment Contract'
+    TERMS_AND_CONDITIONS = 'TERMS_AND_CONDITIONS', 'Terms & Conditions'
+    TRAINING_CERTIFICATE = 'TRAINING_CERTIFICATE', 'Training Certificate'
+    EX_ARMY_DOCUMENT = 'EX_ARMY_DOCUMENT', 'Ex-Army Discharge/Document'
+    EDUCATION_DOCUMENT = 'EDUCATION_DOCUMENT', 'Education Document'
+    OTHER = 'OTHER', 'Other'
+
+class DocumentVerificationStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    UPLOADED = 'UPLOADED', 'Uploaded'
+    VERIFIED = 'VERIFIED', 'Verified'
+    REJECTED = 'REJECTED', 'Rejected'
+    EXPIRED = 'EXPIRED', 'Expired'
+
+class EmployeeDocument(BaseModel):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='documents')
+    document_type = models.CharField(max_length=50, choices=EmployeeDocumentType.choices)
+    file = models.FileField(upload_to='hrm/employee_documents/', null=True, blank=True)
+    document_number = models.CharField(max_length=100, blank=True, default='')
+    issue_date = models.DateField(null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    verification_status = models.CharField(max_length=30, choices=DocumentVerificationStatus.choices, default=DocumentVerificationStatus.PENDING)
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    verified_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+        if self.verified_by_id and hasattr(self.verified_by, 'company_id') and str(self.verified_by.company_id) != str(self.company_id):
+            raise ValidationError({'verified_by': 'Verifier must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def verify(self, user, status_val='VERIFIED', notes_val=''):
+        from django.utils import timezone
+        self.verification_status = status_val
+        self.verified_by = user
+        self.verified_at = timezone.now()
+        if notes_val:
+            self.notes = notes_val
+        self.save()
+        EmploymentHistory.objects.create(
+            company=self.company,
+            employee=self.employee,
+            event_type='DOCUMENT_VERIFICATION',
+            old_value='PENDING',
+            new_value=f"{self.document_type}: {status_val}",
+            notes=notes_val or f"Document {self.document_type} verification updated to {status_val}",
+            changed_by=user
+        )
+
+    def __str__(self):
+        return f"{self.get_document_type_display()} - {self.employee}"
+
+
+class EmployeeTraining(BaseModel):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='trainings')
+    training_type = models.CharField(max_length=100)
+    training_date = models.DateField()
+    institute_or_trainer = models.CharField(max_length=255, blank=True, default='')
+    certificate = models.FileField(upload_to='hrm/training_certificates/', null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=30,
+        choices=[('SCHEDULED', 'Scheduled'), ('IN_PROGRESS', 'In Progress'), ('COMPLETED', 'Completed'), ('EXPIRED', 'Expired'), ('FAILED', 'Failed')],
+        default='COMPLETED'
+    )
+    notes = models.TextField(blank=True, default='')
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.first_name} {self.last_name}".strip()
+        return f"{self.training_type} - {self.employee} ({self.status})"
+
+
+class EmploymentHistory(BaseModel):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='history_logs')
+    event_type = models.CharField(max_length=50)
+    effective_date = models.DateField(default=date.today)
+    old_value = models.TextField(blank=True, default='')
+    new_value = models.TextField(blank=True, default='')
+    notes = models.TextField(blank=True, default='')
+    reason = models.TextField(blank=True, default='')
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+        if self.changed_by_id and hasattr(self.changed_by, 'company_id') and str(self.changed_by.company_id) != str(self.company_id):
+            raise ValidationError({'changed_by': 'User must belong to the same company.'})
+        if self.approved_by_id and hasattr(self.approved_by, 'company_id') and str(self.approved_by.company_id) != str(self.company_id):
+            raise ValidationError({'approved_by': 'Approver must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.event_type} - {self.employee} ({self.effective_date})"
 
 class Employment(BaseModel):
     EMPLOYMENT_TYPE_CHOICES = [
@@ -251,10 +512,14 @@ class Attendance(BaseModel):
 class AttendanceStatus(models.TextChoices):
     PRESENT = 'PRESENT', 'Present'
     ABSENT = 'ABSENT', 'Absent'
-    LATE = 'LATE', 'Late'
-    HALF_DAY = 'HALF_DAY', 'Half Day'
-    ON_LEAVE = 'ON_LEAVE', 'On Leave'
+    PAID_LEAVE = 'PAID_LEAVE', 'Paid Leave'
+    UNPAID_LEAVE = 'UNPAID_LEAVE', 'Unpaid Leave'
     HOLIDAY = 'HOLIDAY', 'Holiday'
+    WEEKLY_OFF = 'WEEKLY_OFF', 'Weekly Off'
+    HALF_DAY = 'HALF_DAY', 'Half Day'
+    # Backward compatibility choices
+    LATE = 'LATE', 'Late'
+    ON_LEAVE = 'ON_LEAVE', 'On Leave'
     OFF_DAY = 'OFF_DAY', 'Off Day'
 
 class WorkforceAttendance(BaseModel):
@@ -265,7 +530,16 @@ class WorkforceAttendance(BaseModel):
     check_out = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=AttendanceStatus.choices, default=AttendanceStatus.PRESENT)
     notes = models.TextField(blank=True, default='')
-    source = models.CharField(max_length=50, blank=True, default='SYSTEM')
+    source = models.CharField(max_length=50, blank=True, default='CENTRAL_OFFICE')
+
+    # Phase S-5D Additions
+    duty_roster = models.ForeignKey('operations.DutyRoster', on_delete=models.SET_NULL, null=True, blank=True, related_name='workforce_attendances')
+    site = models.ForeignKey('operations.OperationalSite', on_delete=models.SET_NULL, null=True, blank=True, related_name='workforce_attendances')
+    post = models.ForeignKey('operations.SecurityPost', on_delete=models.SET_NULL, null=True, blank=True, related_name='workforce_attendances')
+    shift = models.ForeignKey('hrm.Shift', on_delete=models.SET_NULL, null=True, blank=True, related_name='workforce_attendances')
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='recorded_workforce_attendances')
+    finalized_at = models.DateTimeField(null=True, blank=True)
+    is_finalized = models.BooleanField(default=True)
     
     class Meta:
         constraints = [
@@ -284,6 +558,14 @@ class WorkforceAttendance(BaseModel):
             raise ValidationError({'employment': 'Employment must belong to the same company.'})
         if self.employment_id and self.employee_id and self.employment.employee_id != self.employee_id:
             raise ValidationError({'employment': 'Employment must belong to the given employee.'})
+        if self.duty_roster_id and str(self.duty_roster.company_id) != str(self.company_id):
+            raise ValidationError({'duty_roster': 'Duty roster must belong to the same company.'})
+        if self.site_id and str(self.site.company_id) != str(self.company_id):
+            raise ValidationError({'site': 'Site must belong to the same company.'})
+        if self.post_id and str(self.post.company_id) != str(self.company_id):
+            raise ValidationError({'post': 'Security post must belong to the same company.'})
+        if self.shift_id and str(self.shift.company_id) != str(self.company_id):
+            raise ValidationError({'shift': 'Shift must belong to the same company.'})
         if self.check_in and self.check_out and self.check_out < self.check_in:
             raise ValidationError({'check_out': 'Check out cannot be before check in.'})
 
@@ -292,7 +574,87 @@ class WorkforceAttendance(BaseModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.employee} - {self.date}"
+        return f"{self.employee} - {self.date} ({self.status})"
+
+
+class EmployeeAttendanceState(BaseModel):
+    """
+    Phase S-5D Persistent State Engine:
+    PRESENT remains the employee's default daily state until explicitly changed.
+    ABSENT remains the default daily state until explicitly changed again.
+    """
+    employee = models.OneToOneField(Employee, on_delete=models.CASCADE, related_name='attendance_state')
+    current_state = models.CharField(
+        max_length=20,
+        choices=[('PRESENT', 'Present'), ('ABSENT', 'Absent')],
+        default='PRESENT'
+    )
+    effective_from = models.DateField(default=timezone.now)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='updated_attendance_states')
+    notes = models.TextField(blank=True, default='')
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.employee} - {self.current_state} (effective {self.effective_from})"
+
+
+class JumpRecordStatus(models.TextChoices):
+    ACTIVE_JUMP = 'ACTIVE_JUMP', 'Active JUMP'
+    RESTORED = 'RESTORED', 'Restored'
+    ACKNOWLEDGED = 'ACKNOWLEDGED', 'Acknowledged'
+    RESIGNED = 'RESIGNED', 'Resigned'
+    TERMINATED = 'TERMINATED', 'Terminated'
+    OTHER = 'OTHER', 'Other'
+
+
+class JumpRecord(BaseModel):
+    """
+    Phase S-5D: 7-Day Consecutive Absence JUMP tracking.
+    7 consecutive true ABSENT days -> Employee status = JUMP.
+    Preserves audit history when employee is returned/reinstated to ACTIVE.
+    """
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='jump_records')
+    absent_since = models.DateField()
+    jump_triggered_at = models.DateTimeField(default=timezone.now)
+    consecutive_absent_days = models.PositiveIntegerField(default=7)
+    reason = models.TextField(blank=True, default='7 consecutive unexcused absent days')
+    status = models.CharField(max_length=20, choices=JumpRecordStatus.choices, default=JumpRecordStatus.ACTIVE_JUMP)
+    
+    # Return / Reinstatement Tracking
+    reinstated_at = models.DateTimeField(null=True, blank=True)
+    reinstated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reinstated_jumps')
+    reinstatement_notes = models.TextField(blank=True, default='')
+
+    # Phase S-5H HR Resolution Tracking
+    resolution_type = models.CharField(max_length=30, blank=True, default='')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_jumps')
+    resolution_notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-jump_triggered_at']
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+        if self.resolved_by_id and hasattr(self.resolved_by, 'company_id') and str(self.resolved_by.company_id) != str(self.company_id):
+            raise ValidationError({'resolved_by': 'User must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"JUMP: {self.employee} (Since {self.absent_since}, Status: {self.status})"
 
 class Shift(BaseModel):
     name = models.CharField(max_length=100)
@@ -327,6 +689,20 @@ class Shift(BaseModel):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
+
+    @property
+    def duration_hours(self):
+        if not self.start_time or not self.end_time:
+            return 0.0
+        import datetime
+        t1 = datetime.datetime.combine(datetime.date.today(), self.start_time)
+        t2 = datetime.datetime.combine(datetime.date.today(), self.end_time)
+        if self.is_overnight or self.start_time > self.end_time:
+            t2 += datetime.timedelta(days=1)
+        diff = t2 - t1
+        if self.break_duration:
+            diff -= self.break_duration
+        return round(max(0.0, diff.total_seconds() / 3600.0), 2)
 
     def __str__(self):
         return self.name
@@ -468,10 +844,16 @@ class Holiday(BaseModel):
         ]
 
 class OvertimeStatus(models.TextChoices):
+    DRAFT = 'DRAFT', 'Draft'
     PENDING = 'PENDING', 'Pending'
     APPROVED = 'APPROVED', 'Approved'
+    PROCESSED = 'PROCESSED', 'Processed'
     REJECTED = 'REJECTED', 'Rejected'
     CANCELLED = 'CANCELLED', 'Cancelled'
+
+class OvertimeType(models.TextChoices):
+    SINGLE_OT = 'SINGLE_OT', 'Single Overtime'
+    DOUBLE_OT = 'DOUBLE_OT', 'Double Overtime'
 
 class OvertimeRecord(BaseModel):
     employee = models.ForeignKey(Employee, on_delete=models.RESTRICT, related_name='overtime_records')
@@ -481,13 +863,26 @@ class OvertimeRecord(BaseModel):
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
     hours = models.DecimalField(max_digits=5, decimal_places=2)
+    ot_type = models.CharField(max_length=20, choices=OvertimeType.choices, default=OvertimeType.SINGLE_OT)
+    rate_override = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=None)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    payable_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    source = models.CharField(max_length=50, default='MANUAL')
+    site = models.ForeignKey('operations.OperationalSite', on_delete=models.SET_NULL, null=True, blank=True, related_name='overtime_records')
+    post = models.ForeignKey('operations.SecurityPost', on_delete=models.SET_NULL, null=True, blank=True, related_name='overtime_records')
     reason = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=OvertimeStatus.choices, default=OvertimeStatus.PENDING)
     approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_overtime')
     approved_at = models.DateTimeField(null=True, blank=True)
+    processed_payslip = models.ForeignKey('Payslip', on_delete=models.SET_NULL, null=True, blank=True, related_name='processed_overtimes')
+    is_frozen = models.BooleanField(default=False)
     
     def clean(self):
         super().clean()
+        if self.pk:
+            orig = OvertimeRecord.objects.filter(pk=self.pk).values('is_frozen').first()
+            if orig and orig.get('is_frozen') and not getattr(self, '_allow_frozen_update', False):
+                raise ValidationError('Cannot modify a frozen overtime record consumed by finalized payroll.')
         if self.employee_id and str(self.employee.company_id) != str(self.company_id):
             raise ValidationError({'employee': 'Employee must belong to the same company.'})
         if self.attendance_id and str(self.attendance.company_id) != str(self.company_id):
@@ -609,9 +1004,15 @@ class SalaryStructureComponent(BaseModel):
 class EmployeeSalaryAssignment(BaseModel):
     employee = models.ForeignKey('Employee', on_delete=models.RESTRICT, related_name='salary_assignments')
     employment = models.ForeignKey('Employment', on_delete=models.SET_NULL, null=True, blank=True, related_name='salary_assignments')
-    salary_structure = models.ForeignKey(SalaryStructure, on_delete=models.RESTRICT)
+    salary_structure = models.ForeignKey(SalaryStructure, null=True, blank=True, on_delete=models.RESTRICT)
     currency = models.ForeignKey('finance.Currency', on_delete=models.RESTRICT)
     base_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    daily_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True, default=None,
+        help_text="Explicit daily payable duty rate if applicable. Overrides monthly base salary calculation."
+    )
+    single_ot_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    double_ot_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     effective_from = models.DateField()
     effective_to = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, default='ACTIVE')
@@ -619,6 +1020,21 @@ class EmployeeSalaryAssignment(BaseModel):
 
     class Meta:
         ordering = ['-effective_from']
+
+    @classmethod
+    def resolve_compensation(cls, company, employee, on_date=None):
+        from datetime import date
+        if on_date is None:
+            on_date = date.today()
+        return cls.objects.filter(
+            company=company,
+            employee=employee,
+            status='ACTIVE',
+            effective_from__lte=on_date,
+            is_deleted=False
+        ).filter(
+            models.Q(effective_to__isnull=True) | models.Q(effective_to__gte=on_date)
+        ).order_by('-effective_from').first()
 
     def clean(self):
         super().clean()
@@ -653,13 +1069,26 @@ class EmployeeSalaryAssignment(BaseModel):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
+        if self.employee_id and self.company_id:
+            msg = f"Salary/OT updated - Base Salary: {self.base_salary}, Single OT: {self.single_ot_rate}, Double OT: {self.double_ot_rate} (Effective {self.effective_from})"
+            try:
+                EmploymentHistory.objects.create(
+                    company=self.company,
+                    employee=self.employee,
+                    event_type='SALARY_CHANGE',
+                    notes=msg
+                )
+            except Exception:
+                pass
+
+    def __str__(self):
+        return f"{self.employee} - {self.salary_structure.name} ({self.base_salary})"
 
 
 class PayrollPeriodStatus(models.TextChoices):
     DRAFT = 'DRAFT', 'Draft'
     OPEN = 'OPEN', 'Open'
     PROCESSING = 'PROCESSING', 'Processing'
-    FINALIZED = 'FINALIZED', 'Finalized'
     CLOSED = 'CLOSED', 'Closed'
 
 class PayrollPeriod(BaseModel):
@@ -701,17 +1130,39 @@ class PayrollRunStatus(models.TextChoices):
     DRAFT = 'DRAFT', 'Draft'
     PROCESSING = 'PROCESSING', 'Processing'
     CALCULATED = 'CALCULATED', 'Calculated'
+    UNDER_REVIEW = 'UNDER_REVIEW', 'Under Review'
+    APPROVED = 'APPROVED', 'Approved'
     FINALIZED = 'FINALIZED', 'Finalized'
     CANCELLED = 'CANCELLED', 'Cancelled'
 
 class PayrollRun(BaseModel):
-    payroll_period = models.ForeignKey(PayrollPeriod, on_delete=models.RESTRICT, related_name='runs')
+    payroll_period = models.ForeignKey(PayrollPeriod, on_delete=models.RESTRICT, related_name='runs', null=True, blank=True)
     run_number = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=PayrollRunStatus.choices, default=PayrollRunStatus.DRAFT)
-    processed_at = models.DateTimeField(null=True, blank=True)
-    finalized_at = models.DateTimeField(null=True, blank=True)
-    notes = models.TextField(blank=True, default='')
+    
+    # Phase S-5G Core Run Dimensions
+    period_start = models.DateField(null=True, blank=True, db_index=True)
+    period_end = models.DateField(null=True, blank=True, db_index=True)
+    payroll_month = models.CharField(max_length=20, blank=True, default='')
+    employee_count = models.PositiveIntegerField(default=0)
+    gross_earnings = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    employee_deductions = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    employer_statutory_contribution = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    net_payroll = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    # Workflow Audit Trail & Timestamps
+    prepared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='prepared_payrolls')
+    prepared_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_payrolls')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_payrolls')
+    approved_at = models.DateTimeField(null=True, blank=True)
     finalized_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='finalized_payrolls')
+    finalized_at = models.DateTimeField(null=True, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    advances_settled = models.BooleanField(default=False)
+    notes = models.TextField(blank=True, default='')
     journal_entry = models.ForeignKey('finance.JournalEntry', on_delete=models.RESTRICT, null=True, blank=True, related_name='payroll_runs')
 
     class Meta:
@@ -727,8 +1178,6 @@ class PayrollRun(BaseModel):
         super().clean()
         if self.payroll_period_id and str(self.payroll_period.company_id) != str(self.company_id):
             raise ValidationError({'payroll_period': 'Payroll period must belong to the same company.'})
-        if self.finalized_by_id and hasattr(self.finalized_by, "company_id") and str(self.finalized_by.company_id) != str(self.company_id):
-            raise ValidationError({'finalized_by': 'User must belong to the same company.'})
         
         # In a finalized run, don't allow modifying core fields
         if self.pk:
@@ -742,13 +1191,15 @@ class PayrollRun(BaseModel):
     def save(self, *args, **kwargs):
         from erp_core.models import DocumentSequence
         if not self.run_number:
-            prefix = f"PR-{self.payroll_period.start_date.strftime('%Y%m')}"
+            p_date = self.period_start or (self.payroll_period.start_date if self.payroll_period else timezone.now().date())
+            prefix = f"PR-{p_date.strftime('%Y%m')}"
             self.run_number = DocumentSequence.get_next_number(self.company, "PAYROLL_RUN", prefix)
         self.clean()
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.run_number} - {self.payroll_period.name}"
+        period_label = self.payroll_period.name if self.payroll_period else f"{self.period_start} to {self.period_end}"
+        return f"{self.run_number} - {period_label} [{self.status}]"
 
 
 class PayslipStatus(models.TextChoices):
@@ -761,14 +1212,44 @@ class Payslip(BaseModel):
     payroll_run = models.ForeignKey(PayrollRun, on_delete=models.RESTRICT, related_name='payslips')
     employee = models.ForeignKey('Employee', on_delete=models.RESTRICT, related_name='payslips')
     employment = models.ForeignKey('Employment', on_delete=models.SET_NULL, null=True, blank=True)
-    salary_assignment = models.ForeignKey(EmployeeSalaryAssignment, on_delete=models.RESTRICT)
+    salary_assignment = models.ForeignKey(EmployeeSalaryAssignment, on_delete=models.RESTRICT, null=True, blank=True)
     payslip_number = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=PayslipStatus.choices, default=PayslipStatus.DRAFT)
-    currency = models.ForeignKey('finance.Currency', on_delete=models.RESTRICT)
+    currency = models.ForeignKey('finance.Currency', on_delete=models.RESTRICT, null=True, blank=True)
     gross_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     deduction_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     net_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # Phase S-5G Rich Snapshot Dimensions
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+    duty_earnings = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    single_ot_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    double_ot_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    allowances_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    bonuses_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    other_additions_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # Independent Deductions
+    eobi_employee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    eobi_employer_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    sessi_employee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    sessi_employer_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    pessi_employee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    pessi_employer_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    patrolling_deduction = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    insurance_deduction = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    advance_recovery_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    other_deductions_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_statutory_deductions = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_employer_statutory = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # Snapshots & Immutability Locks
+    rate_snapshot = models.JSONField(default=dict, blank=True)
+    lines_snapshot = models.JSONField(default=list, blank=True)
+    operational_calculation = models.ForeignKey('operations.EmployeePayrollCalculation', null=True, blank=True, on_delete=models.SET_NULL, related_name='payslips')
+    is_frozen = models.BooleanField(default=False)
 
     class Meta:
         constraints = [
@@ -800,15 +1281,17 @@ class Payslip(BaseModel):
         if self.pk:
             try:
                 orig = Payslip.objects.get(pk=self.pk)
-                if orig.status == PayslipStatus.FINALIZED and self.status not in (PayslipStatus.FINALIZED, PayslipStatus.PAID):
-                    raise ValidationError({'status': 'Cannot revert a finalized payslip.'})
+                if (orig.status == PayslipStatus.FINALIZED or orig.is_frozen) and not getattr(self, '_allow_frozen_update', False):
+                    if self.status not in (PayslipStatus.FINALIZED, PayslipStatus.PAID):
+                        raise ValidationError({'status': 'Cannot revert a finalized payslip.'})
             except Payslip.DoesNotExist:
                 pass
 
     def save(self, *args, **kwargs):
         from erp_core.models import DocumentSequence
         if not self.payslip_number:
-            prefix = f"PS-{self.payroll_run.payroll_period.start_date.strftime('%Y%m')}"
+            p_date = self.period_start or (self.payroll_run.period_start if self.payroll_run and self.payroll_run.period_start else (self.payroll_run.payroll_period.start_date if self.payroll_run and self.payroll_run.payroll_period else timezone.now().date()))
+            prefix = f"PS-{p_date.strftime('%Y%m')}"
             self.payslip_number = DocumentSequence.get_next_number(self.company, "PAYSLIP", prefix)
         self.clean()
         super().save(*args, **kwargs)
@@ -850,7 +1333,7 @@ class PayrollAccountingConfiguration(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['company'], 
-                condition=models.Q(is_active=True), 
+                condition=models.Q(is_active=True, is_deleted=False), 
                 name='unique_active_payroll_accounting_config'
             )
         ]
@@ -858,21 +1341,93 @@ class PayrollAccountingConfiguration(BaseModel):
     def clean(self):
         super().clean()
         accounts = [
-            self.salary_expense_account, 
-            self.salary_payable_account, 
+            self.salary_expense_account,
+            self.salary_payable_account,
             self.tax_payable_account,
             self.deduction_clearing_account
         ]
         for acc in accounts:
             if acc and acc.company_id != self.company_id:
                 raise ValidationError(f"Account {acc} must belong to the same company.")
-        
         account_ids = [acc.id for acc in accounts if acc]
         if len(account_ids) != len(set(account_ids)):
             raise ValidationError("Duplicate accounts are prohibited in configuration.")
 
     def __str__(self):
         return f"Payroll Accounting Config ({self.company.name})"
+
+
+class CompanyPayrollPolicy(BaseModel):
+    """
+    Tenant-specific payroll policy.
+
+    System defaults (used when no active policy exists):
+        standard_monthly_hours = 160.00  (configurable, not a legal requirement)
+        overtime_multiplier    = 1.50    (configurable, not a legal requirement)
+
+    One active policy per company is enforced by the DB partial-unique constraint
+    ``unique_active_company_payroll_policy``.
+    """
+    standard_monthly_hours = models.DecimalField(
+        max_digits=6, decimal_places=2, default=160.00,
+        help_text="Used to derive hourly rate: Base Salary / Standard Monthly Hours."
+    )
+    overtime_multiplier = models.DecimalField(
+        max_digits=5, decimal_places=2, default=1.50,
+        help_text="Multiplier applied to the calculated hourly overtime rate."
+    )
+    daily_rate_divisor = models.DecimalField(
+        max_digits=5, decimal_places=2, default=30.00,
+        help_text="Divisor used to derive daily duty rate from monthly base salary (e.g. 30.00, 26.00)."
+    )
+    holiday_pay_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=100.00,
+        help_text="Payable percentage for company holidays (default: 100.00%)."
+    )
+    weekly_off_pay_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=100.00,
+        help_text="Payable percentage for scheduled weekly offs (default: 100.00%)."
+    )
+    default_single_ot_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Optional company-wide fallback single OT hourly rate."
+    )
+    default_double_ot_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Optional company-wide fallback double OT hourly rate."
+    )
+    enable_policy_ot_fallback = models.BooleanField(
+        default=False,
+        help_text="If True, allows deriving OT rate from base_salary / standard_monthly_hours * multiplier when no explicit rate is set."
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta(BaseModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=['company'],
+                condition=models.Q(is_active=True, is_deleted=False),
+                name='unique_active_company_payroll_policy'
+            )
+        ]
+
+    def clean(self):
+        """Validate that policy values are business-safe."""
+        super().clean()
+        from decimal import Decimal
+        if self.standard_monthly_hours is not None and self.standard_monthly_hours <= Decimal('0'):
+            raise ValidationError({'standard_monthly_hours': 'Standard monthly hours must be greater than zero.'})
+        if self.overtime_multiplier is not None and self.overtime_multiplier <= Decimal('0'):
+            raise ValidationError({'overtime_multiplier': 'Overtime multiplier must be greater than zero.'})
+        if self.daily_rate_divisor is not None and self.daily_rate_divisor <= Decimal('0'):
+            raise ValidationError({'daily_rate_divisor': 'Daily rate divisor must be greater than zero.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"PayrollPolicy ({self.company.name}) hrs={self.standard_monthly_hours} x{self.overtime_multiplier}"
 
 
 # ============================================================================
@@ -1012,10 +1567,15 @@ class StatutorySchemeType(models.TextChoices):
     INCOME_TAX = 'INCOME_TAX', 'Income Tax'
 
 class StatutoryScheme(BaseModel):
+    code = models.CharField(max_length=30, blank=True, default='')
     name = models.CharField(max_length=100)
     scheme_type = models.CharField(max_length=50, choices=StatutorySchemeType.choices)
+    employee_default_rate = models.DecimalField(max_digits=5, decimal_places=2, default=1.00, help_text="Default Employee contribution %")
+    employer_default_rate = models.DecimalField(max_digits=5, decimal_places=2, default=5.00, help_text="Default Employer contribution %")
+    effective_from = models.DateField(null=True, blank=True)
+    effective_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
-    liability_account = models.ForeignKey('finance.ChartOfAccount', on_delete=models.RESTRICT, related_name='+')
+    liability_account = models.ForeignKey('finance.ChartOfAccount', null=True, blank=True, on_delete=models.RESTRICT, related_name='+')
     expense_account = models.ForeignKey('finance.ChartOfAccount', null=True, blank=True, on_delete=models.RESTRICT, related_name='+')
     
     def clean(self):
@@ -1025,8 +1585,39 @@ class StatutoryScheme(BaseModel):
         if self.expense_account_id and str(self.expense_account.company_id) != str(self.company_id):
             raise ValidationError({'expense_account': 'Account must belong to the same company.'})
 
+    def save(self, *args, **kwargs):
+        if not self.code:
+            self.code = self.name.upper().replace(' ', '_')[:30]
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.name} ({self.get_scheme_type_display()})"
+        return f"{self.name} ({self.code})"
+
+
+class StatutorySchemeRateHistory(BaseModel):
+    scheme = models.ForeignKey(StatutoryScheme, on_delete=models.CASCADE, related_name='rate_history')
+    employee_default_rate = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+    employer_default_rate = models.DecimalField(max_digits=5, decimal_places=2, default=5.00)
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+
+    class Meta(BaseModel.Meta):
+        ordering = ['-effective_from']
+
+    def clean(self):
+        super().clean()
+        if self.scheme_id and str(self.scheme.company_id) != str(self.company_id):
+            raise ValidationError({'scheme': 'Scheme must belong to the same company.'})
+        if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
+            raise ValidationError({'effective_to': 'Effective to date cannot be before effective from date.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.scheme.name} Rate History ({self.effective_from})"
 
 
 class StatutoryRule(BaseModel):
@@ -1060,16 +1651,59 @@ class EmployeeStatutoryEnrollment(BaseModel):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='statutory_enrollments')
     scheme = models.ForeignKey(StatutoryScheme, on_delete=models.RESTRICT, related_name='enrolled_employees')
     identifier = models.CharField(max_length=100, blank=True, help_text="e.g. EOBI Number or SSN")
+    is_enabled = models.BooleanField(default=True)
+    use_company_default = models.BooleanField(default=True)
+    employee_rate_override = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    employer_rate_override = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    effective_from = models.DateField(null=True, blank=True)
+    effective_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     
     class Meta(BaseModel.Meta):
         constraints = [
             models.UniqueConstraint(
                 fields=['company', 'employee', 'scheme'],
-                condition=models.Q(is_active=True),
+                condition=models.Q(is_active=True, is_deleted=False),
                 name='unique_active_employee_scheme'
             )
         ]
+
+    @classmethod
+    def resolve_rate(cls, company, employee, scheme_code, on_date=None):
+        from datetime import date
+        from decimal import Decimal
+        if on_date is None:
+            on_date = date.today()
+        
+        enrollment = cls.objects.filter(
+            company=company,
+            employee=employee,
+            scheme__code__iexact=scheme_code,
+            is_deleted=False
+        ).first()
+        
+        if not enrollment or not enrollment.is_enabled or not enrollment.is_active:
+            return Decimal('0.00'), Decimal('0.00'), False
+
+        if not enrollment.use_company_default and (enrollment.employee_rate_override is not None or enrollment.employer_rate_override is not None):
+            emp_rate = enrollment.employee_rate_override if enrollment.employee_rate_override is not None else Decimal('0.00')
+            empr_rate = enrollment.employer_rate_override if enrollment.employer_rate_override is not None else Decimal('0.00')
+            return emp_rate, empr_rate, True
+
+        scheme = enrollment.scheme
+        rate_hist = StatutorySchemeRateHistory.objects.filter(
+            company=company,
+            scheme=scheme,
+            effective_from__lte=on_date,
+            is_deleted=False
+        ).filter(
+            models.Q(effective_to__isnull=True) | models.Q(effective_to__gte=on_date)
+        ).order_by('-effective_from').first()
+
+        if rate_hist:
+            return rate_hist.employee_default_rate, rate_hist.employer_default_rate, True
+
+        return scheme.employee_default_rate, scheme.employer_default_rate, True
 
     def clean(self):
         super().clean()
@@ -1077,6 +1711,19 @@ class EmployeeStatutoryEnrollment(BaseModel):
             raise ValidationError({'employee': 'Employee must belong to the same company.'})
         if self.scheme_id and str(self.scheme.company_id) != str(self.company_id):
             raise ValidationError({'scheme': 'Scheme must belong to the same company.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+        if self.employee_id and self.company_id:
+            scheme_name = self.scheme.name if hasattr(self, 'scheme') and self.scheme else 'Statutory Scheme'
+            msg = f"{scheme_name} Enrollment - Enabled: {self.is_enabled}, Default Rate: {self.use_company_default}, Employee Override: {self.employee_rate_override}, Employer Override: {self.employer_rate_override}"
+            EmploymentHistory.objects.create(
+                company=self.company,
+                employee=self.employee,
+                event_type='STATUTORY_ENROLLMENT_CHANGE',
+                notes=msg
+            )
 
     def __str__(self):
         return f"{self.employee.employee_code} - {self.scheme.name}"

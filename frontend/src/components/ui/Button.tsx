@@ -3,6 +3,7 @@ import type { ButtonHTMLAttributes } from 'react';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'warning';
+    size?: 'small' | 'medium' | 'large' | string;
     icon?: string;
     loading?: boolean;
 }
@@ -10,6 +11,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 export const Button: React.FC<ButtonProps> = ({ 
     children, 
     variant = 'primary', 
+    size,
     icon, 
     loading, 
     className = '', 
@@ -18,7 +20,7 @@ export const Button: React.FC<ButtonProps> = ({
 }) => {
     return (
         <button 
-            className={`btn btn-${variant} ${className}`} 
+            className={`btn btn-${variant} ${size ? `btn-${size}` : ''} ${className}`} 
             disabled={disabled || loading}
             {...props}
         >

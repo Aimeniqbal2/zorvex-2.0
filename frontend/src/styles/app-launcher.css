@@ -2,9 +2,9 @@
 .desktop-container {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
+    max-height: 100%;
     overflow: hidden;
-    background: url('/bg-blur.png') no-repeat center/cover;
     background-color: var(--color-background);
 }
 
@@ -12,20 +12,16 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 48px;
-    overflow-y: auto;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .app-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    gap: 32px 48px;
-    max-width: 1000px;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 24px 32px;
     width: 100%;
-    justify-content: center;
-    align-content: center;
 }
 
 /* Fallback for exact grid layout if auto-fit doesn't look like Odoo */
@@ -74,7 +70,9 @@
 }
 
 [data-theme='dark'] .app-icon-box {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: var(--color-surface);
 }
 
 .app-icon-wrapper:hover .app-icon-box {
@@ -82,9 +80,19 @@
     border-color: var(--color-primary);
 }
 
+[data-theme='dark'] .app-icon-wrapper:hover .app-icon-box {
+    border-color: #ffffff;
+    box-shadow: 0 8px 24px rgba(255, 255, 255, 0.15);
+}
+
 .app-icon-box i {
     font-size: 36px;
     color: var(--color-primary);
+    transition: color 0.2s ease;
+}
+
+[data-theme='dark'] .app-icon-box i {
+    color: #ffffff !important;
 }
 
 .app-icon-label {
@@ -98,4 +106,5 @@
 
 [data-theme='dark'] .app-icon-label {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    color: #e2e8f0;
 }

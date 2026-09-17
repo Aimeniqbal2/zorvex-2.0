@@ -41,18 +41,25 @@ logger = logging.getLogger(__name__)
 def _get_company_for_user(request):
     """
     Returns the Company for the requesting user.
-    Superadmins must pass ?company_id= query param.
+    Superadmins can pass X-Company-ID header, ?company_id= query param, or fallback to first company.
     """
     user = request.user
     if user.is_superuser:
-        company_id = request.query_params.get('company_id') or request.data.get('company_id')
-        if not company_id:
-            return None, Response(
-                {'error': 'Superadmins must supply company_id.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        company = get_object_or_404(Company, pk=company_id)
-        return company, None
+        company_id = (
+            request.headers.get('X-Company-ID')
+            or request.META.get('HTTP_X_COMPANY_ID')
+            or request.query_params.get('company_id')
+            or request.data.get('company_id')
+        )
+        if company_id:
+            try:
+                return Company.objects.get(pk=company_id), None
+            except Company.DoesNotExist:
+                pass
+        fallback = Company.objects.first()
+        if fallback:
+            return fallback, None
+        return None, Response({'error': 'No companies available.'}, status=status.HTTP_404_NOT_FOUND)
     elif getattr(user, 'company_id', None):
         return get_object_or_404(Company, pk=user.company_id), None
     return None, Response({'error': 'No company associated.'}, status=status.HTTP_403_FORBIDDEN)
@@ -146,6 +153,85 @@ class ModuleStateView(APIView):
 
         state = {code: (code in enabled_codes) for code in all_modules}
         return Response(state)
+
+
+class RuntimeConfigView(APIView):
+    """
+    GET /api/platform/runtime-config/
+    
+    Provides the runtime configuration for the frontend, including:
+    - Company basic details
+    - The installed Industry Package (if any)
+    - Enabled capabilities mapped to underlying engines
+    - The raw universal engine states
+    """
+    permission_classes = [IsAuthenticated, IsCompanyMember]
+
+    def get(self, request):
+        company, err = _get_company_for_user(request)
+        if err:
+            return err
+
+        # Raw universal engine states (company level)
+        all_modules = ModuleDefinition.objects.filter(is_active=True).values_list('code', flat=True)
+        enabled_codes = set(
+            CompanyModule.objects.filter(
+                company=company,
+                enabled=True,
+            ).values_list('module__code', flat=True)
+        )
+        
+        user = request.user
+        if user.access_mode == 'FULL_COMPANY' or user.is_superuser:
+            effective_user_modules = list(enabled_codes)
+        else:
+            custom_mods = user.custom_module_access.filter(enabled=True).values_list('module__code', flat=True)
+            effective_user_modules = [m for m in custom_mods if m in enabled_codes]
+
+        # For frontend authorization (moduleAuth.ts), 'engines' dict should represent EFFECTIVE user access
+        engine_states = {code: (code in effective_user_modules) for code in all_modules}
+
+        config = {
+            "company": {
+                "id": str(company.id),
+                "name": company.name,
+                "business_type": company.business_type,
+            },
+            "industry": None,
+            "package": None,
+            "capabilities": [],
+            "company_modules": list(enabled_codes),
+            "user_modules": effective_user_modules,
+            "engines": engine_states,
+        }
+
+        # Try to resolve industry package
+        try:
+            from industries.common.registry import get_industry_package
+            pkg = get_industry_package(company.business_type)
+            if pkg:
+                config["industry"] = {
+                    "code": pkg.code,
+                    "name": pkg.name
+                }
+                config["package"] = {
+                    "code": pkg.code,
+                    "version": pkg.version
+                }
+                
+                # Resolve capabilities
+                for cap in pkg.get_capabilities():
+                    # Capability is enabled if its underlying engine is enabled
+                    config["capabilities"].append({
+                        "code": cap.code,
+                        "label": cap.label,
+                        "engine": cap.engine,
+                        "enabled": cap.engine in effective_user_modules
+                    })
+        except ImportError:
+            pass # industries app not fully loaded or unavailable
+
+        return Response(config)
 
 
 # ===========================================================================
@@ -504,4 +590,79 @@ class ProvisionCompanyView(APIView):
         except Exception as e:
             logger.exception("Provisioning failed")
             return Response({"error": "An internal error occurred during provisioning."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class DashboardStatsView(APIView):
+    """
+    GET /api/platform/dashboard-stats/
+    Returns real-time authoritative stats for the home command center.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        company, err = _get_company_for_user(request)
+        if err:
+            return err
+
+        from django.db.models import Sum
+        from hrm.models import Employee
+        from inventory.models import Item, PurchaseOrder
+        from operations.models import Deployment, ServiceContract, EquipmentIssue
+        from crm.models import CRMEntity
+        from billing.models import ClientInvoice
+
+        try:
+            emp_count = Employee.objects.filter(company=company, is_deleted=False).count()
+        except Exception:
+            emp_count = 0
+
+        try:
+            dep_count = Deployment.objects.filter(company=company, status='ACTIVE', is_deleted=False).count()
+        except Exception:
+            dep_count = 0
+
+        try:
+            con_count = ServiceContract.objects.filter(company=company, status='ACTIVE', is_deleted=False).count()
+        except Exception:
+            con_count = 0
+
+        try:
+            crm_count = CRMEntity.objects.filter(company=company, is_deleted=False).count()
+        except Exception:
+            crm_count = 0
+
+        try:
+            item_count = Item.objects.filter(company=company, is_deleted=False).count()
+        except Exception:
+            item_count = 0
+
+        try:
+            custody_count = EquipmentIssue.objects.filter(company=company, status='ISSUED', is_deleted=False).count()
+        except Exception:
+            custody_count = 0
+
+        try:
+            invoices = ClientInvoice.objects.filter(company=company, is_deleted=False)
+            inv_total = invoices.aggregate(total=Sum('grand_total'))['total'] or 0
+        except Exception:
+            inv_total = 0
+
+        try:
+            po_pending = PurchaseOrder.objects.filter(company=company, is_deleted=False, status='PENDING').count()
+        except Exception:
+            po_pending = 0
+
+        return Response({
+            'company_name': company.name,
+            'active_employees': emp_count,
+            'active_deployments': dep_count,
+            'active_contracts': con_count,
+            'crm_clients': crm_count,
+            'inventory_items': item_count,
+            'equipment_in_custody': custody_count,
+            'total_invoiced': float(inv_total),
+            'pending_pos': po_pending,
+            'currency': getattr(company, 'currency', 'PKR') or 'PKR',
+        })
+
 

@@ -47,9 +47,9 @@ class TestPhase8FC1PDFEngine(TestCase):
         self.client_b = APIClient()
         self.client_b.force_authenticate(user=self.admin_b)
         
-        self.pnl_url = reverse('api-profit-and-loss')
-        self.bs_url = reverse('api-balance-sheet')
-        self.tb_url = reverse('api-trial-balance')
+        self.pnl_url = reverse('api-report-pnl')
+        self.bs_url = reverse('api-report-balance-sheet')
+        self.tb_url = reverse('api-report-trial-balance')
         self.dashboard_url = reverse('api-dashboard')
 
     def test_01_profit_and_loss_pdf(self):

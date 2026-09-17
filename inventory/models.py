@@ -100,6 +100,8 @@ class StockMovement(BaseModel):
         ('LOSS', 'Loss'),
         ('EMPLOYEE_ISSUE', 'Employee Issue'),
         ('EMPLOYEE_RETURN', 'Employee Return'),
+        ('SITE_ISSUE', 'Site Issue'),
+        ('SITE_RETURN', 'Site Return'),
     )
     # Legacy field
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='movements', null=True, blank=True)

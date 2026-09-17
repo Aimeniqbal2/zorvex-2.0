@@ -1,8 +1,25 @@
 import axios, { AxiosError } from 'axios';
 import { TokenManager } from '../auth/tokenManager';
 
+export const getApiBaseUrl = (): string => {
+    if (import.meta.env.VITE_API_BASE_URL) {
+        return import.meta.env.VITE_API_BASE_URL;
+    }
+    if (typeof window !== 'undefined') {
+        if (window.location.port === '5173') {
+            return '';
+        }
+        if (window.location.hostname) {
+            return `http://${window.location.hostname}:8000`;
+        }
+    }
+    return 'http://127.0.0.1:8000';
+};
+
+export const API_HOST_URL = getApiBaseUrl() || (typeof window !== 'undefined' ? window.location.origin : '');
+
 export const apiClient = axios.create({
-    baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+    baseURL: getApiBaseUrl(),
     headers: {
         'Content-Type': 'application/json'
     }
@@ -58,13 +75,13 @@ apiClient.interceptors.response.use(
                 } catch (refreshError) {
                     // Refresh failed, clear tokens and redirect
                     TokenManager.clearTokens();
-                    window.location.href = '/login/';
+                    window.location.href = '/app/login';
                     return Promise.reject(refreshError);
                 }
             } else {
                 // No refresh token available
                 TokenManager.clearTokens();
-                window.location.href = '/login/';
+                window.location.href = '/app/login';
             }
         }
         

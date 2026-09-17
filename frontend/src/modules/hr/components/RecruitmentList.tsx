@@ -8,12 +8,15 @@ import { ErrorState } from '../../../components/ui/ErrorState';
 import { CandidateModal } from './CandidateModal';
 import { Badge } from '../../../components/ui/Badge';
 
+import { CandidateDetail } from './CandidateDetail';
+
 export const RecruitmentList: React.FC = () => {
     const [candidates, setCandidates] = useState<Candidate[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+    const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
 
     const fetchCandidates = async () => {
         setLoading(true);
@@ -29,8 +32,10 @@ export const RecruitmentList: React.FC = () => {
     };
 
     useEffect(() => {
-        fetchCandidates();
-    }, []);
+        if (!selectedCandidateId) {
+            fetchCandidates();
+        }
+    }, [selectedCandidateId]);
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -45,27 +50,38 @@ export const RecruitmentList: React.FC = () => {
         }
     };
 
+    if (selectedCandidateId) {
+        return <CandidateDetail candidateId={selectedCandidateId} onBack={() => setSelectedCandidateId(null)} />;
+    }
+
     const columns = [
-        { key: 'No.', header: 'No.',  },
+        { key: 'No.', header: 'No.', render: (c: Candidate) => c.candidate_number },
         { key: 'Name', header: 'Name',  render: (c: Candidate) => `${c.first_name} ${c.last_name}` },
         { key: 'Applied For', header: 'Applied For',  render: (c: Candidate) => c.applied_designation_name || '—' },
-        { key: 'Phone', header: 'Phone',  },
+        { key: 'Phone', header: 'Phone', render: (c: Candidate) => c.phone },
         { key: 'status', 
             header: 'Status', 
             render: (c: Candidate) => (
                 <Badge variant={getStatusColor(c.status)}>{c.status}</Badge>
             )
         },
-        { key: 'Date', header: 'Date',  },
+        { key: 'Date', header: 'Date', render: (c: Candidate) => c.application_date },
         { key: 'actions', header: 'Actions',
             render: (c: Candidate) => (
-                <Button 
-                    variant="secondary" 
-                    
-                    onClick={() => { setSelectedCandidate(c); setIsModalOpen(true); }}
-                >
-                    Manage
-                </Button>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                    <Button 
+                        variant="secondary" 
+                        onClick={() => setSelectedCandidateId(c.id)}
+                    >
+                        View / Vetting
+                    </Button>
+                    <Button 
+                        variant="ghost" 
+                        onClick={() => { setSelectedCandidate(c); setIsModalOpen(true); }}
+                    >
+                        <i className='bx bx-edit'></i> Edit Bio
+                    </Button>
+                </div>
             )
         }
     ];

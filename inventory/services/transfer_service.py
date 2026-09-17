@@ -4,7 +4,7 @@ from .transaction_service import process_transaction
 from .exceptions import InventoryValidationException, WarehouseMismatchException
 
 @transaction.atomic
-def transfer_stock(item, source_warehouse, destination_warehouse, quantity, user=None, reference=''):
+def transfer_stock(item, source_warehouse, destination_warehouse, quantity, user=None, reference='', serial_numbers=None):
     """
     Transfer stock between two warehouses.
     Uses deterministic locking by sorting warehouse UUIDs to prevent deadlocks.
@@ -59,5 +59,23 @@ def transfer_stock(item, source_warehouse, destination_warehouse, quantity, user
         user=user,
         notes=f"Transfer from {source_warehouse.name}"
     )
+
+    if item.track_serial_number and serial_numbers:
+        from .serial_service import move_serial
+        from inventory.models import ItemSerial
+        
+        if len(serial_numbers) != qty:
+            raise InventoryValidationException("Number of serials provided does not match transfer quantity.")
+            
+        for sn in serial_numbers:
+            try:
+                s_obj = ItemSerial.objects.select_for_update().get(
+                    company=item.company, item=item, serial_number=sn
+                )
+                if s_obj.warehouse_id != source_warehouse.id:
+                    raise InventoryValidationException(f"Serial {sn} is in {s_obj.warehouse.name}, not {source_warehouse.name}.")
+                move_serial(s_obj, destination_warehouse)
+            except ItemSerial.DoesNotExist:
+                raise InventoryValidationException(f"Serial {sn} not found in inventory.")
 
     return out_movement, in_movement

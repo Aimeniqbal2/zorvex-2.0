@@ -44,9 +44,17 @@ def is_module_enabled(company, module_code: str) -> bool:
         bool
     """
     company_id = getattr(company, 'pk', company)
+    codes = [module_code]
+    if module_code == 'billing':
+        codes.extend(['finance', 'security_ops'])
+    elif module_code == 'payroll':
+        codes.extend(['hr', 'finance'])
+    elif module_code == 'security_finance':
+        codes.extend(['finance', 'security_ops'])
+
     return CompanyModule.objects.filter(
         company_id=company_id,
-        module__code=module_code,
+        module__code__in=codes,
         module__is_active=True,
         enabled=True,
     ).exists()

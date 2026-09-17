@@ -5,13 +5,14 @@ import { AppLayout } from '../layouts/AppLayout';
 import { WorkspaceManager } from '../components/workspace/WorkspaceManager';
 import { UIShowcase } from '../pages/UIShowcase';
 import { Login } from '../auth/Login';
+import { ZorvexLoadingScreen } from '../components/ui/ZorvexLoadingScreen';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { isAuthenticated, loading } = useAuthStore();
     const location = useLocation();
 
     if (loading) {
-        return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading session...</div>;
+        return <ZorvexLoadingScreen variant="dark" />;
     }
 
     if (!isAuthenticated) {
@@ -25,7 +26,7 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { isAuthenticated, loading } = useAuthStore();
 
     if (loading) {
-        return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading session...</div>;
+        return <ZorvexLoadingScreen variant="dark" />;
     }
 
     if (isAuthenticated) {
@@ -57,7 +58,7 @@ export const router = createBrowserRouter([
                 element: <WorkspaceManager />
             },
             {
-                path: '/ui-showcase',
+                path: 'ui-showcase',
                 element: <UIShowcase />
             },
             {
@@ -66,4 +67,6 @@ export const router = createBrowserRouter([
             }
         ]
     }
-]);
+], {
+    basename: '/app'
+});

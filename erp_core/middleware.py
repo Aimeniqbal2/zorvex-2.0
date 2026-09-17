@@ -53,8 +53,15 @@ class TenantMiddleware:
             # SaaS Gatekeeper (Bypass Auth, Webhooks, and Admin panels)
             excluded_paths = ['/api/auth/', '/api/subscriptions/webhook/', '/admin/']
             if not any(path.startswith(ep) for ep in excluded_paths):
-                active_sub = CompanySubscription.objects.filter(company_id=company_id, is_active=True).first()
-                if not active_sub or active_sub.end_date < timezone.now().date():
+                from django.core.cache import cache
+                cache_key = f"company_sub_valid_{company_id}"
+                is_valid = cache.get(cache_key)
+                if is_valid is None:
+                    active_sub = CompanySubscription.objects.filter(company_id=company_id, is_active=True).first()
+                    is_valid = bool(active_sub and active_sub.end_date >= timezone.now().date())
+                    cache.set(cache_key, is_valid, 60) # cache for 60 seconds
+                
+                if not is_valid:
                     return JsonResponse({'error': '402 Payment Required. SaaS Subscription Expired. Please use JazzCash/EasyPaisa portal to renew.'}, status=402)
 
         response = self.get_response(request)

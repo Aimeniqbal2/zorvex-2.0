@@ -63,7 +63,7 @@ export const DutyAssignmentModal: React.FC<DutyAssignmentModalProps> = ({
     const fetchActiveDeployments = async () => {
         setLoadingDeployments(true);
         try {
-            const res = await apiClient.get('/api/operations/deployments/?status=ACTIVE&page_size=200');
+            const res = await apiClient.get('/api/operations/deployments/?page_size=200');
             setDeployments(res.data.results || res.data);
         } catch (err) {
             console.error('Failed to fetch deployments', err);
@@ -144,7 +144,7 @@ export const DutyAssignmentModal: React.FC<DutyAssignmentModalProps> = ({
                         disabled={isCompleted}
                     >
                         <option value="">
-                            {loadingDeployments ? 'Loading deployments...' : '— Select Active Deployment —'}
+                            {loadingDeployments ? 'Loading deployments...' : '— Select Deployment —'}
                         </option>
                         {deployments.map(d => (
                             <option key={d.id} value={d.id}>

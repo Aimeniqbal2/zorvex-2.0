@@ -39,6 +39,12 @@ class User(AbstractUser):
     role = models.CharField(max_length=25, choices=ROLE_CHOICES, default='staff')
     company_role = models.ForeignKey('CompanyRole', on_delete=models.SET_NULL, null=True, blank=True, related_name='users', help_text="Configurable granular permissions role.")
 
+    ACCESS_MODE_CHOICES = (
+        ('FULL_COMPANY', 'Full Company Access'),
+        ('CUSTOM', 'Custom Access'),
+    )
+    access_mode = models.CharField(max_length=20, choices=ACCESS_MODE_CHOICES, default='FULL_COMPANY')
+
     @property
     def is_technician(self):
         """Returns True if the user is any kind of technician."""

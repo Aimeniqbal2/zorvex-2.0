@@ -33,7 +33,7 @@ class CRMEntity(BaseModel):
     
     name = models.CharField(max_length=255)
     display_name = models.CharField(max_length=255, blank=True)
-    code = models.CharField(max_length=100)
+    code = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=50, default='active')
     active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
@@ -51,6 +51,62 @@ class CRMEntity(BaseModel):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='owned_entities')
     
     tags = models.ManyToManyField(CRMTag, blank=True, related_name='entities')
+
+    @classmethod
+    def generate_next_code(cls, company_id, entity_type='CUSTOMER'):
+        """
+        Generates a collision-free sequential code per company and entity type (e.g. CUST-0001, SUPP-0001).
+        """
+        prefix_map = {
+            'CUSTOMER': 'CUST',
+            'SUPPLIER': 'SUPP',
+            'LEAD': 'LEAD',
+            'PARTNER': 'PART',
+            'COMPANY': 'COMP',
+            'PERSON': 'PERS',
+            'GOVERNMENT': 'GOV',
+            'NGO': 'NGO',
+            'EMPLOYEE': 'EMP',
+            'CONTRACTOR': 'CONT',
+        }
+        prefix = prefix_map.get(entity_type, 'CUST')
+        
+        import re
+        existing_codes = cls.objects.filter(
+            company_id=company_id,
+            code__startswith=f"{prefix}-"
+        ).values_list('code', flat=True)
+        
+        max_num = 0
+        pattern = re.compile(rf"^{prefix}-(\d+)$")
+        for c in existing_codes:
+            match = pattern.match(c)
+            if match:
+                try:
+                    num = int(match.group(1))
+                    if num > max_num:
+                        max_num = num
+                except ValueError:
+                    pass
+                    
+        next_num = max_num + 1
+        candidate_code = f"{prefix}-{next_num:04d}"
+        
+        while cls.objects.filter(company_id=company_id, code=candidate_code).exists():
+            next_num += 1
+            candidate_code = f"{prefix}-{next_num:04d}"
+            
+        return candidate_code
+
+    def save(self, *args, **kwargs):
+        if not self.code or not str(self.code).strip():
+            cid = self.company_id or (self.company.id if getattr(self, 'company', None) else None)
+            if cid:
+                self.code = self.__class__.generate_next_code(cid, self.entity_type)
+            else:
+                import uuid
+                self.code = f"ENT-{uuid.uuid4().hex[:6].upper()}"
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.display_name or self.name

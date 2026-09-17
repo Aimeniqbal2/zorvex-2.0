@@ -9,18 +9,111 @@ export interface Designation {
     code: string;
 }
 
+export interface EmployeeNextOfKin {
+    id: string;
+    employee: string;
+    name: string;
+    cnic_number?: string;
+    relationship: string;
+    contact_number: string;
+    is_primary: boolean;
+    notes?: string;
+}
+
+export interface EmployeeDocument {
+    id: string;
+    employee: string;
+    document_type: string;
+    document_type_display?: string;
+    document_number?: string;
+    issue_date?: string;
+    expiry_date?: string;
+    verification_status: 'PENDING' | 'UPLOADED' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
+    verification_status_display?: string;
+    verified_by?: string;
+    verified_by_name?: string;
+    verified_at?: string;
+    notes?: string;
+}
+
+export interface EmployeeTraining {
+    id: string;
+    employee: string;
+    training_type: string;
+    training_date: string;
+    institute_or_trainer?: string;
+    expiry_date?: string;
+    status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'EXPIRED' | 'FAILED';
+    notes?: string;
+}
+
+export interface EmploymentHistory {
+    id: string;
+    employee: string;
+    event_type: string;
+    effective_date: string;
+    old_value?: string;
+    new_value?: string;
+    notes?: string;
+    reason?: string;
+    changed_by_name?: string;
+    approved_by_name?: string;
+    metadata?: Record<string, any>;
+    created_at: string;
+}
+
+export interface UnifiedTimelineItem {
+    id: string;
+    source_type: 'EMPLOYMENT_HISTORY' | 'DEPLOYMENT' | 'JUMP_RECORD';
+    source_id: string;
+    event_type: string;
+    date: string;
+    timestamp: string;
+    title: string;
+    description: string;
+    reason?: string;
+    old_value?: string;
+    new_value?: string;
+    actor?: string | null;
+    metadata?: Record<string, any>;
+}
+
 export interface Employee {
     id: string;
     employee_code: string;
     first_name: string;
     last_name: string;
-    email: string;
-    phone: string;
-    designation: string;
-    department: string;
+    full_name?: string;
+    email?: string;
+    phone?: string;
+    date_of_birth?: string;
+    hire_date?: string;
+    joining_date?: string;
+    confirmation_date?: string;
+    resignation_date?: string;
+    termination_date?: string;
+    last_working_date?: string;
+    rehire_date?: string;
+    age?: number;
+    designation?: string;
+    department?: string;
     department_name?: string;
     designation_name?: string;
+    classification: 'DIRECT' | 'INDIRECT';
+    father_name?: string;
+    cnic_number?: string;
+    permanent_address?: string;
+    current_address?: string;
+    education?: string;
+    marital_status?: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED';
+    background_type?: 'CIVILIAN' | 'EX_ARMY' | 'OTHER';
+    employment_status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'TERMINATED' | 'JUMP';
     is_active: boolean;
+    training_completed?: boolean;
+    next_of_kin?: EmployeeNextOfKin[];
+    documents?: EmployeeDocument[];
+    trainings?: EmployeeTraining[];
+    history_logs?: EmploymentHistory[];
 }
 
 export interface Employment {
@@ -209,4 +302,82 @@ export interface EmployeeSalaryAssignment {
     effective_from?: string;
     effective_to?: string;
     status?: string;
+}
+
+export interface WorkSchedule {
+    id: string;
+    employee: string;
+    employee_name?: string;
+    shift: string;
+    shift_name?: string;
+    effective_from: string;
+    effective_to?: string;
+    days_of_week: string;
+    is_active: boolean;
+}
+
+export interface StatutoryScheme {
+    id: string;
+    name: string;
+    scheme_type: string;
+    description?: string;
+    is_active: boolean;
+}
+
+export interface OvertimeRecord {
+    id: string;
+    employee: string;
+    employee_name?: string;
+    date: string;
+    start_time?: string;
+    end_time?: string;
+    hours: string;
+    reason?: string;
+    status: string;
+    approved_by?: string;
+}
+
+export interface StatutoryRule {
+    id: string;
+    scheme: string;
+    scheme_name?: string;
+    effective_from: string;
+    effective_to?: string;
+    employee_rate: string;
+    employer_rate: string;
+    wage_ceiling?: string;
+    wage_floor?: string;
+    is_flat_amount: boolean;
+}
+
+export interface EmployeeStatutoryEnrollment {
+    id: string;
+    employee: string;
+    employee_name?: string;
+    scheme: string;
+    scheme_name?: string;
+    identifier?: string;
+    is_active: boolean;
+}
+
+export interface PayrollDisbursement {
+    id: string;
+    payroll_run: string;
+    payroll_run_name?: string;
+    payment_voucher?: string;
+    payment_account?: string;
+    payment_account_name?: string;
+    total_amount: string;
+    disbursement_date: string;
+    status: string;
+    payslips?: PayslipDisbursement[];
+}
+
+export interface PayslipDisbursement {
+    id: string;
+    disbursement: string;
+    payslip: string;
+    payslip_name?: string;
+    amount: string;
+    status: string;
 }

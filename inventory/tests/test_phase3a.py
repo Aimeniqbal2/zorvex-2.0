@@ -131,7 +131,8 @@ class Phase3AInventoryTests(APITestCase):
         token = RefreshToken.for_user(self.admin2)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
         res = self.client.get("/api/inventory/items/")
-        self.assertEqual(len(res.data), 0)
+        results = res.data.get('results', res.data)
+        self.assertEqual(len(results), 0)
 
     def test_superadmin_with_context(self):
         token = RefreshToken.for_user(self.superadmin)

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { PageContainer, PageHeader } from '../../layouts/PageLayout';
 import { Card } from '../../components/ui/Card';
 import { EmployeeList } from './components/EmployeeList';
 import { DesignationList } from './components/DesignationList';
+import { DepartmentList } from './components/DepartmentList';
 import { RecruitmentList } from './components/RecruitmentList';
 import { AttendanceList } from './components/AttendanceList';
 import { LeaveList } from './components/LeaveList';
@@ -16,8 +16,12 @@ import { EmployeeSalaryAssignmentList } from './components/EmployeeSalaryAssignm
 import { StatutorySchemeList } from './components/StatutorySchemeList';
 import { PayrollDisbursementList } from './components/PayrollDisbursementList';
 
+import { OvertimeList } from './components/OvertimeList';
+import { CompanyPayrollPolicyForm } from './components/CompanyPayrollPolicyForm';
+
 export const HRModule: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'EMPLOYEES' | 'RECRUITMENT' | 'DESIGNATIONS' | 'ATTENDANCE' | 'SHIFTS' | 'LEAVE' | 'SALARY_COMPONENTS' | 'SALARY_STRUCTURES' | 'ASSIGNMENTS' | 'PAYROLL_PERIODS' | 'PAYROLL' | 'PAYSLIPS' | 'STATUTORY' | 'DISBURSEMENTS'>('EMPLOYEES');
+    const [activeTab, setActiveTab] = useState<'EMPLOYEES' | 'RECRUITMENT' | 'DESIGNATIONS' | 'DEPARTMENTS' | 'ATTENDANCE' | 'SHIFTS' | 'LEAVE' | 'OVERTIME' | 'SALARY_COMPONENTS' | 'SALARY_STRUCTURES' | 'ASSIGNMENTS' | 'PAYROLL_PERIODS' | 'PAYROLL' | 'PAYSLIPS' | 'STATUTORY' | 'DISBURSEMENTS' | 'SETTINGS'>('EMPLOYEES');
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
     const renderContent = () => {
         switch (activeTab) {
@@ -27,12 +31,16 @@ export const HRModule: React.FC = () => {
                 return <RecruitmentList />;
             case 'DESIGNATIONS':
                 return <DesignationList />;
+            case 'DEPARTMENTS':
+                return <DepartmentList />;
             case 'ATTENDANCE':
                 return <AttendanceList />;
             case 'SHIFTS':
                 return <ShiftList />;
             case 'LEAVE':
                 return <LeaveList />;
+            case 'OVERTIME':
+                return <OvertimeList />;
             case 'SALARY_COMPONENTS':
                 return <SalaryComponentList />;
             case 'SALARY_STRUCTURES':
@@ -49,105 +57,73 @@ export const HRModule: React.FC = () => {
                 return <StatutorySchemeList />;
             case 'DISBURSEMENTS':
                 return <PayrollDisbursementList />;
+            case 'SETTINGS':
+                return <CompanyPayrollPolicyForm />;
             default:
                 return null;
         }
     };
 
+    const tabs = [
+        { id: 'EMPLOYEES', label: 'Employees', icon: 'bx-group' },
+        { id: 'RECRUITMENT', label: 'Recruitment', icon: 'bx-user-plus' },
+        { id: 'DESIGNATIONS', label: 'Designations', icon: 'bx-badge-check' },
+        { id: 'DEPARTMENTS', label: 'Departments', icon: 'bx-buildings' },
+        { id: 'ATTENDANCE', label: 'Attendance', icon: 'bx-time-five' },
+        { id: 'SHIFTS', label: 'Shifts', icon: 'bx-transfer' },
+        { id: 'LEAVE', label: 'Leave', icon: 'bx-calendar-x' },
+        { id: 'OVERTIME', label: 'Overtime', icon: 'bx-time' },
+        { id: 'SALARY_COMPONENTS', label: 'Salary Components', icon: 'bx-layer' },
+        { id: 'SALARY_STRUCTURES', label: 'Salary Structures', icon: 'bx-money' },
+        { id: 'ASSIGNMENTS', label: 'Assignments', icon: 'bx-user-pin' },
+        { id: 'PAYROLL_PERIODS', label: 'Payroll Periods', icon: 'bx-calendar' },
+        { id: 'PAYROLL', label: 'Payroll', icon: 'bx-calculator' },
+        { id: 'PAYSLIPS', label: 'Payslips', icon: 'bx-receipt' },
+        { id: 'STATUTORY', label: 'Statutory', icon: 'bx-shield' },
+        { id: 'DISBURSEMENTS', label: 'Disbursements', icon: 'bx-wallet' },
+        { id: 'SETTINGS', label: 'Settings', icon: 'bx-cog' }
+    ] as const;
+
     return (
-        <PageContainer>
-            <PageHeader title="Universal HR" />
-            <Card>
-                <div style={{ padding: '16px', display: 'flex', gap: '16px', borderBottom: '1px solid var(--color-border)' }}>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'EMPLOYEES' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'EMPLOYEES' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'EMPLOYEES' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('EMPLOYEES')}
-                    >
-                        Employees
+        <div className="module-container">
+            <div className="module-header">
+                <div className="header-content">
+                    <button className="sidebar-toggle-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+                        <i className={`bx ${isSidebarOpen ? 'bx-menu-alt-left' : 'bx-menu'}`}></i>
                     </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'RECRUITMENT' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'RECRUITMENT' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'RECRUITMENT' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('RECRUITMENT')}
-                    >
-                        Recruitment
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'DESIGNATIONS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'DESIGNATIONS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'DESIGNATIONS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('DESIGNATIONS')}
-                    >
-                        Designations
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'ATTENDANCE' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'ATTENDANCE' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'ATTENDANCE' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('ATTENDANCE')}
-                    >
-                        Attendance
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'SHIFTS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'SHIFTS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'SHIFTS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('SHIFTS')}
-                    >
-                        Shifts
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'LEAVE' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'LEAVE' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'LEAVE' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('LEAVE')}
-                    >
-                        Leave
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'SALARY_COMPONENTS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'SALARY_COMPONENTS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'SALARY_COMPONENTS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('SALARY_COMPONENTS')}
-                    >
-                        Salary Components
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'SALARY_STRUCTURES' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'SALARY_STRUCTURES' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'SALARY_STRUCTURES' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('SALARY_STRUCTURES')}
-                    >
-                        Salary Structures
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'ASSIGNMENTS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'ASSIGNMENTS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'ASSIGNMENTS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('ASSIGNMENTS')}
-                    >
-                        Assignments
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'PAYROLL_PERIODS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'PAYROLL_PERIODS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'PAYROLL_PERIODS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('PAYROLL_PERIODS')}
-                    >
-                        Payroll Periods
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'PAYROLL' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'PAYROLL' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'PAYROLL' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('PAYROLL')}
-                    >
-                        Payroll
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'PAYSLIPS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'PAYSLIPS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'PAYSLIPS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('PAYSLIPS')}
-                    >
-                        Payslips
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'STATUTORY' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'STATUTORY' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'STATUTORY' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('STATUTORY')}
-                    >
-                        Statutory
-                    </button>
-                    <button 
-                        style={{ padding: '8px 16px', borderBottom: activeTab === 'DISBURSEMENTS' ? '2px solid var(--color-primary)' : 'none', cursor: 'pointer', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', color: activeTab === 'DISBURSEMENTS' ? 'var(--color-primary)' : 'inherit', fontWeight: activeTab === 'DISBURSEMENTS' ? 'bold' : 'normal' }}
-                        onClick={() => setActiveTab('DISBURSEMENTS')}
-                    >
-                        Disbursements
-                    </button>
+                    <div>
+                        <h1>Universal HR</h1>
+                        <p>Manage employees, attendance, payroll, and recruitment.</p>
+                    </div>
                 </div>
-                <div style={{ padding: '16px' }}>
-                    {renderContent()}
+            </div>
+
+            <div className="module-body-layout">
+                <div className={`module-sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
+                    <div className="module-sidebar-nav">
+                        {tabs.map(tab => (
+                            <button 
+                                key={tab.id}
+                                className={`sidebar-nav-btn ${activeTab === tab.id ? 'active' : ''}`}
+                                onClick={() => setActiveTab(tab.id as any)}
+                            >
+                                <i className={`bx ${tab.icon}`}></i>
+                                <span>{tab.label}</span>
+                            </button>
+                        ))}
+                    </div>
                 </div>
-            </Card>
-        </PageContainer>
+
+                <div className="module-main">
+                    <div className="module-content">
+                        <Card>
+                            <div style={{ padding: '24px' }}>
+                                {renderContent()}
+                            </div>
+                        </Card>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 };

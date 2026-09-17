@@ -33,7 +33,7 @@ class PhaseC2ATests(APITestCase):
             username='hr_admin_c2a',
             password='password123',
             company=self.company,
-            role='ADMIN'
+            role='admin'
         )
         self.client.force_authenticate(user=self.user)
         

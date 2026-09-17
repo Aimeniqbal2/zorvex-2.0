@@ -24,7 +24,7 @@ export const HomePage: React.FC = () => {
 
     const handleLogout = () => {
         clearAuth();
-        window.location.href = '/login/';
+        window.location.href = '/app/login';
     };
 
     return (

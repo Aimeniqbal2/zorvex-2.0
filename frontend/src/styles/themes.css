@@ -8,7 +8,7 @@
   --color-text-muted: #64748b;
   --color-border: #e2e8f0;
   --color-overlay: rgba(15, 23, 42, 0.5);
-  --color-focus: rgba(67, 24, 255, 0.2);
+  --color-focus: rgba(9, 36, 83, 0.2);
 }
 
 /* Dark Theme */
@@ -21,5 +21,5 @@
   --color-text-muted: #94a3b8;
   --color-border: #2e3650;
   --color-overlay: rgba(11, 14, 20, 0.8);
-  --color-focus: rgba(67, 24, 255, 0.4);
+  --color-focus: rgba(9, 36, 83, 0.4);
 }

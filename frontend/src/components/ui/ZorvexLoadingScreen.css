@@ -1,0 +1,180 @@
+/* ZorvexLoadingScreen.css - Premium Branded Zorvex Loading System */
+
+.zorvex-loading-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    user-select: none;
+    transition: opacity 0.3s ease, background 0.3s ease;
+    width: 100%;
+}
+
+.zorvex-loading-screen.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 99999;
+}
+
+.zorvex-loading-screen.contained {
+    min-height: 280px;
+    height: 100%;
+    border-radius: 16px;
+}
+
+/* ==========================================================================
+   DARK VARIANT (Image 1 - Login & Dark Mode)
+   ========================================================================== */
+.zorvex-loading-screen.dark {
+    background: radial-gradient(circle at 50% 45%, #0d1b33 0%, #060a14 75%, #04070e 100%);
+    color: #ffffff;
+}
+
+.zorvex-loading-screen.dark .zorvex-logo-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+}
+
+.zorvex-loading-screen.dark .zorvex-logo-glow {
+    position: absolute;
+    width: 180px;
+    height: 80px;
+    background: radial-gradient(ellipse, rgba(56, 189, 248, 0.25) 0%, rgba(37, 99, 235, 0.15) 50%, transparent 80%);
+    filter: blur(20px);
+    pointer-events: none;
+    animation: zorvexGlowPulseDark 3s infinite alternate ease-in-out;
+}
+
+.zorvex-loading-screen.dark .zorvex-logo-img {
+    height: 52px;
+    width: auto;
+    max-width: 240px;
+    position: relative;
+    z-index: 2;
+    filter: drop-shadow(0 4px 16px rgba(56, 189, 248, 0.3));
+    animation: zorvexLogoFloat 3s infinite alternate ease-in-out;
+}
+
+.zorvex-loading-screen.dark .zorvex-spinner {
+    width: 38px;
+    height: 38px;
+    border: 3px solid rgba(255, 255, 255, 0.08);
+    border-top-color: #38bdf8;
+    border-right-color: #2563eb;
+    border-radius: 50%;
+    animation: zorvexSpinnerRotate 0.9s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+}
+
+.zorvex-loading-screen.dark .zorvex-loading-message {
+    margin-top: 18px;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.65);
+    letter-spacing: 0.03em;
+}
+
+/* ==========================================================================
+   LIGHT VARIANT (Image 2 - Light Mode)
+   ========================================================================== */
+.zorvex-loading-screen.light {
+    background: radial-gradient(circle at 50% 45%, #ffffff 0%, #f6f8fc 60%, #eef2f9 100%);
+    color: #1e293b;
+}
+
+.zorvex-loading-screen.light .zorvex-logo-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+}
+
+.zorvex-loading-screen.light .zorvex-logo-glow {
+    position: absolute;
+    width: 180px;
+    height: 80px;
+    background: radial-gradient(ellipse, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.1) 50%, transparent 80%);
+    filter: blur(25px);
+    pointer-events: none;
+    animation: zorvexGlowPulseLight 3s infinite alternate ease-in-out;
+}
+
+.zorvex-loading-screen.light .zorvex-logo-img {
+    height: 52px;
+    width: auto;
+    max-width: 240px;
+    position: relative;
+    z-index: 2;
+    filter: drop-shadow(0 4px 14px rgba(99, 102, 241, 0.2));
+    animation: zorvexLogoFloat 3s infinite alternate ease-in-out;
+}
+
+.zorvex-loading-screen.light .zorvex-spinner {
+    width: 38px;
+    height: 38px;
+    border: 3px solid rgba(99, 102, 241, 0.12);
+    border-top-color: #6366f1;
+    border-right-color: #8b5cf6;
+    border-radius: 50%;
+    animation: zorvexSpinnerRotate 0.9s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
+}
+
+.zorvex-loading-screen.light .zorvex-loading-message {
+    margin-top: 18px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #64748b;
+    letter-spacing: 0.03em;
+}
+
+/* ==========================================================================
+   ANIMATIONS
+   ========================================================================== */
+@keyframes zorvexSpinnerRotate {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes zorvexLogoFloat {
+    0% {
+        transform: translateY(0px) scale(1);
+    }
+    100% {
+        transform: translateY(-3px) scale(1.015);
+    }
+}
+
+@keyframes zorvexGlowPulseDark {
+    0% {
+        opacity: 0.6;
+        transform: scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+}
+
+@keyframes zorvexGlowPulseLight {
+    0% {
+        opacity: 0.5;
+        transform: scale(0.95);
+    }
+    100% {
+        opacity: 0.9;
+        transform: scale(1.1);
+    }
+}

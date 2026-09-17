@@ -45,7 +45,7 @@ export const DesignationModal: React.FC<DesignationModalProps> = ({ isOpen, onCl
             onSave();
             onClose();
         } catch (err: any) {
-            setError(err.response?.data || 'Failed to save designation');
+            setError(err.response?.data || 'Failed to save designation. You may be logged in as a Superadmin without a company context.');
         } finally {
             setLoading(false);
         }

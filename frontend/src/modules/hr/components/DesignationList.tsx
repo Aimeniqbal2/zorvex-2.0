@@ -32,8 +32,8 @@ export const DesignationList: React.FC = () => {
     }, []);
 
     const columns = [
-        { key: 'Code', header: 'Code',  },
-        { key: 'Name', header: 'Name',  },
+        { key: 'code', header: 'Code' },
+        { key: 'name', header: 'Name' },
         { key: 'actions', header: 'Actions',
             render: (d: Designation) => (
                 <Button 

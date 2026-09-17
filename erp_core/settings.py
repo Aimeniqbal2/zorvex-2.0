@@ -29,6 +29,10 @@ import os
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY', default='django-insecure-replace-this')
 
+# Field-level encryption key for EncryptedCharField (SMTP passwords / API secrets).
+# Must be a URL-safe base64-encoded 32-byte Fernet key from environment — NOT from DB.
+FIELD_ENCRYPTION_KEY = env('FIELD_ENCRYPTION_KEY', default=None)
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG', default=True)
 
@@ -36,6 +40,12 @@ CSRF_TRUSTED_ORIGINS = [
     "http://softech.ltd",
     "https://softech.ltd",
     "https://www.softech.ltd",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://192.168.18.163:5173",
+    "http://192.168.18.163:8000",
 ]
 
 ALLOWED_HOSTS = [
@@ -44,6 +54,7 @@ ALLOWED_HOSTS = [
     "46.224.187.226",
     "localhost",
     "127.0.0.1",
+    "*",
 ]
 
 # Application definition
@@ -73,9 +84,11 @@ INSTALLED_APPS = [
     'notifications',
     'platform_core',
     'crm',
+    'security_crm',
     'purchasing',
     'operations',
     'billing',
+    'communications',
 ]
 
 MIDDLEWARE = [
@@ -127,6 +140,7 @@ DATABASES = {
         'PASSWORD': env('DB_PASSWORD'),
         'HOST': env('DB_HOST'),
         'PORT': env('DB_PORT'),
+        'CONN_MAX_AGE': 60,
         'TEST': {
             'NAME': 'test_erp_db3',
         }
@@ -191,7 +205,9 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/day',
         'user': '1000/day'
-    }
+    },
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,
 }
 
 # CORS
@@ -204,7 +220,7 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
+    'UPDATE_LAST_LOGIN': False,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
@@ -240,15 +256,18 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
 # CACHES Configuration
-# In test environment, fallback to LocMemCache. Otherwise use Redis.
-if env('REDIS_URL', default=None) or 'redis' in CELERY_BROKER_URL:
+# Only use Redis if REDIS_URL is explicitly set in environment; otherwise use blazing fast LocMemCache.
+REDIS_URL = env('REDIS_URL', default=None)
+if REDIS_URL:
     CACHES = {
         'default': {
             'BACKEND': 'django_redis.cache.RedisCache',
-            'LOCATION': env('REDIS_URL', default='redis://localhost:6379/1'),
+            'LOCATION': REDIS_URL,
             'OPTIONS': {
                 'CLIENT_CLASS': 'django_redis.client.DefaultClient',
                 'IGNORE_EXCEPTIONS': True, # Cache failures must not break ERP functionality
+                'SOCKET_CONNECT_TIMEOUT': 1, # 1 second connect timeout
+                'SOCKET_TIMEOUT': 1, # 1 second read timeout
             }
         }
     }
@@ -256,7 +275,7 @@ else:
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'unique-snowflake',
+            'LOCATION': 'erp-locmem-cache',
         }
     }
 

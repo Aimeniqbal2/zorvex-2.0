@@ -3,6 +3,9 @@ export interface AuthUser {
     username?: string;
     role?: string;
     company_id?: string;
+    company_name?: string;
+    company_logo?: string | null;
+    business_type?: string | null;
     exp?: number;
     iat?: number;
     permissions?: string[];

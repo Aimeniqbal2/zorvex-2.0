@@ -6,5 +6,8 @@ class PlatformCoreConfig(AppConfig):
     verbose_name = 'Platform Core'
 
     def ready(self):
-        """Import signals when app is ready."""
-        pass  # Future signal registration goes here
+        """Import signals and register packages when app is ready."""
+        try:
+            import industries.security.manifest
+        except ImportError:
+            pass

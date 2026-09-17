@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { WorkspaceTabBar } from './WorkspaceTabBar';
 import { DesktopHeader } from '../desktop/DesktopHeader';
@@ -17,24 +17,49 @@ import { isModuleAuthorized } from '../../auth/moduleAuth';
 import { useAuthStore } from '../../auth/authStore';
 import { useAppStore } from '../../stores/appStore';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { SECURITY_NAVIGATION } from '../../industries/security/navigation';
+import { SecurityCRMModule } from '../../industries/security/crm/SecurityCRMModule';
+import { SecurityPurchasingModule } from '../../industries/security/purchasing/SecurityPurchasingModule';
+import { SecurityFinanceModule } from '../../industries/security/finance/SecurityFinanceModule';
+import { SecurityReportsWorkspace } from '../../modules/security-operations/components/SecurityReportsWorkspace';
+import { SecurityInventoryWorkspace } from '../../modules/security-operations/components/SecurityInventoryWorkspace';
+import { SettingsWorkspace } from '../desktop/SettingsWorkspace';
+
 
 export const WorkspaceManager: React.FC = () => {
     const { tabs, activeTabId, openTab, activateTab } = useWorkspaceStore();
     const { user } = useAuthStore();
-    const { enabledModules } = useAppStore();
+    const { enabledModules, fetchModuleState, industry } = useAppStore();
     const location = useLocation();
     const navigate = useNavigate();
+    const mounted = useRef(false);
+
+    // Determine industry synchronously: JWT business_type is available immediately,
+    // industry from runtime-config arrives after async fetch. Use either.
+    const isSecurityIndustry = industry?.code === 'security' || user?.business_type === 'security';
+
+    useEffect(() => {
+        fetchModuleState();
+    }, [fetchModuleState]);
 
     // Synchronize URL with active tab
     useEffect(() => {
+        if (!mounted.current) {
+            mounted.current = true;
+            return;
+        }
+
         if (location.pathname === '/') {
             // Desktop
             activateTab('');
             return;
         }
 
-        // Try to find module for this route
-        const module = MODULE_REGISTRY.find(m => m.route === location.pathname);
+        // Try to find module for this route — check BOTH registries so security routes work
+        // regardless of whether industry loaded before or after navigation
+        const securityModule = SECURITY_NAVIGATION.find(m => m.route === location.pathname);
+        const universalModule = MODULE_REGISTRY.find(m => m.route === location.pathname);
+        const module = isSecurityIndustry ? (securityModule ?? universalModule) : universalModule;
         if (module) {
             if (isModuleAuthorized(module, user, enabledModules)) {
                 openTab(module);
@@ -46,7 +71,7 @@ export const WorkspaceManager: React.FC = () => {
             // Fallback to desktop if route unknown
             navigate('/');
         }
-    }, [location.pathname, openTab, activateTab, navigate, user, enabledModules]);
+    }, [location.pathname, openTab, activateTab, navigate, user, enabledModules, industry, isSecurityIndustry]);
 
     // Render logic
     const isDesktop = location.pathname === '/' || !activeTabId;
@@ -70,28 +95,34 @@ export const WorkspaceManager: React.FC = () => {
                         style={{ 
                             display: activeTabId === tab.id ? 'block' : 'none',
                             height: '100%',
-                            width: '100%'
+                            width: '100%',
+                            overflowY: 'auto'
                         }}
                     >
-                        {tab.moduleCode === 'inventory' ? (
-                            <InventoryModule />
+                        {tab.moduleCode === 'inventory' || tab.moduleCode === 'store_equipment' ? (
+                            (isSecurityIndustry || tab.moduleCode === 'store_equipment') ? <SecurityInventoryWorkspace /> : <InventoryModule />
                         ) : tab.moduleCode === 'pos' ? (
                             <POSModule />
-                        ) : tab.moduleCode === 'crm' ? (
-                            <CRMModule />
-                        ) : tab.moduleCode === 'security_ops' ? (
+                        ) : tab.moduleCode === 'crm' || tab.moduleCode === 'clients_contracts' ? (
+                            (isSecurityIndustry || tab.moduleCode === 'clients_contracts') ? <SecurityCRMModule /> : <CRMModule />
+                        ) : tab.moduleCode === 'security_ops' || tab.moduleCode === 'operations' ? (
                             <SecurityOperationsModule />
                         ) : tab.moduleCode === 'platform' ? (
                             <PlatformModule />
-                        ) : tab.moduleCode === 'hr' ? (
+                        ) : tab.moduleCode === 'hr' || tab.moduleCode === 'guards_staff' ? (
                             <HRModule />
-                        ) : tab.moduleCode === 'finance' ? (
-                            <FinanceModule />
-                        ) : tab.moduleCode === 'purchasing' ? (
-                            <PurchasingModule />
+                        ) : tab.moduleCode === 'finance' || tab.moduleCode === 'security_finance' ? (
+                            (isSecurityIndustry || tab.moduleCode === 'security_finance') ? <SecurityFinanceModule /> : <FinanceModule />
+                        ) : tab.moduleCode === 'purchasing' || tab.moduleCode === 'vendors_purchasing' ? (
+                            (isSecurityIndustry || tab.moduleCode === 'vendors_purchasing') ? <SecurityPurchasingModule /> : <PurchasingModule />
+                        ) : tab.moduleCode === 'reports' ? (
+                            isSecurityIndustry ? <SecurityReportsWorkspace /> : <ModulePlaceholder title={tab.title} />
+                        ) : tab.moduleCode === 'settings' ? (
+                            <SettingsWorkspace />
                         ) : (
                             <ModulePlaceholder title={tab.title} />
                         )}
+
                     </div>
                 ))}
             </div>

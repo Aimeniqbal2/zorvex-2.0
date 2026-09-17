@@ -5,6 +5,7 @@ export interface ERPModule {
     route: string;
     category?: string;
     minRole: string; // from legacy: super_admin, admin, manager, cashier, staff, etc.
+    engine?: string; // Optional mapping to underlying universal engine (e.g. for industry capabilities)
 }
 
 export const MODULE_REGISTRY: ERPModule[] = [

@@ -7,24 +7,40 @@ import { Badge } from '../../../../components/ui/Badge';
 import { getOpportunities } from '../../api';
 import type { Opportunity, PaginatedResponse } from '../../types';
 import { useToastStore } from '../../../../stores/toastStore';
+import { OpportunityModal } from './OpportunityModal';
+import { useCrmStore } from '../../store/useCrmStore';
 
 export const OpportunitiesList: React.FC = () => {
     const [data, setData] = useState<PaginatedResponse<Opportunity> | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
+
+    const fetchOpps = async () => {
+        setIsLoading(true);
+        try {
+            const response = await getOpportunities();
+            setData(response);
+        } catch (err) {
+            useToastStore.getState().error('Failed to load opportunities');
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchOpps = async () => {
-            try {
-                const response = await getOpportunities();
-                setData(response);
-            } catch (err) {
-                useToastStore.getState().error('Failed to load opportunities');
-            } finally {
-                setIsLoading(false);
-            }
-        };
         fetchOpps();
     }, []);
+
+    const handleAdd = () => {
+        setSelectedOpp(null);
+        setIsModalOpen(true);
+    };
+
+    const handleEdit = (opp: Opportunity) => {
+        setSelectedOpp(opp);
+        setIsModalOpen(true);
+    };
 
     const columns: Column<Opportunity>[] = [
         {
@@ -55,7 +71,16 @@ export const OpportunitiesList: React.FC = () => {
         {
             key: 'actions',
             header: 'Actions',
-            render: () => <Button variant="ghost" disabled><i className='bx bx-show'></i></Button>
+            render: (opp) => (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                    <Button variant="ghost" onClick={() => useCrmStore.getState().setSelectedOpportunityId(opp.id)}>
+                        <i className='bx bx-show'></i>
+                    </Button>
+                    <Button variant="ghost" onClick={() => handleEdit(opp)}>
+                        <i className='bx bx-edit'></i>
+                    </Button>
+                </div>
+            )
         }
     ];
 
@@ -64,7 +89,7 @@ export const OpportunitiesList: React.FC = () => {
             <Toolbar>
                 <div style={{ fontWeight: 600 }}>Opportunities Pipeline</div>
                 <div style={{ flex: 1 }} />
-                <Button variant="primary">Add Opportunity</Button>
+                <Button variant="primary" onClick={handleAdd}>Add Opportunity</Button>
             </Toolbar>
             <DataTable 
                 data={data?.results || []}
@@ -72,6 +97,14 @@ export const OpportunitiesList: React.FC = () => {
                 isLoading={isLoading}
                 keyExtractor={(row) => row.id}
             />
+            {isModalOpen && (
+                <OpportunityModal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    onSaved={fetchOpps}
+                    opportunity={selectedOpp}
+                />
+            )}
         </div>
     );
 };

@@ -38,3 +38,17 @@ class ExtraDutyAdmin(admin.ModelAdmin):
     list_display = ('employee', 'site', 'date', 'hours', 'company', 'status', 'is_deleted')
     list_filter = ('company', 'status', 'date', 'is_deleted')
     search_fields = ('employee__user__first_name', 'employee__user__last_name', 'site__name')
+
+from .models import InspectionPolicy, InspectionCriterionPolicy
+
+class InspectionCriterionPolicyInline(admin.TabularInline):
+    model = InspectionCriterionPolicy
+    extra = 1
+
+@admin.register(InspectionPolicy)
+class InspectionPolicyAdmin(admin.ModelAdmin):
+    list_display = ('name', 'company', 'is_active', 'effective_from', 'effective_to', 'escalation_threshold', 'critical_threshold')
+    list_filter = ('company', 'is_active')
+    search_fields = ('name',)
+    inlines = [InspectionCriterionPolicyInline]
+

@@ -1,7 +1,11 @@
+from datetime import date
 from rest_framework import serializers
 from django.db import models
-from .models import Department, Position, Designation, Employee, Employment, EmployeeRecord, Attendance
 from erp_core.middleware import get_current_company
+from .models import (
+    Department, Position, Designation, Employee, Employment, EmployeeRecord, Attendance,
+    EmployeeNextOfKin, EmployeeDocument, EmployeeTraining, EmploymentHistory, StatutorySchemeRateHistory
+)
 
 class BaseTenantSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
@@ -56,14 +60,61 @@ class DesignationSerializer(BaseTenantSerializer):
             raise serializers.ValidationError("A designation with this name already exists.")
         return value
 
+class EmployeeNextOfKinSerializer(BaseTenantSerializer):
+    class Meta:
+        model = EmployeeNextOfKin
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+
+class EmployeeDocumentSerializer(BaseTenantSerializer):
+    verified_by_name = serializers.CharField(source='verified_by.get_full_name', read_only=True)
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+    verification_status_display = serializers.CharField(source='get_verification_status_display', read_only=True)
+
+    class Meta:
+        model = EmployeeDocument
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted', 'verified_by', 'verified_at']
+
+class EmployeeTrainingSerializer(BaseTenantSerializer):
+    class Meta:
+        model = EmployeeTraining
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+
+class EmploymentHistorySerializer(BaseTenantSerializer):
+    changed_by_name = serializers.CharField(source='changed_by.get_full_name', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = EmploymentHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+
+class StatutorySchemeRateHistorySerializer(BaseTenantSerializer):
+    class Meta:
+        model = StatutorySchemeRateHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+
 class EmployeeSerializer(BaseTenantSerializer):
     architecture_state = serializers.SerializerMethodField()
     legacy_record = serializers.PrimaryKeyRelatedField(read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    designation_name = serializers.CharField(source='designation.name', read_only=True)
+    joining_date = serializers.DateField(required=False, allow_null=True)
+    age = serializers.IntegerField(read_only=True)
+    training_completed = serializers.BooleanField(read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    next_of_kin = EmployeeNextOfKinSerializer(many=True, read_only=True)
+    documents = EmployeeDocumentSerializer(many=True, read_only=True)
+    trainings = EmployeeTrainingSerializer(many=True, read_only=True)
+    history_logs = EmploymentHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model = Employee
         fields = '__all__'
-        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+        read_only_fields = ['id', 'company', 'employee_code', 'created_at', 'updated_at', 'is_deleted']
 
     def get_architecture_state(self, obj):
         from hrm.services.compatibility import get_hr_architecture_state
@@ -98,16 +149,46 @@ class AttendanceSerializer(BaseTenantSerializer):
 
 from .models import (
     Candidate, CandidateDocument, CandidateVerification,
-    WorkforceAttendance, Shift, WorkSchedule, LeaveType, LeaveBalance, LeaveRequest, Holiday, OvertimeRecord
+    WorkforceAttendance, Shift, WorkSchedule, LeaveType, LeaveBalance, LeaveRequest, Holiday, OvertimeRecord,
+    EmployeeAttendanceState, JumpRecord
 )
 
 class WorkforceAttendanceSerializer(BaseTenantSerializer):
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    site_name = serializers.CharField(source='site.name', read_only=True)
+    post_name = serializers.CharField(source='post.post_name', read_only=True)
+    shift_name = serializers.CharField(source='shift.name', read_only=True)
+    recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True)
+
     class Meta:
         model = WorkforceAttendance
         fields = '__all__'
         read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
 
+class EmployeeAttendanceStateSerializer(BaseTenantSerializer):
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+
+    class Meta:
+        model = EmployeeAttendanceState
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+
+class JumpRecordSerializer(BaseTenantSerializer):
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    reinstated_by_name = serializers.CharField(source='reinstated_by.get_full_name', read_only=True)
+    resolved_by_name = serializers.CharField(source='resolved_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = JumpRecord
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
+
 class ShiftSerializer(BaseTenantSerializer):
+    duration_hours = serializers.FloatField(read_only=True)
+
     class Meta:
         model = Shift
         fields = '__all__'
@@ -253,7 +334,13 @@ class PayslipSerializer(BaseTenantSerializer):
             'tax_amount', 'net_amount', 'created_at', 'updated_at', 'is_deleted'
         ]
 
-from hrm.models import PayrollAccountingConfiguration
+from hrm.models import    PayrollDisbursement, PayslipDisbursement, CompanyPayrollPolicy, PayrollAccountingConfiguration
+
+class CompanyPayrollPolicySerializer(BaseTenantSerializer):
+    class Meta:
+        model = CompanyPayrollPolicy
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted']
 
 class PayrollAccountingConfigurationSerializer(BaseTenantSerializer):
     class Meta:
@@ -333,4 +420,116 @@ class PayrollDisbursementSerializer(serializers.ModelSerializer):
         model = PayrollDisbursement
         fields = '__all__'
         read_only_fields = ['company', 'created_at', 'updated_at', 'is_deleted', 'deleted_at']
+
+
+# ============================================================================
+# Phase S-5H: Workforce Lifecycle Action Serializers
+# ============================================================================
+
+class PromoteDesignationActionSerializer(serializers.Serializer):
+    new_designation = serializers.UUIDField()
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    is_promotion = serializers.BooleanField(required=False, default=True)
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ChangeDepartmentActionSerializer(serializers.Serializer):
+    new_department = serializers.UUIDField()
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ChangeClassificationActionSerializer(serializers.Serializer):
+    new_classification = serializers.ChoiceField(choices=['DIRECT', 'INDIRECT'])
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ReviseSalaryActionSerializer(serializers.Serializer):
+    base_salary = serializers.DecimalField(max_digits=12, decimal_places=2)
+    effective_date = serializers.DateField(required=False, default=date.today)
+    daily_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    single_ot_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
+    double_ot_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
+    currency = serializers.UUIDField(required=False, allow_null=True)
+    salary_structure = serializers.UUIDField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class TransferDeploymentActionSerializer(serializers.Serializer):
+    new_site = serializers.UUIDField()
+    new_post = serializers.UUIDField(required=False, allow_null=True)
+    new_service_contract = serializers.UUIDField(required=False, allow_null=True)
+    new_designation = serializers.UUIDField(required=False, allow_null=True)
+    start_date = serializers.DateField(required=False, default=date.today)
+    relief_reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class RelieveDeploymentActionSerializer(serializers.Serializer):
+    relieved_date = serializers.DateField(required=False, default=date.today)
+    relief_reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class SuspendEmployeeActionSerializer(serializers.Serializer):
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ReinstateEmployeeActionSerializer(serializers.Serializer):
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ResignEmployeeActionSerializer(serializers.Serializer):
+    resignation_date = serializers.DateField(required=False, default=date.today)
+    last_working_date = serializers.DateField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notice_details = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class TerminateEmployeeActionSerializer(serializers.Serializer):
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    category = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ResolveJumpActionSerializer(serializers.Serializer):
+    outcome = serializers.ChoiceField(choices=['RETURNED', 'REINSTATED', 'RESIGNED', 'TERMINATED', 'OTHER'])
+    jump_record_id = serializers.UUIDField(required=False, allow_null=True)
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class RehireEmployeeActionSerializer(serializers.Serializer):
+    rehire_date = serializers.DateField(required=False, default=date.today)
+    designation = serializers.UUIDField(required=False, allow_null=True)
+    department = serializers.UUIDField(required=False, allow_null=True)
+    classification = serializers.ChoiceField(choices=['DIRECT', 'INDIRECT'], required=False, allow_null=True)
+    base_salary = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    daily_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    single_ot_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    double_ot_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class CreateLifecycleEventActionSerializer(serializers.Serializer):
+    event_type = serializers.CharField(max_length=50)
+    effective_date = serializers.DateField(required=False, default=date.today)
+    old_value = serializers.CharField(required=False, allow_blank=True, default='')
+    new_value = serializers.CharField(required=False, allow_blank=True, default='')
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+    metadata = serializers.JSONField(required=False, default=dict)
+
 

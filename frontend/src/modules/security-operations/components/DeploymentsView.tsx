@@ -8,12 +8,16 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { DeploymentModal } from './DeploymentModal';
+import { DeploymentTransferModal } from './DeploymentTransferModal';
+import { DeploymentRelieveModal } from './DeploymentRelieveModal';
+import { DeploymentHistoryModal } from './DeploymentHistoryModal';
 
 const STATUS_VARIANT: Record<string, 'success' | 'danger' | 'default' | 'primary'> = {
     DRAFT: 'default',
     PLANNED: 'primary',
     ACTIVE: 'success',
     COMPLETED: 'default',
+    RELIEVED: 'default',
     CANCELLED: 'danger',
 };
 
@@ -27,8 +31,24 @@ export const DeploymentsView: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [hasError, setHasError] = useState(false);
 
+    // Edit/Create Modal
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
+
+    // Transfer Modal
+    const [isTransferOpen, setIsTransferOpen] = useState(false);
+    const [transferId, setTransferId] = useState<string | null>(null);
+    const [transferEmpName, setTransferEmpName] = useState<string>('');
+
+    // Relieve Modal
+    const [isRelieveOpen, setIsRelieveOpen] = useState(false);
+    const [relieveId, setRelieveId] = useState<string | null>(null);
+    const [relieveEmpName, setRelieveEmpName] = useState<string>('');
+
+    // History Modal
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [historyEmpId, setHistoryEmpId] = useState<string | null>(null);
+    const [historyEmpName, setHistoryEmpName] = useState<string>('');
 
     useEffect(() => {
         const handler = setTimeout(() => {
@@ -54,12 +74,48 @@ export const DeploymentsView: React.FC = () => {
     useEffect(() => { fetchDeployments(); }, [fetchDeployments]);
 
     const columns: Column<Deployment>[] = [
-        { key: 'employee_name', header: 'Employee', render: (row) => row.employee_name || '—' },
-        { key: 'site_name', header: 'Site', render: (row) => row.site_name || '—' },
+        { 
+            key: 'employee_name', 
+            header: 'Employee', 
+            render: (row) => (
+                <div>
+                    <div style={{ fontWeight: 600 }}>{row.employee_name || '—'}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                        {row.employee_code ? `${row.employee_code} • ` : ''}{row.employee_classification || 'DIRECT'}
+                    </div>
+                </div>
+            ) 
+        },
+        { 
+            key: 'site_name', 
+            header: 'Site & Post', 
+            render: (row) => (
+                <div>
+                    <div>{row.site_name || '—'}</div>
+                    {row.post_name && <div style={{ fontSize: '11px', color: 'var(--color-primary)' }}>Post: {row.post_name}</div>}
+                </div>
+            ) 
+        },
         { key: 'designation_name', header: 'Designation', render: (row) => row.designation_name || '—' },
-        { key: 'contract_code', header: 'Contract', render: (row) => row.contract_code || '—' },
-        { key: 'start_date', header: 'Start' },
-        { key: 'end_date', header: 'End', render: (row) => row.end_date || '—' },
+        { 
+            key: 'assignment_type', 
+            header: 'Type', 
+            render: (row) => (
+                <Badge variant={row.assignment_type === 'PERMANENT' ? 'primary' : 'default'}>
+                    {row.assignment_type || 'PERMANENT'}
+                </Badge>
+            ) 
+        },
+        { 
+            key: 'start_date', 
+            header: 'Period', 
+            render: (row) => (
+                <div style={{ fontSize: '12px' }}>
+                    <div>From: {row.start_date}</div>
+                    <div style={{ color: 'var(--color-text-muted)' }}>To: {row.end_date || 'Ongoing'}</div>
+                </div>
+            ) 
+        },
         {
             key: 'status',
             header: 'Status',
@@ -73,10 +129,48 @@ export const DeploymentsView: React.FC = () => {
             key: 'actions',
             header: 'Actions',
             render: (row) => (
-                <button
-                    className="text-blue-600 hover:underline text-sm"
-                    onClick={() => { setSelectedDeployment(row); setIsModalOpen(true); }}
-                >Edit</button>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {row.status === 'ACTIVE' && (
+                        <>
+                            <button
+                                style={{ background: 'none', border: 'none', color: 'var(--color-primary)', fontWeight: 600, cursor: 'pointer', fontSize: '12px' }}
+                                onClick={() => {
+                                    setTransferId(row.id);
+                                    setTransferEmpName(row.employee_name || 'Guard');
+                                    setIsTransferOpen(true);
+                                }}
+                            >
+                                Transfer
+                            </button>
+                            <button
+                                style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '12px' }}
+                                onClick={() => {
+                                    setRelieveId(row.id);
+                                    setRelieveEmpName(row.employee_name || 'Guard');
+                                    setIsRelieveOpen(true);
+                                }}
+                            >
+                                Relieve
+                            </button>
+                        </>
+                    )}
+                    <button
+                        style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '12px' }}
+                        onClick={() => {
+                            setHistoryEmpId(row.employee);
+                            setHistoryEmpName(row.employee_name || 'Employee');
+                            setIsHistoryOpen(true);
+                        }}
+                    >
+                        History
+                    </button>
+                    <button
+                        style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '12px' }}
+                        onClick={() => { setSelectedDeployment(row); setIsModalOpen(true); }}
+                    >
+                        Edit
+                    </button>
+                </div>
             )
         }
     ];
@@ -98,12 +192,14 @@ export const DeploymentsView: React.FC = () => {
                     <select
                         value={statusFilter}
                         onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
-                        className="border rounded p-2 text-sm"
+                        className="input-base"
+                        style={{ width: '150px' }}
                     >
                         <option value="">All Statuses</option>
-                        <option value="DRAFT">Draft</option>
-                        <option value="PLANNED">Planned</option>
                         <option value="ACTIVE">Active</option>
+                        <option value="RELIEVED">Relieved</option>
+                        <option value="PLANNED">Planned</option>
+                        <option value="DRAFT">Draft</option>
                         <option value="COMPLETED">Completed</option>
                         <option value="CANCELLED">Cancelled</option>
                     </select>
@@ -119,21 +215,48 @@ export const DeploymentsView: React.FC = () => {
                     columns={columns}
                     isLoading={isLoading}
                     keyExtractor={(row) => row.id}
-                    emptyMessage={searchQuery ? 'No deployments match your search.' : 'No deployments yet. Create your first deployment.'}
+                    emptyMessage={searchQuery ? "No deployments match your search." : "No deployments recorded yet."}
                     pagination={data ? {
-                        page,
+                        page: page,
                         pageSize: 10,
                         totalItems: data.count,
-                        onPageChange: setPage
+                        onPageChange: (newPage) => setPage(newPage)
                     } : undefined}
                 />
             </div>
 
+            {/* Edit / Create Modal */}
             <DeploymentModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 onSave={fetchDeployments}
                 deployment={selectedDeployment}
+            />
+
+            {/* Transfer Modal */}
+            <DeploymentTransferModal
+                isOpen={isTransferOpen}
+                onClose={() => setIsTransferOpen(false)}
+                deploymentId={transferId}
+                employeeName={transferEmpName}
+                onTransferred={fetchDeployments}
+            />
+
+            {/* Relieve Modal */}
+            <DeploymentRelieveModal
+                isOpen={isRelieveOpen}
+                onClose={() => setIsRelieveOpen(false)}
+                deploymentId={relieveId}
+                employeeName={relieveEmpName}
+                onRelieved={fetchDeployments}
+            />
+
+            {/* History Modal */}
+            <DeploymentHistoryModal
+                isOpen={isHistoryOpen}
+                onClose={() => setIsHistoryOpen(false)}
+                employeeId={historyEmpId}
+                employeeName={historyEmpName}
             />
         </div>
     );

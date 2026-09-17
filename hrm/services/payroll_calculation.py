@@ -211,6 +211,71 @@ def calculate_payroll_for_employee(company_id, payroll_run, employee, assignment
         
     PayslipLine.objects.bulk_create(lines_to_create)
     
+    # ----------------------------------------------------
+    # Overtime Injection
+    # ----------------------------------------------------
+    from hrm.models import OvertimeRecord, OvertimeStatus, CompanyPayrollPolicy
+    from django.db import models
+    
+    # Fetch overtimes that are either explicitly APPROVED (unprocessed)
+    # OR PROCESSED but their payslip was deleted (e.g. draft recalculation)
+    overtimes = OvertimeRecord.objects.filter(
+        models.Q(status=OvertimeStatus.APPROVED) | 
+        models.Q(status=OvertimeStatus.PROCESSED, processed_payslip__isnull=True),
+        company_id=company_id,
+        employee=employee,
+        date__range=(period.start_date, period.end_date),
+        is_deleted=False
+    )
+    
+    if overtimes.exists():
+        ot_comp, _ = SalaryComponent.objects.get_or_create(
+            company_id=company_id,
+            code='OVERTIME_PAY',
+            defaults={
+                'name': 'Overtime Pay',
+                'component_type': ComponentType.EARNING,
+                'calculation_type': CalculationType.FIXED,
+                'is_active': True,
+                'is_recurring': False
+            }
+        )
+        
+        try:
+            policy = CompanyPayrollPolicy.objects.get(company_id=company_id, is_active=True, is_deleted=False)
+            standard_hours = policy.standard_monthly_hours
+            multiplier = policy.overtime_multiplier
+        except CompanyPayrollPolicy.DoesNotExist:
+            standard_hours = Decimal('160.00')
+            multiplier = Decimal('1.50')
+        except CompanyPayrollPolicy.MultipleObjectsReturned:
+            raise PayrollCalculationError("Multiple active payroll policies found for the company. Please resolve configuration.")
+            
+        ot_rate = (base_salary / standard_hours) * multiplier
+        
+        ot_lines = []
+        for ot in overtimes:
+            amount = _quantize_decimal(ot.hours * ot_rate)
+            gross += amount
+            ot_lines.append(PayslipLine(
+                company_id=company_id,
+                payslip=payslip,
+                salary_component=ot_comp,
+                component_type=ComponentType.EARNING,
+                amount=amount,
+                sequence=800,
+                description=f"Overtime - {ot.date} ({ot.hours}h)"
+            ))
+            
+            # Link exactly once
+            ot.status = OvertimeStatus.PROCESSED
+            ot.processed_payslip = payslip
+            ot.save(update_fields=['status', 'processed_payslip', 'updated_at'])
+                
+        if ot_lines:
+            PayslipLine.objects.bulk_create(ot_lines)
+    # ----------------------------------------------------
+    
     # Statutory Deductions
     from .statutory_service import calculate_statutory_deductions_for_payslip
     statutory_emp_deduction, statutory_employer_contrib = calculate_statutory_deductions_for_payslip(

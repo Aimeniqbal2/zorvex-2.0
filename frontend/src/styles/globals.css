@@ -31,8 +31,9 @@ a {
 }
 
 .desktop-logo {
-  width: 110px;
-  height: 30px;
+  height: 36px;
+  width: auto;
+  max-width: 140px;
   object-fit: contain;
   animation: pulseLogo 4s infinite alternate ease-in-out;
   display: block;

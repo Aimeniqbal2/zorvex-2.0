@@ -24,7 +24,8 @@ def execute_payroll_disbursement(disbursement: PayrollDisbursement, user):
     total_amount = sum(payslip.net_amount for payslip in payslips)
     
     # Check if a config exists to find the Payroll Payable account
-    config = disbursement.company.payroll_accounting_configs.first()
+    from hrm.models import PayrollAccountingConfiguration
+    config = PayrollAccountingConfiguration.objects.filter(company=disbursement.company).first()
     if not config:
         raise ValidationError("Payroll accounting configuration not found.")
         

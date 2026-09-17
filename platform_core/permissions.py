@@ -74,4 +74,30 @@ class ModulePermission(BasePermission):
                 }
             )
 
+        # Check if the user is in CUSTOM mode and whether they have access
+        if getattr(request.user, 'access_mode', 'FULL_COMPANY') == 'CUSTOM':
+            codes = [module_code]
+            if module_code == 'billing':
+                codes.extend(['finance', 'security_ops'])
+            elif module_code == 'payroll':
+                codes.extend(['hr', 'finance'])
+            elif module_code == 'security_finance':
+                codes.extend(['finance', 'security_ops'])
+
+            has_user_access = request.user.custom_module_access.filter(
+                module__code__in=codes,
+                enabled=True
+            ).exists()
+            if not has_user_access:
+                logger.info(
+                    "User '%s' is restricted from module '%s'",
+                    request.user.pk, module_code,
+                )
+                raise PermissionDenied(
+                    detail={
+                        'detail': "You do not have permission to access this module.",
+                        'module': module_code,
+                    }
+                )
+
         return True

@@ -19,9 +19,9 @@ def process_transaction(company, item, warehouse, movement_type, quantity, refer
     qty = Decimal(str(quantity))
     
     # Types that increase stock
-    IN_TYPES = ['IN', 'PURCHASE', 'SALE_RETURN', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'EMPLOYEE_RETURN']
+    IN_TYPES = ['IN', 'PURCHASE', 'SALE_RETURN', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'EMPLOYEE_RETURN', 'SITE_RETURN']
     # Types that decrease stock
-    OUT_TYPES = ['OUT', 'PURCHASE_RETURN', 'SALE', 'TRANSFER_OUT', 'SERVICE_USAGE', 'ADJUSTMENT_OUT', 'DAMAGE', 'LOSS', 'EMPLOYEE_ISSUE']
+    OUT_TYPES = ['OUT', 'PURCHASE_RETURN', 'SALE', 'TRANSFER_OUT', 'SERVICE_USAGE', 'ADJUSTMENT_OUT', 'DAMAGE', 'LOSS', 'EMPLOYEE_ISSUE', 'SITE_ISSUE']
     
     if movement_type == 'OPENING_BALANCE':
         set_opening_balance(item, warehouse, qty)
@@ -68,21 +68,29 @@ def process_transaction(company, item, warehouse, movement_type, quantity, refer
                     sell_serial(s_obj)
                 except ItemSerial.DoesNotExist:
                     raise InventoryValidationException(f"Serial {serial} not found in inventory.")
-            elif movement_type in ['SALE_RETURN', 'PURCHASE_RETURN']:
+            elif movement_type == 'PURCHASE_RETURN':
+                from inventory.models import ItemSerial
+                from .serial_service import return_serial_to_vendor
+                try:
+                    s_obj = ItemSerial.objects.get(company=company, item=item, serial_number=serial)
+                    return_serial_to_vendor(s_obj)
+                except ItemSerial.DoesNotExist:
+                    raise InventoryValidationException(f"Serial {serial} not found in inventory.")
+            elif movement_type == 'SALE_RETURN':
                 from inventory.models import ItemSerial
                 try:
                     s_obj = ItemSerial.objects.get(company=company, item=item, serial_number=serial)
                     return_serial(s_obj, warehouse)
                 except ItemSerial.DoesNotExist:
                     raise InventoryValidationException(f"Serial {serial} not found.")
-            elif movement_type == 'EMPLOYEE_ISSUE':
+            elif movement_type in ['EMPLOYEE_ISSUE', 'SITE_ISSUE']:
                 from inventory.models import ItemSerial
                 try:
                     s_obj = ItemSerial.objects.get(company=company, item=item, serial_number=serial)
                     issue_serial(s_obj)
                 except ItemSerial.DoesNotExist:
                     raise InventoryValidationException(f"Serial {serial} not found in inventory.")
-            elif movement_type == 'EMPLOYEE_RETURN':
+            elif movement_type in ['EMPLOYEE_RETURN', 'SITE_RETURN']:
                 from inventory.models import ItemSerial
                 try:
                     s_obj = ItemSerial.objects.get(company=company, item=item, serial_number=serial)

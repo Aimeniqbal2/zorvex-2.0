@@ -98,6 +98,7 @@ class CRMEntitySerializer(serializers.ModelSerializer):
         write_only=True,
         required=False
     )
+    code = serializers.CharField(required=False, allow_blank=True)
     
     class Meta:
         model = CRMEntity
@@ -138,6 +139,14 @@ class CRMEntitySerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         roles_data = validated_data.pop('roles_write', None)
+        
+        # If entity_type is being updated and no roles_write provided, ensure the new type is added
+        if roles_data is None and 'entity_type' in validated_data and validated_data['entity_type'] != instance.entity_type:
+            current_roles = set(instance.role_mappings.values_list('role', flat=True))
+            new_type = validated_data['entity_type']
+            if new_type not in current_roles:
+                roles_data = list(current_roles) + [new_type]
+
         entity = super().update(instance, validated_data)
         
         if roles_data is not None:
@@ -172,6 +181,9 @@ class OpportunitySerializer(serializers.ModelSerializer):
             'converted_contract', 'converted_contract_code', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'converted_contract']
+        extra_kwargs = {
+            'opportunity_number': {'required': False}
+        }
 
 
 class ProposalLineSerializer(serializers.ModelSerializer):
@@ -201,6 +213,9 @@ class ProposalSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'subtotal', 'total']
+        extra_kwargs = {
+            'proposal_number': {'required': False}
+        }
 
 
 class OpportunityAwardSerializer(serializers.ModelSerializer):

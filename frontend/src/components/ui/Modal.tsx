@@ -1,14 +1,17 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ModalProps {
-    isOpen: boolean;
+    isOpen?: boolean;
     onClose: () => void;
     title: string;
     children: React.ReactNode;
     footer?: React.ReactNode;
+    size?: string;
+    width?: string;
 }
 
-export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, footer }) => {
+export const Modal: React.FC<ModalProps> = ({ isOpen = true, onClose, title, children, footer, size, width }) => {
     const modalRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -29,9 +32,9 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, 
         }
     };
 
-    return (
-        <div className="modal-overlay" onClick={handleBackdropClick}>
-            <div className="modal-content" ref={modalRef} role="dialog" aria-modal="true">
+    return createPortal(
+        <div className={`modal-overlay ${size ? `modal-${size}` : ''}`} onClick={handleBackdropClick}>
+            <div className="modal-content" ref={modalRef} role="dialog" aria-modal="true" style={width ? { maxWidth: width, width: '100%' } : undefined}>
                 <div className="modal-header">
                     <h2 className="modal-title">{title}</h2>
                     <button className="modal-close" onClick={onClose} aria-label="Close">
@@ -47,6 +50,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, 
                     </div>
                 )}
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };

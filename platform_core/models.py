@@ -139,7 +139,42 @@ class CompanyModule(models.Model):
 
     def __str__(self):
         status = 'enabled' if self.enabled else 'disabled'
-        return f'{self.company.name} → {self.module.name} [{status}]'
+        return f'{self.company.name} - {self.module.name} ({status})'
+
+
+# ---------------------------------------------------------------------------
+# UserModuleAccess — explicitly granted modules per user for CUSTOM access
+# ---------------------------------------------------------------------------
+class UserModuleAccess(models.Model):
+    """
+    Explicitly tracks which modules a user has access to, assuming their
+    User.access_mode == 'CUSTOM'. If a module is removed from the company,
+    this record remains, but effective access will evaluate to False dynamically.
+    """
+    id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user    = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='custom_module_access',
+        db_index=True
+    )
+    module  = models.ForeignKey(
+        ModuleDefinition,
+        on_delete=models.CASCADE,
+        related_name='user_module_access',
+        db_index=True
+    )
+    enabled = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('user', 'module')]
+        verbose_name = 'User Module Access'
+        verbose_name_plural = 'User Module Access'
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.module.code} ({'enabled' if self.enabled else 'disabled'})"
 
 
 # ---------------------------------------------------------------------------

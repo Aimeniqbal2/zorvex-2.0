@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../auth/authStore';
+import { SettingsModal } from './SettingsModal';
 
 export const DesktopHeader: React.FC = () => {
     const { theme, toggleTheme } = useAppStore();
     const { user, clearAuth } = useAuthStore();
     const [menuOpen, setMenuOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [settingsTab, setSettingsTab] = useState<'profile'|'company'|'settings'>('profile');
 
     const handleLogout = () => {
         clearAuth();
-        window.location.href = '/login/';
+        window.location.href = '/app/login';
     };
 
     const roleDisplay = user?.role ? user.role.replace(/_/g, ' ') : 'Staff';
@@ -19,7 +22,7 @@ export const DesktopHeader: React.FC = () => {
             <div className="header-left">
                 <div className="brand-logo">
                     <img 
-                        src={theme === 'dark' ? '/assets/logo-full1.png' : '/assets/logo-full.png'} 
+                        src="/app/assets/zorvex-logo.png"
                         alt="ZORVEX Logo" 
                         className="desktop-logo" 
                     />
@@ -53,18 +56,28 @@ export const DesktopHeader: React.FC = () => {
                     </button>
                     
                     <div className={`user-menu-dropdown ${menuOpen ? 'active' : ''}`}>
-                        <button className="dropdown-item">
+                        <button className="dropdown-item" onClick={() => { setSettingsTab('profile'); setSettingsOpen(true); setMenuOpen(false); }}>
                             <i className='bx bx-user'></i> Profile
                         </button>
-                        <button className="dropdown-item">
+                        <button className="dropdown-item" onClick={() => { setSettingsTab('company'); setSettingsOpen(true); setMenuOpen(false); }}>
                             <i className='bx bx-buildings'></i> {user?.company_id ? `Company ${user.company_id}` : 'My Company'}
                         </button>
-                        <button className="dropdown-item" onClick={handleLogout}>
+                        <button className="dropdown-item" onClick={() => { setSettingsTab('settings'); setSettingsOpen(true); setMenuOpen(false); }}>
+                            <i className='bx bx-cog'></i> Settings
+                        </button>
+                        <div className="dropdown-divider"></div>
+                        <button className="dropdown-item text-danger" onClick={handleLogout}>
                             <i className='bx bx-log-out'></i> Logout
                         </button>
                     </div>
                 </div>
             </div>
+            
+            <SettingsModal 
+                isOpen={settingsOpen} 
+                onClose={() => setSettingsOpen(false)} 
+                initialTab={settingsTab} 
+            />
         </header>
     );
 };

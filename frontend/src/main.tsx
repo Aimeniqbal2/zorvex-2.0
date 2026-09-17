@@ -8,6 +8,7 @@ import './styles/desktop.css';
 import './styles/app-launcher.css';
 import './styles/workspace.css';
 import './styles/ui.css';
+import './industries/security/crm/styles/security-crm.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

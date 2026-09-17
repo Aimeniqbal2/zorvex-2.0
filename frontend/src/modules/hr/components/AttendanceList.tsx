@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../api';
 import type { WorkforceAttendance, Employee } from '../types';
-import { Button } from '../../../components/ui/Button';
 import { DataTable } from '../../../components/tables/DataTable';
 import type { Column } from '../../../components/tables/DataTable';
 import { LoadingState } from '../../../components/ui/LoadingState';
@@ -78,9 +77,6 @@ export const AttendanceList: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0 }}>Workforce Attendance</h3>
-                <Button variant="primary" onClick={() => {}}>
-                    Sync Operations Duty
-                </Button>
             </div>
             <DataTable columns={columns} data={attendance} keyExtractor={(item: any) => item.id} />
         </div>

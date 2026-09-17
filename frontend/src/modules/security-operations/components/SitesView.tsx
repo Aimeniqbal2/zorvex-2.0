@@ -8,6 +8,7 @@ import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { Button } from '../../../components/ui/Button';
 import { SiteModal } from './SiteModal';
+import { SiteManpowerModal } from './SiteManpowerModal';
 
 export const SitesView: React.FC = () => {
     const [page, setPage] = useState(1);
@@ -20,6 +21,9 @@ export const SitesView: React.FC = () => {
     
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedSite, setSelectedSite] = useState<OperationalSite | null>(null);
+
+    const [isManpowerModalOpen, setIsManpowerModalOpen] = useState(false);
+    const [manpowerSite, setManpowerSite] = useState<OperationalSite | null>(null);
 
     useEffect(() => {
         const handler = setTimeout(() => {
@@ -59,12 +63,34 @@ export const SitesView: React.FC = () => {
             key: 'actions',
             header: 'Actions',
             render: (row: OperationalSite) => (
-                <button 
-                    onClick={() => { setSelectedSite(row); setIsModalOpen(true); }}
-                    className="text-blue-600 hover:text-blue-800"
-                >
-                    Edit
-                </button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <button 
+                        onClick={() => { setManpowerSite(row); setIsManpowerModalOpen(true); }}
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--color-primary)',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            fontSize: '13px'
+                        }}
+                    >
+                        <i className="bx bx-group" style={{ marginRight: '4px' }}></i>
+                        Posts & Manpower
+                    </button>
+                    <button 
+                        onClick={() => { setSelectedSite(row); setIsModalOpen(true); }}
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--color-text-muted)',
+                            cursor: 'pointer',
+                            fontSize: '13px'
+                        }}
+                    >
+                        Edit
+                    </button>
+                </div>
             )
         }
     ];
@@ -108,6 +134,13 @@ export const SitesView: React.FC = () => {
                 onClose={() => setIsModalOpen(false)}
                 onSave={fetchSites}
                 site={selectedSite}
+            />
+
+            <SiteManpowerModal
+                isOpen={isManpowerModalOpen}
+                onClose={() => setIsManpowerModalOpen(false)}
+                site={manpowerSite}
+                onRefresh={fetchSites}
             />
         </div>
     );

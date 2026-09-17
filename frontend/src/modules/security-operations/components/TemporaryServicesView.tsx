@@ -1,104 +1,168 @@
-import React, { useState, useEffect } from 'react';
-import { apiClient as api } from '../../../api/client';
+import React, { useState, useEffect, useCallback } from 'react';
+import { PageHeader } from '../../../layouts/PageLayout';
+import { Button } from '../../../components/ui/Button';
+import { Badge } from '../../../components/ui/Badge';
+import { DataTable } from '../../../components/tables/DataTable';
+import type { Column } from '../../../components/tables/DataTable';
+import { useToastStore } from '../../../stores/toastStore';
+import { getTemporaryServices, actionTemporaryService } from '../api';
+import type { TemporaryServiceRequest, PaginatedResponse } from '../types';
+import { TemporaryServiceModal } from './TemporaryServiceModal';
 
 export const TemporaryServicesView: React.FC = () => {
-    const [services, setServices] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [data, setData] = useState<PaginatedResponse<TemporaryServiceRequest> | null>(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedService, setSelectedService] = useState<TemporaryServiceRequest | null>(null);
+    const [page, setPage] = useState(1);
+
+    const loadData = useCallback(async () => {
+        try {
+            const res = await getTemporaryServices({ page });
+            setData(res);
+        } catch (error) {
+            useToastStore.getState().error('Failed to load temporary services');
+        }
+    }, [page]);
 
     useEffect(() => {
-        fetchServices();
-    }, []);
+        loadData();
+    }, [loadData]);
 
-    const fetchServices = async () => {
+    const handleAction = async (id: string, action: string) => {
         try {
-            const response = await api.get('/api/operations/temporary-services/');
-            setServices(response.data.results || response.data);
-        } catch (error) {
-            console.error('Failed to fetch temporary services', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-    
-    const handleAction = async (id: number, action: string) => {
-        try {
-            const payload = action === 'generate_duties' ? { assignments: [] } : {}; // Simplified for UI
-            const res = await api.post(`/api/operations/temporary-services/${id}/${action}/`, payload);
-            alert(`Success: ${res.data.status || 'Action completed'}`);
-            fetchServices();
+            await actionTemporaryService(id, action);
+            useToastStore.getState().success(`Successfully applied action: ${action}`);
+            loadData();
         } catch (error: any) {
-            alert(`Error: ${error.response?.data?.error || error.message}`);
+            useToastStore.getState().error(`Failed: ${error.response?.data?.error || error.message}`);
         }
     };
 
-    if (loading) return <div>Loading Temporary Services...</div>;
+    const handleEdit = (service: TemporaryServiceRequest) => {
+        setSelectedService(service);
+        setIsModalOpen(true);
+    };
+
+    const handleNew = () => {
+        setSelectedService(null);
+        setIsModalOpen(true);
+    };
+
+    const columns: Column<TemporaryServiceRequest>[] = [
+        {
+            key: 'reference_number',
+            header: 'Reference',
+            render: (row: any) => row.reference_number
+        },
+        {
+            key: 'customer',
+            header: 'Customer',
+            render: (row: any) => row.crm_entity_name || 'Unknown'
+        },
+        {
+            key: 'site',
+            header: 'Site',
+            render: (row: any) => row.operational_site_name || 'Temporary Site'
+        },
+        {
+            key: 'start',
+            header: 'Start',
+            render: (row: any) => new Date(row.start_datetime).toLocaleString()
+        },
+        {
+            key: 'end',
+            header: 'End',
+            render: (row: any) => new Date(row.end_datetime).toLocaleString()
+        },
+        {
+            key: 'status',
+            header: 'Status',
+            render: (row: any) => <Badge>{row.status}</Badge>
+        },
+        {
+            key: 'actions',
+            header: 'Actions',
+            render: (row: any) => (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                    <Button variant="ghost" onClick={() => handleEdit(row)}>
+                        <i className='bx bx-edit'></i>
+                    </Button>
+                    {(row.status === 'DRAFT' || row.status === 'REQUESTED') && (
+                        <Button variant="ghost" onClick={() => handleAction(row.id, 'approve')} title="Approve">
+                            <i className='bx bx-check'></i>
+                        </Button>
+                    )}
+                    {row.status === 'APPROVED' && (
+                        <>
+                            <Button variant="ghost" onClick={() => handleAction(row.id, 'confirm')} title="Confirm">
+                                <i className='bx bx-check-double'></i>
+                            </Button>
+                            <Button variant="ghost" onClick={() => handleAction(row.id, 'generate_duties')} title="Generate Duties">
+                                <i className='bx bx-calendar-event'></i>
+                            </Button>
+                        </>
+                    )}
+                    {row.status === 'CONFIRMED' && (
+                        <>
+                            <Button variant="ghost" onClick={() => handleAction(row.id, 'generate_duties')} title="Generate Duties">
+                                <i className='bx bx-calendar-event'></i>
+                            </Button>
+                            <Button variant="ghost" onClick={() => handleAction(row.id, 'complete')} title="Complete">
+                                <i className='bx bx-flag'></i>
+                            </Button>
+                        </>
+                    )}
+                    {row.status === 'COMPLETED' && (
+                        <Button variant="ghost" onClick={() => handleAction(row.id, 'generate_invoice')} title="Generate Invoice">
+                            <i className='bx bx-receipt'></i>
+                        </Button>
+                    )}
+                </div>
+            )
+        }
+    ];
 
     return (
-        <div className="security-subview">
-            <div className="subview-header">
-                <h2>Temporary Security Services</h2>
-                <button className="primary-btn">New Temporary Service</button>
-            </div>
-            
-            <div className="table-container">
-                <table className="data-table">
-                    <thead>
-                        <tr>
-                            <th>Reference</th>
-                            <th>Customer</th>
-                            <th>Location/Site</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {services.length === 0 ? (
-                            <tr>
-                                <td colSpan={7} style={{textAlign: 'center'}}>No temporary services found.</td>
-                            </tr>
-                        ) : (
-                            services.map(service => (
-                                <tr key={service.id}>
-                                    <td>{service.reference_number}</td>
-                                    <td>{service.crm_entity_name}</td>
-                                    <td>{service.operational_site_name || service.site_name}</td>
-                                    <td>{new Date(service.start_datetime).toLocaleString()}</td>
-                                    <td>{new Date(service.end_datetime).toLocaleString()}</td>
-                                    <td>
-                                        <span className={`status-badge status-${service.status.toLowerCase()}`}>
-                                            {service.status.replace('_', ' ')}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div style={{ display: 'flex', gap: '5px' }}>
-                                            {(service.status === 'DRAFT' || service.status === 'REQUESTED') && (
-                                                <button className="btn-small" onClick={() => handleAction(service.id, 'approve')}>Approve</button>
-                                            )}
-                                            {service.status === 'APPROVED' && (
-                                                <>
-                                                    <button className="btn-small" onClick={() => handleAction(service.id, 'confirm')}>Confirm</button>
-                                                    <button className="btn-small" onClick={() => handleAction(service.id, 'generate_duties')}>Gen Duties</button>
-                                                </>
-                                            )}
-                                            {service.status === 'CONFIRMED' && (
-                                                <>
-                                                    <button className="btn-small" onClick={() => handleAction(service.id, 'generate_duties')}>Gen Duties</button>
-                                                    <button className="btn-small" onClick={() => handleAction(service.id, 'complete')}>Complete</button>
-                                                </>
-                                            )}
-                                            {service.status === 'COMPLETED' && (
-                                                <button className="btn-small" onClick={() => handleAction(service.id, 'generate_invoice')}>Gen Invoice</button>
-                                            )}
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
+        <div>
+            <PageHeader 
+                title="Temporary Security Services"
+                actions={<Button variant="primary" onClick={handleNew}>Request Service</Button>}
+            />
+
+            <DataTable 
+                data={data?.results || []}
+                columns={columns}
+                keyExtractor={(row: any) => row.id}
+                emptyMessage="No temporary services found."
+            />
+
+            {data && data.count > (data.results?.length || 0) && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '16px', gap: '8px' }}>
+                    <Button 
+                        variant="secondary" 
+                        disabled={!data.previous} 
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                    >
+                        Previous
+                    </Button>
+                    <Button 
+                        variant="secondary" 
+                        disabled={!data.next} 
+                        onClick={() => setPage(p => p + 1)}
+                    >
+                        Next
+                    </Button>
+                </div>
+            )}
+
+            {isModalOpen && (
+                <TemporaryServiceModal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    onSaved={loadData}
+                    service={selectedService}
+                />
+            )}
         </div>
     );
 };

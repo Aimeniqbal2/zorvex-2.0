@@ -7,11 +7,16 @@ import type { Column } from '../../../components/tables/DataTable';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { Badge } from '../../../components/ui/Badge';
+import { ShiftModal } from './ShiftModal';
+import { WorkScheduleList } from './WorkScheduleList';
 
 export const ShiftList: React.FC = () => {
     const [shifts, setShifts] = useState<Shift[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+    const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
+    const [view, setView] = useState<'shifts' | 'schedules'>('shifts');
 
     const fetchData = async () => {
         setLoading(true);
@@ -28,8 +33,14 @@ export const ShiftList: React.FC = () => {
     };
 
     useEffect(() => {
-        fetchData();
-    }, []);
+        if (view === 'shifts') {
+            fetchData();
+        }
+    }, [view]);
+
+    if (view === 'schedules') {
+        return <WorkScheduleList onBack={() => setView('shifts')} />;
+    }
 
     const columns: Column<Shift>[] = [
         { key: 'Code', header: 'Code', render: (s: Shift) => s.code },
@@ -41,9 +52,9 @@ export const ShiftList: React.FC = () => {
         { key: 'Status', header: 'Status', render: (s: Shift) => (
             <Badge variant={s.is_active ? 'success' : 'default'}>{s.is_active ? 'Active' : 'Inactive'}</Badge>
         )},
-        { key: 'actions', header: 'Actions', render: (_s: Shift) => (
+        { key: 'actions', header: 'Actions', render: (s: Shift) => (
             <div style={{ display: 'flex', gap: '8px' }}>
-                <Button variant="secondary">Edit</Button>
+                <Button variant="secondary" onClick={() => { setSelectedShift(s); setIsShiftModalOpen(true); }}>Edit</Button>
             </div>
         )}
     ];
@@ -56,11 +67,18 @@ export const ShiftList: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0 }}>Work Shifts</h3>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <Button variant="secondary" onClick={() => {}}>Work Schedules</Button>
-                    <Button variant="primary" onClick={() => {}}>Add Shift</Button>
+                    <Button variant="secondary" onClick={() => setView('schedules')}>Work Schedules</Button>
+                    <Button variant="primary" onClick={() => { setSelectedShift(null); setIsShiftModalOpen(true); }}>Add Shift</Button>
                 </div>
             </div>
             <DataTable columns={columns} data={shifts} keyExtractor={(item: any) => item.id} />
+            
+            <ShiftModal 
+                isOpen={isShiftModalOpen} 
+                onClose={() => setIsShiftModalOpen(false)} 
+                onSave={fetchData} 
+                shift={selectedShift} 
+            />
         </div>
     );
 };

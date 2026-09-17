@@ -98,10 +98,21 @@ export const EntityModal: React.FC<EntityModalProps> = ({ isOpen, onClose, onSav
             onClose();
         } catch (error: any) {
             if (error.response?.data) {
-                setErrors(error.response.data);
-                useToastStore.getState().error('Please check the form for validation errors.');
+                const data = error.response.data;
+                setErrors(data);
+                
+                // Show specific error messages if available
+                if (data.detail) {
+                    useToastStore.getState().error(data.detail);
+                } else if (data.non_field_errors) {
+                    useToastStore.getState().error(data.non_field_errors.join(', '));
+                } else if (data.code) {
+                    useToastStore.getState().error(`Code Error: ${data.code.join(', ')}`);
+                } else {
+                    useToastStore.getState().error('Please check the form for validation errors.');
+                }
             } else {
-                useToastStore.getState().error('An unexpected error occurred.');
+                useToastStore.getState().error(error.message || 'An unexpected error occurred.');
             }
         } finally {
             setIsSubmitting(false);
@@ -115,6 +126,21 @@ export const EntityModal: React.FC<EntityModalProps> = ({ isOpen, onClose, onSav
             title={entity ? 'Edit Entity' : 'Create Entity'}
         >
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
+                {/* General Error Banner */}
+                {(errors.non_field_errors || errors.detail) && (
+                    <div style={{
+                        padding: '10px 14px',
+                        background: '#fef2f2',
+                        border: '1px solid #fecaca',
+                        borderRadius: '6px',
+                        color: '#b91c1c',
+                        fontSize: '13px'
+                    }}>
+                        <strong>Error: </strong>
+                        {errors.non_field_errors?.join(', ') || errors.detail}
+                    </div>
+                )}
+
                 <h3 style={{ fontSize: '14px', borderBottom: '1px solid var(--color-border)', paddingBottom: '4px', marginBottom: '8px' }}>BASIC INFORMATION</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-3)' }}>
                     <div className="form-field">
@@ -138,8 +164,9 @@ export const EntityModal: React.FC<EntityModalProps> = ({ isOpen, onClose, onSav
                         name="code" 
                         value={formData.code} 
                         onChange={handleChange} 
-                        required 
+                        placeholder="Auto-generated (e.g. CUST-0001)"
                         error={errors.code?.join(', ')}
+                        helpText="Optional: Leave blank to auto-generate code"
                     />
                     
                     <Input 

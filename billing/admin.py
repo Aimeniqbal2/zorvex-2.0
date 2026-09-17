@@ -54,3 +54,78 @@ class BillingAccountingConfigurationAdmin(admin.ModelAdmin):
         'default_currency', 'is_active'
     )
     list_filter = ('company', 'is_active')
+
+
+from .models import (
+    BillingPeriod, BillingSheet, BillingSheetLine, BillingAdjustment,
+    ClientInvoice, ClientInvoiceLine
+)
+
+
+@admin.register(BillingPeriod)
+class BillingPeriodAdmin(admin.ModelAdmin):
+    list_display = ('contract', 'client', 'billing_month', 'period_start', 'period_end', 'status', 'company')
+    list_filter = ('company', 'status', 'billing_month')
+    search_fields = ('contract__contract_code', 'client__name')
+
+
+@admin.register(BillingSheet)
+class BillingSheetAdmin(admin.ModelAdmin):
+    list_display = ('sheet_number', 'client', 'contract', 'billing_month', 'status', 'total_amount', 'company')
+    list_filter = ('company', 'status', 'billing_month')
+    search_fields = ('sheet_number', 'client__name', 'contract__contract_code')
+    readonly_fields = ('sheet_number', 'prepared_at', 'reviewed_at', 'approved_at', 'created_at', 'updated_at')
+
+
+@admin.register(BillingSheetLine)
+class BillingSheetLineAdmin(admin.ModelAdmin):
+    list_display = ('billing_sheet', 'line_type', 'description', 'site', 'billable_quantity', 'unit_rate', 'total_amount')
+    list_filter = ('company', 'line_type', 'source')
+    search_fields = ('billing_sheet__sheet_number', 'description')
+
+
+@admin.register(BillingAdjustment)
+class BillingAdjustmentAdmin(admin.ModelAdmin):
+    list_display = ('billing_sheet', 'adjustment_type', 'reason', 'amount', 'tax_amount', 'created_by')
+    list_filter = ('company', 'adjustment_type')
+    search_fields = ('billing_sheet__sheet_number', 'reason')
+
+
+@admin.register(ClientInvoice)
+class ClientInvoiceAdmin(admin.ModelAdmin):
+    list_display = ('invoice_number', 'client', 'contract', 'billing_month', 'invoice_date', 'due_date', 'grand_total', 'status')
+    list_filter = ('company', 'status', 'billing_month')
+    search_fields = ('invoice_number', 'client__name', 'contract__contract_code')
+    readonly_fields = ('invoice_number', 'issued_at', 'sent_at', 'created_at', 'updated_at')
+
+
+@admin.register(ClientInvoiceLine)
+class ClientInvoiceLineAdmin(admin.ModelAdmin):
+    list_display = ('invoice', 'line_type', 'description', 'site', 'quantity', 'unit_rate', 'total_amount')
+    list_filter = ('company', 'line_type')
+    search_fields = ('invoice__invoice_number', 'description')
+
+
+from .models import ClientReceipt, ClientReceiptAllocation, RecoveryActivity
+
+
+@admin.register(ClientReceipt)
+class ClientReceiptAdmin(admin.ModelAdmin):
+    list_display = ('receipt_number', 'client', 'receipt_date', 'amount', 'payment_method', 'status', 'company')
+    list_filter = ('company', 'status', 'payment_method')
+    search_fields = ('receipt_number', 'client__name', 'reference_number', 'cheque_number')
+    readonly_fields = ('receipt_number', 'posted_at', 'posted_by', 'reversed_at', 'reversed_by', 'created_at', 'updated_at')
+
+
+@admin.register(ClientReceiptAllocation)
+class ClientReceiptAllocationAdmin(admin.ModelAdmin):
+    list_display = ('receipt', 'invoice', 'allocated_amount', 'company')
+    list_filter = ('company',)
+    search_fields = ('receipt__receipt_number', 'invoice__invoice_number')
+
+
+@admin.register(RecoveryActivity)
+class RecoveryActivityAdmin(admin.ModelAdmin):
+    list_display = ('client', 'invoice', 'activity_type', 'activity_date', 'recovery_status_outcome', 'assigned_to', 'company')
+    list_filter = ('company', 'activity_type', 'recovery_status_outcome')
+    search_fields = ('client__name', 'invoice__invoice_number', 'notes')

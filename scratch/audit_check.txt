@@ -1,8 +1,0 @@
-COMMAND: venv\Scripts\python manage.py check
-========================================
-STDOUT:
-System check identified no issues (0 silenced).
-
-STDERR:
-
-RETURN CODE: 0

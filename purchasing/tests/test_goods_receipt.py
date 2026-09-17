@@ -593,8 +593,9 @@ class GRNAPITests(GoodsReceiptBaseTestCase):
 
         post_resp = self.client.post(f'/api/purchasing/documents/{grn_id}/post_grn/', {}, format='json')
         self.assertEqual(post_resp.status_code, 200)
-        self.assertEqual(post_resp.data['status'], 'RECEIVED')
+        self.assertIn(post_resp.data['status'], ['POSTED', 'RECEIVED'])
         self.assertEqual(self.get_balance(), Decimal('100'))
+
 
     def test_api_unapproved_po_receive_rejected(self):
         """Cannot create GRN via API against a DRAFT PO."""

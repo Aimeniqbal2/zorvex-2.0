@@ -1,9 +1,0 @@
-COMMAND: venv\Scripts\python manage.py test --noinput
-========================================
-STDOUT:
-
-STDERR:
-Creating test database for alias 'default'...
-
-........................................................................
-RETURN CODE: 1

@@ -6,25 +6,11 @@ from django.views.static import serve
 from rest_framework_simplejwt.views import TokenRefreshView
 from accounts.views import CustomTokenObtainPairView
 from erp_core.search_views import GlobalSearchView
-from django.views.generic import TemplateView
-from erp_core import views
+from django.views.generic import RedirectView
 
 urlpatterns = [
-    # PWA Service Worker (Served at root level)
-    path('sw.js', TemplateView.as_view(template_name='sw.js', content_type='application/javascript'), name='sw.js'),
-    # Frontend Views (Templates)
-    path('', views.dashboard_view, name='dashboard'),
-    path('login/', views.index_view, name='login'),
-    path('pos/', views.pos_view, name='pos'),
-    path('inventory/', views.inventory_view, name='inventory'),
-    path('services/', views.services_view, name='services'),
-    path('service-logs/', views.service_logs_view, name='service_logs'),
-    path('vendors/', views.vendors_view, name='vendors'),
-    path('credit/', views.credit_view, name='credit'),
-    path('team/', views.team_view, name='team'),
-    path('transactions/', views.sales_history_view, name='transactions'),
-    path('analytics/', views.analytics_view, name='analytics'),
-    path('zorvex/', TemplateView.as_view(template_name='zorvex_landing.html'), name='zorvex'),
+    # For local development, redirect Django root to the React development application.
+    path('', RedirectView.as_view(url='http://localhost:5173/app/', permanent=False), name='root_redirect'),
 
     path('admin/', admin.site.urls),
     
@@ -47,7 +33,9 @@ urlpatterns = [
     path('api/purchasing/', include('purchasing.urls')),
     path('api/operations/', include('operations.urls')),
     path('api/billing/', include('billing.urls')),
+    path('api/communications/', include('communications.urls')),
     path('api/platform/', include('platform_core.urls', namespace='platform_core')),
+    path('api/security/crm/', include('security_crm.urls', namespace='security_crm')),
 
     # Global cross-module search
     path('api/search/', GlobalSearchView.as_view(), name='global_search'),

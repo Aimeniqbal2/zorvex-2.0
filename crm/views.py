@@ -41,9 +41,10 @@ class CRMEntityViewSet(BaseCRMViewSet):
         # Backward compatible role filtering
         filter_role = role or entity_type
         if filter_role:
-            # Prevent duplicates if an entity has multiple roles somehow, 
-            # though role mapping should be unique
-            queryset = queryset.filter(role_mappings__role__iexact=filter_role).distinct()
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(role_mappings__role__iexact=filter_role) | Q(entity_type__iexact=filter_role)
+            ).distinct()
             
         if status:
             queryset = queryset.filter(status__iexact=status)
@@ -171,7 +172,12 @@ class OpportunityViewSet(BaseCRMViewSet):
     ordering_fields = ['created_at', 'expected_close_date']
 
     def perform_create(self, serializer):
-        serializer.save(company_id=self.request.user.company_id, owner=self.request.user)
+        import time
+        from django.utils.crypto import get_random_string
+        opp_number = serializer.validated_data.get('opportunity_number')
+        if not opp_number:
+            opp_number = f"OPP-{get_random_string(6).upper()}"
+        serializer.save(company_id=self.request.user.company_id, owner=self.request.user, opportunity_number=opp_number)
 
     @action(detail=True, methods=['post'])
     def convert_to_contract(self, request, pk=None):
@@ -190,7 +196,11 @@ class ProposalViewSet(BaseCRMViewSet):
     search_fields = ['title', 'proposal_number']
 
     def perform_create(self, serializer):
-        serializer.save(company_id=self.request.user.company_id)
+        from django.utils.crypto import get_random_string
+        prop_number = serializer.validated_data.get('proposal_number')
+        if not prop_number:
+            prop_number = f"PROP-{get_random_string(6).upper()}"
+        serializer.save(company_id=self.request.user.company_id, proposal_number=prop_number)
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):

@@ -67,7 +67,7 @@ export const updateFiscalYear = async (id: string, data: any) => {
 };
 
 export const fetchAccountingPeriods = async (fiscalYearId?: string) => {
-    const url = fiscalYearId ? `/finance/accounting-periods/?fiscal_year=${fiscalYearId}` : '/finance/accounting-periods/';
+    const url = fiscalYearId ? `/api/finance/accounting-periods/?fiscal_year=${fiscalYearId}` : '/api/finance/accounting-periods/';
     const res = await api.get(url);
     return res.data;
 };

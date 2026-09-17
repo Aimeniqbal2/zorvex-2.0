@@ -8,11 +8,16 @@ import type { Column } from '../../../components/tables/DataTable';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { Badge } from '../../../components/ui/Badge';
+import { LeaveRequestModal } from './LeaveRequestModal';
+import { LeaveTypesList } from './LeaveTypesList';
 
 export const LeaveList: React.FC = () => {
     const [requests, setRequests] = useState<LeaveRequest[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [view, setView] = useState<'requests' | 'types'>('requests');
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
 
     const fetchData = async () => {
         setLoading(true);
@@ -33,23 +38,29 @@ export const LeaveList: React.FC = () => {
     };
 
     useEffect(() => {
-        fetchData();
-    }, []);
+        if (view === 'requests') {
+            fetchData();
+        }
+    }, [view]);
+
+    if (view === 'types') {
+        return <LeaveTypesList onBack={() => setView('requests')} />;
+    }
 
     const handleStatusChange = async (id: string, status: string) => {
         try {
             await apiClient.patch(`/api/hrm/leave-requests/${id}/`, { status });
             fetchData();
         } catch (err: any) {
-            alert('Failed to update leave status: ' + (err.response?.data?.error || err.message));
+            alert('Failed to update leave status: ' + (err.response?.data?.detail || err.message));
         }
     };
 
     const columns: Column<LeaveRequest>[] = [
-        { key: 'Employee', header: 'Employee', render: (l: LeaveRequest) => l.employee },
-        { key: 'Type', header: 'Leave Type', render: (l: LeaveRequest) => l.leave_type },
+        { key: 'Employee', header: 'Employee', render: (l: LeaveRequest) => l.employee_name || l.employee },
+        { key: 'Type', header: 'Leave Type', render: (l: LeaveRequest) => l.leave_type_name || l.leave_type },
         { key: 'Dates', header: 'Dates', render: (l: LeaveRequest) => `${l.start_date} to ${l.end_date}` },
-        { key: 'Days', header: 'Requested Days', render: (l: LeaveRequest) => (l as any).requested_days },
+        { key: 'Days', header: 'Requested Days', render: (l: LeaveRequest) => l.total_days || (l as any).requested_days },
         { key: 'Status', header: 'Status', render: (l: LeaveRequest) => (
             <Badge variant={l.status === 'APPROVED' ? 'success' : l.status === 'PENDING' ? 'warning' : l.status === 'REJECTED' ? 'danger' : 'default'}>{l.status}</Badge>
         )},
@@ -61,7 +72,7 @@ export const LeaveList: React.FC = () => {
                         <Button variant="secondary" onClick={() => handleStatusChange(l.id, 'REJECTED')}>Reject</Button>
                     </>
                 )}
-                <Button variant="secondary">View</Button>
+                <Button variant="secondary" onClick={() => { setSelectedRequest(l); setIsModalOpen(true); }}>Edit/View</Button>
             </div>
         )}
     ];
@@ -74,11 +85,18 @@ export const LeaveList: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0 }}>Leave Requests</h3>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <Button variant="secondary" onClick={() => {}}>Types & Balances</Button>
-                    <Button variant="primary" onClick={() => {}}>Request Leave</Button>
+                    <Button variant="secondary" onClick={() => setView('types')}>Types & Balances</Button>
+                    <Button variant="primary" onClick={() => { setSelectedRequest(null); setIsModalOpen(true); }}>Request Leave</Button>
                 </div>
             </div>
             <DataTable columns={columns} data={requests} keyExtractor={(item: any) => item.id} />
+            
+            <LeaveRequestModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                onSave={fetchData} 
+                leaveRequest={selectedRequest} 
+            />
         </div>
     );
 };

@@ -1,5 +1,38 @@
+# Environment & Secrets
 .env
+.env.*
+!.env.prod.example
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Logs & Temporary debug files
+*.log
+erp_system.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+vite_build_log.txt
+test_output.txt
+test_results*.txt
+
+# Build artifacts & Dependencies
 staticfiles/
 media/
-*.log
-__pycache__/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+artifacts/
+
+# Scratch & Dev temporary files
+scratch/
+*.tmp
+*.bak
+
+# AI Handover & Agent Documentation (Preserved locally, excluded from GitHub)
+.ai/
+AGENTS.md

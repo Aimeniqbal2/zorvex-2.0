@@ -14,6 +14,8 @@ import { EntityModal } from './components/EntityModal';
 import { EntityDetail } from './components/EntityDetail';
 import { OpportunitiesList } from './components/bd/OpportunitiesList';
 import { ProposalsList } from './components/bd/ProposalsList';
+import { ProposalDetail } from './components/bd/ProposalDetail';
+import { OpportunityDetail } from './components/bd/OpportunityDetail';
 import './styles/crm.css';
 
 const FILTER_TABS: { label: string, value: CRMEntityType | '' }[] = [
@@ -32,7 +34,9 @@ export const CRMModule: React.FC = () => {
         search, setSearch, 
         page, setPage,
         ordering,
-        selectedEntityId, setSelectedEntityId
+        selectedEntityId, setSelectedEntityId,
+        selectedProposalId, setSelectedProposalId,
+        selectedOpportunityId, setSelectedOpportunityId
     } = useCrmStore();
     
     const [debouncedSearch, setDebouncedSearch] = useState(search);
@@ -216,6 +220,34 @@ export const CRMModule: React.FC = () => {
         );
     }
 
+    if (selectedProposalId) {
+        return (
+            <PageContainer>
+                <ProposalDetail 
+                    proposalId={selectedProposalId} 
+                    onBack={() => {
+                        setSelectedProposalId(null);
+                        setRefreshTrigger(prev => prev + 1);
+                    }} 
+                />
+            </PageContainer>
+        );
+    }
+
+    if (selectedOpportunityId) {
+        return (
+            <PageContainer>
+                <OpportunityDetail 
+                    opportunityId={selectedOpportunityId} 
+                    onBack={() => {
+                        setSelectedOpportunityId(null);
+                        setRefreshTrigger(prev => prev + 1);
+                    }} 
+                />
+            </PageContainer>
+        );
+    }
+
     return (
         <PageContainer>
             <PageHeader 
@@ -228,19 +260,23 @@ export const CRMModule: React.FC = () => {
                 }
             />
 
-            <div className="crm-tabs" style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--color-border)', marginBottom: '16px' }}>
+            <div className="crm-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid var(--color-border)', paddingBottom: '16px', marginBottom: '16px' }}>
                 {['entities', 'opportunities', 'proposals'].map(tab => (
                     <button
                         key={tab}
                         style={{
                             padding: '8px 16px',
-                            background: 'none',
-                            border: 'none',
-                            borderBottom: activeTab === tab ? '2px solid var(--color-primary)' : '2px solid transparent',
-                            color: activeTab === tab ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: activeTab === tab ? 600 : 400,
+                            background: activeTab === tab ? 'var(--color-primary)' : 'var(--color-background)',
+                            border: `1px solid ${activeTab === tab ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                            borderRadius: '20px',
+                            color: activeTab === tab ? 'white' : 'var(--color-text-muted)',
+                            fontWeight: 500,
+                            fontSize: '13.5px',
                             cursor: 'pointer',
-                            textTransform: 'capitalize'
+                            textTransform: 'capitalize',
+                            transition: 'all 0.2s ease',
+                            whiteSpace: 'nowrap',
+                            boxShadow: activeTab === tab ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none'
                         }}
                         onClick={() => setActiveTab(tab as any)}
                     >

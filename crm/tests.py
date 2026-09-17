@@ -71,15 +71,17 @@ class CRMTestCase(APITestCase):
             code="C2"
         )
         
-        # User 1 should only see Comp1 Cust
-        res1 = self.client1.get('/api/crm/entities/')
-        self.assertEqual(len(res1.data), 1)
-        self.assertEqual(res1.data[0]['name'], "Comp1 Cust")
+        # User 1 should only see Comp1 Cust when querying CUSTOMER entities
+        res1 = self.client1.get('/api/crm/entities/?entity_type=CUSTOMER')
+        results1 = res1.data.get('results', res1.data)
+        self.assertEqual(len(results1), 1)
+        self.assertEqual(results1[0]['name'], "Comp1 Cust")
         
-        # User 2 should only see Comp2 Cust
-        res2 = self.client2.get('/api/crm/entities/')
-        self.assertEqual(len(res2.data), 1)
-        self.assertEqual(res2.data[0]['name'], "Comp2 Cust")
+        # User 2 should only see Comp2 Cust when querying CUSTOMER entities
+        res2 = self.client2.get('/api/crm/entities/?entity_type=CUSTOMER')
+        results2 = res2.data.get('results', res2.data)
+        self.assertEqual(len(results2), 1)
+        self.assertEqual(results2[0]['name'], "Comp2 Cust")
 
     def test_unique_entity_code_per_company(self):
         CRMEntity.objects.create(
@@ -143,3 +145,46 @@ class CRMTestCase(APITestCase):
         
         res = self.client1.get('/api/crm/entities/')
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_auto_generate_code_sequential(self):
+        """Verify that CRM entities without a provided code are automatically assigned sequential codes."""
+        # 1. Create first customer without code
+        res1 = self.client1.post('/api/crm/entities/', {
+            "entity_type": "CUSTOMER",
+            "name": "Alpha Corp"
+        })
+        self.assertEqual(res1.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res1.data['code'], 'CUST-0001')
+
+        # 2. Create second customer without code
+        res2 = self.client1.post('/api/crm/entities/', {
+            "entity_type": "CUSTOMER",
+            "name": "Beta Industries"
+        })
+        self.assertEqual(res2.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res2.data['code'], 'CUST-0002')
+
+        # 3. Create a supplier without code
+        res3 = self.client1.post('/api/crm/entities/', {
+            "entity_type": "SUPPLIER",
+            "name": "Gamma Logistics"
+        })
+        self.assertEqual(res3.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res3.data['code'], 'SUPP-0001')
+
+        # 4. Create custom code entity
+        res4 = self.client1.post('/api/crm/entities/', {
+            "entity_type": "CUSTOMER",
+            "name": "Custom Client",
+            "code": "CUSTOM-99"
+        })
+        self.assertEqual(res4.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res4.data['code'], 'CUSTOM-99')
+
+        # 5. Company 2 gets its own isolated sequence
+        res5 = self.client2.post('/api/crm/entities/', {
+            "entity_type": "CUSTOMER",
+            "name": "Other Company Customer"
+        })
+        self.assertEqual(res5.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res5.data['code'], 'CUST-0001')

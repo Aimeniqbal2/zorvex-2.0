@@ -7,22 +7,28 @@ import { Badge } from '../../../../components/ui/Badge';
 import { getProposals } from '../../api';
 import type { Proposal, PaginatedResponse } from '../../types';
 import { useToastStore } from '../../../../stores/toastStore';
+import { ProposalModal } from './ProposalModal';
+import { useCrmStore } from '../../store/useCrmStore';
 
 export const ProposalsList: React.FC = () => {
     const [data, setData] = useState<PaginatedResponse<Proposal> | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const { setSelectedProposalId } = useCrmStore();
+
+    const fetchProposals = async () => {
+        setIsLoading(true);
+        try {
+            const response = await getProposals();
+            setData(response);
+        } catch (err) {
+            useToastStore.getState().error('Failed to load proposals');
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchProposals = async () => {
-            try {
-                const response = await getProposals();
-                setData(response);
-            } catch (err) {
-                useToastStore.getState().error('Failed to load proposals');
-            } finally {
-                setIsLoading(false);
-            }
-        };
         fetchProposals();
     }, []);
 
@@ -55,7 +61,11 @@ export const ProposalsList: React.FC = () => {
         {
             key: 'actions',
             header: 'Actions',
-            render: () => <Button variant="ghost" disabled><i className='bx bx-show'></i></Button>
+            render: (prop) => (
+                <Button variant="ghost" onClick={() => setSelectedProposalId(prop.id)}>
+                    <i className='bx bx-show'></i>
+                </Button>
+            )
         }
     ];
 
@@ -64,7 +74,7 @@ export const ProposalsList: React.FC = () => {
             <Toolbar>
                 <div style={{ fontWeight: 600 }}>Proposals</div>
                 <div style={{ flex: 1 }} />
-                <Button variant="primary">Create Proposal</Button>
+                <Button variant="primary" onClick={() => setIsModalOpen(true)}>Create Proposal</Button>
             </Toolbar>
             <DataTable 
                 data={data?.results || []}
@@ -72,6 +82,13 @@ export const ProposalsList: React.FC = () => {
                 isLoading={isLoading}
                 keyExtractor={(row) => row.id}
             />
+            {isModalOpen && (
+                <ProposalModal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    onSaved={fetchProposals}
+                />
+            )}
         </div>
     );
 };

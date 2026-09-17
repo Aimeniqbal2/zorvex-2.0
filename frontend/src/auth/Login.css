@@ -9,7 +9,7 @@
   top: 0;
   left: 0;
   overflow: hidden;
-  background: url('/assets/bg-new.png') no-repeat center/cover;
+  background: url('/app/assets/bg-new.png') no-repeat center/cover;
   font-family: 'Inter', sans-serif;
   z-index: 9999;
 }
@@ -142,8 +142,8 @@
 
 @keyframes spin { 100% { transform: rotate(360deg); } }
 @keyframes pulseLogo { 
-  0% { transform: scale(1); filter: drop-shadow(0 0 15px rgba(122, 162, 255, 0.4)); } 
-  100% { transform: scale(1.05); filter: drop-shadow(0 0 25px rgba(122, 162, 255, 0.8)); } 
+  0% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.2)); } 
+  100% { transform: scale(1.04); filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.4)); } 
 }
 
 /* wrapper */
@@ -206,25 +206,20 @@
   box-shadow: 20px 0 50px rgba(0, 0, 0, 0.9);
 }
 
-/* LOGO */
 .login-page-wrapper .logo {
   text-align: center;
-  font-size: 60px;
-  font-weight: 600;
-  letter-spacing: 3px;
   animation: pulseLogo 4s infinite alternate ease-in-out;
-  filter: drop-shadow(0 0 15px rgba(122, 162, 255, 0.4));
-  -webkit-background-clip: text;
 }
 
 .login-page-wrapper .logo img {
-  width: 250px;
+  height: 70px;
+  width: auto;
+  max-width: 260px;
   display: block;
   margin: 0 auto;
   margin-top: 15px;
   margin-bottom: 30px;
   animation: pulseLogo 4s infinite alternate ease-in-out;
-  filter: drop-shadow(0 0 15px rgba(122, 162, 255, 0.4));
 }
 
 /* inputs */
@@ -288,7 +283,7 @@
 /* RIGHT IMAGE */
 .login-page-wrapper .right {
   width: 50%;
-  background: url('/assets/right_img.png') no-repeat center/cover;
+  background: url('/app/assets/right_img.png') no-repeat center/cover;
 }
 
 /* responsive */

@@ -183,7 +183,7 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({ isOpen, onClose,
                         <p style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
                             Documents functionality requires the dedicated candidate detail page. Currently viewing basic Bio Data.
                         </p>
-                        {/* Placeholder for Documents */}
+
                         {candidate?.documents?.length ? (
                             <ul style={{ listStyle: 'none', padding: 0 }}>
                                 {candidate.documents.map(d => (

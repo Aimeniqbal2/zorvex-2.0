@@ -86,3 +86,12 @@ def unissue_serial(serial, warehouse):
     serial.status = 'IN_STOCK'
     serial.save(update_fields=['warehouse', 'status', 'updated_at'])
     return serial
+
+@transaction.atomic
+def return_serial_to_vendor(serial):
+    """Mark an in-stock or defective serial as returned to vendor."""
+    if serial.status not in ['IN_STOCK', 'DEFECTIVE']:
+        raise SerialException(f"Serial {serial.serial_number} is {serial.status} and cannot be returned to vendor.")
+    serial.status = 'RETURNED'
+    serial.save(update_fields=['status', 'updated_at'])
+    return serial

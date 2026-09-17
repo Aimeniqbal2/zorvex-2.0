@@ -1,0 +1,255 @@
+/* DesktopDashboard.css — Premium Command Center */
+
+.dd-container {
+    padding: 24px 32px 140px 32px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100%;
+    max-height: 100%;
+    box-sizing: border-box;
+    background: var(--color-background);
+}
+
+/* ─── Greeting Banner ─────────────────────────────────────────── */
+.dd-greeting-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, #092453 0%, #1a4a96 60%, #2d6cdf 100%);
+    border-radius: 16px;
+    padding: 20px 32px;
+    min-height: 100px;
+    color: white;
+    box-shadow: 0 8px 32px rgba(9, 36, 83, 0.35);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.dd-greeting-banner::before {
+    content: '';
+    position: absolute;
+    top: -40px;
+    right: -40px;
+    width: 220px;
+    height: 220px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 50%;
+}
+
+.dd-greeting-banner::after {
+    content: '';
+    position: absolute;
+    bottom: -60px;
+    right: 80px;
+    width: 160px;
+    height: 160px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 50%;
+}
+
+.dd-greeting-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    z-index: 1;
+}
+
+.dd-greeting-company-logo {
+    width: 100px;
+    height: 100px;
+    border-radius: 14px;
+    object-fit: contain;
+    background: white;
+    padding: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.dd-greeting-title {
+    margin: 0 0 8px 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+}
+
+.dd-greeting-sub {
+    margin: 0;
+    font-size: 14px;
+    color: rgba(255,255,255,0.7);
+}
+
+.dd-greeting-right {
+    text-align: right;
+    z-index: 1;
+}
+
+.dd-clock {
+    font-size: 32px;
+    font-weight: 700;
+    color: white;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+}
+
+.dd-date {
+    font-size: 13px;
+    color: rgba(255,255,255,0.65);
+    margin-top: 4px;
+}
+
+/* ─── KPI Cards ───────────────────────────────────────────────── */
+.dd-kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+}
+
+.dd-kpi-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: all 0.25s ease;
+    box-shadow: var(--shadow-sm);
+}
+
+.dd-kpi-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+}
+
+.dd-kpi-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.dd-kpi-icon i {
+    font-size: 26px;
+    color: white;
+}
+
+.dd-kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--color-text);
+    line-height: 1;
+    margin-bottom: 4px;
+}
+
+.dd-kpi-label {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    font-weight: 500;
+    margin-bottom: 6px;
+}
+
+.dd-kpi-sub {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.dd-kpi-sub i {
+    font-size: 14px;
+}
+
+/* ─── Section Header ─────────────────────────────────────────── */
+.dd-section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.dd-section-title i {
+    color: var(--color-primary);
+    font-size: 18px;
+}
+
+[data-theme='dark'] .dd-section-title i {
+    color: #ffffff;
+}
+
+/* ─── Quick Actions ─────────────────────────────────────────── */
+.dd-quick-actions-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.dd-quick-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 18px 22px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    min-width: 110px;
+    box-shadow: var(--shadow-sm);
+    flex: 1;
+}
+
+.dd-quick-action:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-primary);
+}
+
+.dd-qa-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dd-qa-icon i {
+    font-size: 22px;
+    color: white;
+}
+
+.dd-quick-action span {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--color-text);
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* ─── Dark Theme Adjustments ─────────────────────────────────── */
+[data-theme='dark'] .dd-kpi-card,
+[data-theme='dark'] .dd-quick-action {
+    background: var(--color-surface);
+    border-color: var(--color-border);
+}
+
+/* ─── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+    .dd-kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+    .dd-container { padding: 16px 16px 60px 16px; }
+    .dd-kpi-row { grid-template-columns: 1fr; }
+    .dd-greeting-right { display: none; }
+}

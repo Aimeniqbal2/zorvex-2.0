@@ -3,7 +3,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { apiClient } from '../api';
-import type { Deployment, OperationalSite, ServiceContract, DesignationOption, EmployeeOption } from '../types';
+import type { Deployment, OperationalSite, SecurityPost, ServiceContract, DesignationOption, EmployeeOption } from '../types';
 
 interface DeploymentModalProps {
     isOpen: boolean;
@@ -12,12 +12,13 @@ interface DeploymentModalProps {
     deployment: Deployment | null;
 }
 
-const DEPLOYMENT_STATUSES = ['DRAFT', 'PLANNED', 'ACTIVE', 'COMPLETED', 'CANCELLED'] as const;
+const DEPLOYMENT_STATUSES = ['DRAFT', 'PLANNED', 'ACTIVE', 'COMPLETED', 'RELIEVED', 'CANCELLED'] as const;
 
 export const DeploymentModal: React.FC<DeploymentModalProps> = ({
     isOpen, onClose, onSave, deployment
 }) => {
     const [sites, setSites] = useState<OperationalSite[]>([]);
+    const [sitePosts, setSitePosts] = useState<SecurityPost[]>([]);
     const [designations, setDesignations] = useState<DesignationOption[]>([]);
     const [employees, setEmployees] = useState<EmployeeOption[]>([]);
     const [empSearch, setEmpSearch] = useState('');
@@ -26,8 +27,10 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
     const [formData, setFormData] = useState<Partial<Deployment>>({
         employee: '',
         site: '',
+        post: '',
         service_contract: null,
         designation: '',
+        assignment_type: 'PERMANENT',
         start_date: '',
         end_date: null,
         status: 'DRAFT',
@@ -45,27 +48,33 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                 setFormData({
                     employee: deployment.employee,
                     site: deployment.site,
+                    post: deployment.post || '',
                     service_contract: deployment.service_contract,
                     designation: deployment.designation,
+                    assignment_type: deployment.assignment_type || 'PERMANENT',
                     start_date: deployment.start_date,
                     end_date: deployment.end_date,
                     status: deployment.status,
                     notes: deployment.notes || '',
                 });
                 fetchContractsForSite(deployment.site);
+                fetchPostsForSite(deployment.site);
                 fetchEmployeesDebounced('');
             } else {
                 setFormData({
                     employee: '',
                     site: '',
+                    post: '',
                     service_contract: null,
                     designation: '',
+                    assignment_type: 'PERMANENT',
                     start_date: '',
                     end_date: null,
                     status: 'DRAFT',
                     notes: '',
                 });
                 setSiteContracts([]);
+                setSitePosts([]);
             }
             setError(null);
         }
@@ -81,6 +90,16 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
             setDesignations(desigRes.data.results || desigRes.data);
         } catch (err) {
             console.error('Failed to fetch static data', err);
+        }
+    };
+
+    const fetchPostsForSite = async (siteId: string) => {
+        if (!siteId) { setSitePosts([]); return; }
+        try {
+            const res = await apiClient.get(`/api/operations/posts/?site=${siteId}&is_active=true&page_size=100`);
+            setSitePosts(res.data.results || res.data);
+        } catch {
+            setSitePosts([]);
         }
     };
 
@@ -125,7 +144,22 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
 
         if (name === 'site') {
             fetchContractsForSite(value);
-            setFormData(prev => ({ ...prev, site: value, service_contract: null }));
+            fetchPostsForSite(value);
+            setFormData(prev => ({ ...prev, site: value, post: '', service_contract: null }));
+        }
+        if (name === 'post') {
+            const selectedPost = sitePosts.find(p => p.id === value);
+            if (selectedPost && selectedPost.required_designation) {
+                setFormData(prev => ({
+                    ...prev,
+                    post: value,
+                    designation: selectedPost.required_designation,
+                    service_contract: selectedPost.service_contract || prev.service_contract
+                }));
+                fetchEmployeesDebounced(empSearch);
+            } else {
+                setFormData(prev => ({ ...prev, post: value }));
+            }
         }
         if (name === 'designation') {
             setFormData(prev => ({ ...prev, designation: value, employee: '' }));
@@ -140,6 +174,7 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
 
         const payload = {
             ...formData,
+            post: formData.post || null,
             end_date: formData.end_date || null,
             service_contract: formData.service_contract || null,
         };
@@ -184,6 +219,41 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                         ⚠️ Active deployment: employee, site, and designation cannot be changed.
                     </div>
                 )}
+
+                {/* Site */}
+                <div className="form-field">
+                    <label className="form-label">Site <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+                    <select
+                        name="site"
+                        value={formData.site || ''}
+                        onChange={handleChange}
+                        className="input-base"
+                        required
+                        disabled={isEditActive}
+                    >
+                        <option value="">Select Site</option>
+                        {sites.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Security Post (Optional) */}
+                <div className="form-field">
+                    <label className="form-label">Security Post (Optional)</label>
+                    <select
+                        name="post"
+                        value={formData.post || ''}
+                        onChange={handleChange}
+                        className="input-base"
+                        disabled={isEditActive || !formData.site}
+                    >
+                        <option value="">Unassigned / General Post</option>
+                        {sitePosts.map(p => (
+                            <option key={p.id} value={p.id}>{p.post_name} ({p.required_designation_name || 'Post'}, Req: {p.required_headcount})</option>
+                        ))}
+                    </select>
+                </div>
 
                 {/* Designation first — filters employee list */}
                 <div className="form-field">
@@ -234,24 +304,6 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                     </select>
                 </div>
 
-                {/* Site */}
-                <div className="form-field">
-                    <label className="form-label">Site <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                    <select
-                        name="site"
-                        value={formData.site || ''}
-                        onChange={handleChange}
-                        className="input-base"
-                        required
-                        disabled={isEditActive}
-                    >
-                        <option value="">Select Site</option>
-                        {sites.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
-                </div>
-
                 {/* Contract — optional, filtered to site */}
                 <div className="form-field">
                     <label className="form-label">Service Contract (optional)</label>
@@ -290,19 +342,34 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                     />
                 </div>
 
-                {/* Status */}
-                <div className="form-field">
-                    <label className="form-label">Status</label>
-                    <select
-                        name="status"
-                        value={formData.status || 'DRAFT'}
-                        onChange={handleChange}
-                        className="input-base"
-                    >
-                        {DEPLOYMENT_STATUSES.map(s => (
-                            <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>
-                        ))}
-                    </select>
+                {/* Status and Assignment Type */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div className="form-field">
+                        <label className="form-label">Status</label>
+                        <select
+                            name="status"
+                            value={formData.status || 'DRAFT'}
+                            onChange={handleChange}
+                            className="input-base"
+                        >
+                            {DEPLOYMENT_STATUSES.map(s => (
+                                <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="form-field">
+                        <label className="form-label">Assignment Type</label>
+                        <select
+                            name="assignment_type"
+                            value={formData.assignment_type || 'PERMANENT'}
+                            onChange={handleChange}
+                            className="input-base"
+                        >
+                            <option value="PERMANENT">Permanent</option>
+                            <option value="TEMPORARY">Temporary</option>
+                        </select>
+                    </div>
                 </div>
 
                 {/* Notes */}

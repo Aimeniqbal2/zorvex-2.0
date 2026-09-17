@@ -70,7 +70,19 @@ def provision_company(
         address=kwargs.get('address', '')
     )
 
-    # 2. Assign selected modules
+    # 1.5 Install Industry Package if one exists for this business type
+    try:
+        from industries.common.registry import get_industry_package
+        pkg = get_industry_package(business_type)
+        if pkg:
+            # For security package
+            if business_type == 'security':
+                from industries.security.installer import install_security_package
+                install_security_package(company)
+    except ImportError:
+        pass
+
+    # 2. Assign selected (additional/manual) modules
     for mod_code in selected_modules:
         enable_module(company, mod_code)
 

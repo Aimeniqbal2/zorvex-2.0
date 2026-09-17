@@ -1,43 +1,5 @@
-from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from django.views.decorators.cache import cache_control
-
-
-@cache_control(no_cache=True, must_revalidate=True, no_store=True)
-def index_view(request):
-    return render(request, 'login.html')
-
-@cache_control(no_cache=True, must_revalidate=True, no_store=True)
-def dashboard_view(request):
-    return render(request, 'dashboard.html')
-
-def pos_view(request):
-    return render(request, 'pos.html')
-
-def inventory_view(request):
-    return render(request, 'inventory.html')
-
-def services_view(request):
-    return render(request, 'services.html')
-
-def service_logs_view(request):
-    return render(request, 'service-logs.html')
-
-def vendors_view(request):
-    return render(request, 'vendors.html')
-
-def credit_view(request):
-    return render(request, 'credit.html')
-
-def team_view(request):
-    return render(request, 'team.html')
-
-def sales_history_view(request):
-    return render(request, 'sales-history.html')
-
-def analytics_view(request):
-    return render(request, 'analytics.html')
 
 
 

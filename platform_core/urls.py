@@ -5,6 +5,7 @@ from django.urls import path
 from .views import (
     ModuleCatalogueView,
     ModuleStateView,
+    RuntimeConfigView,
     CompanyModuleListView,
     EnableModuleView,
     DisableModuleView,
@@ -15,6 +16,7 @@ from .views import (
     WarehouseDetailView,
     ProvisionCompanyView,
     IndustryTemplateView,
+    DashboardStatsView,
 )
 
 app_name = 'platform_core'
@@ -25,6 +27,8 @@ urlpatterns = [
 
     # Module state map (frontend navigation helper)
     path('module-state/', ModuleStateView.as_view(), name='module-state'),
+    path('runtime-config/', RuntimeConfigView.as_view(), name='runtime-config'),
+    path('dashboard-stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
 
     # Company-specific module management
     path('company-modules/', CompanyModuleListView.as_view(), name='company-module-list'),
