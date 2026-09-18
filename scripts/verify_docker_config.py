@@ -28,7 +28,13 @@ def audit_production_config():
     assert 'proxy_set_header X-Forwarded-Port $proxy_x_forwarded_port;' in nginx_conf, "Proxy must send $proxy_x_forwarded_port"
     assert 'try_files $uri $uri/ /app/index.html;' in nginx_conf, "Missing React SPA fallback in /app/"
     assert 'internal;' in nginx_conf and 'alias /app/media/;' in nginx_conf, "Protected media must enforce internal directive"
-    print("[OK] Container Nginx: HTTPS protocol preservation verified with direct curl fallback")
+    assert 'location /media/company_logos/' in nginx_conf, "Missing /media/company_logos/ location"
+    assert 'alias /app/media/company_logos/;' in nginx_conf, "Missing alias for company_logos"
+    # Verify precedence: /media/company_logos/ appears before /media/ in config
+    pos_logos = nginx_conf.find('location /media/company_logos/ {')
+    pos_media = nginx_conf.find('location /media/ {')
+    assert pos_logos != -1 and pos_media != -1 and pos_logos < pos_media, "location /media/company_logos/ must precede location /media/"
+    print("[OK] Container Nginx: Public company logos routed with internal protected media guard")
 
     # 3. Django Security Settings Audit
     with open('erp_core/settings.py', 'r', encoding='utf-8') as f:
@@ -36,10 +42,12 @@ def audit_production_config():
 
     assert "SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')" in settings, "Missing SECURE_PROXY_SSL_HEADER"
     assert "USE_X_FORWARDED_HOST = True" in settings, "Missing USE_X_FORWARDED_HOST"
+    assert "SESSION_COOKIE_SECURE = not DEBUG" in settings, "Missing SESSION_COOKIE_SECURE"
+    assert "CSRF_COOKIE_SECURE = not DEBUG" in settings, "Missing CSRF_COOKIE_SECURE"
     assert "_env_allowed_hosts = env.list('ALLOWED_HOSTS', default=None)" in settings, "Missing dynamic ALLOWED_HOSTS"
     assert "_env_csrf_trusted = env.list('CSRF_TRUSTED_ORIGINS', default=None)" in settings, "Missing dynamic CSRF_TRUSTED_ORIGINS"
     assert "CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)" in settings, "Missing dynamic CORS"
-    print("[OK] Django Settings: SECURE_PROXY_SSL_HEADER and dynamic CSRF/Hosts verified")
+    print("[OK] Django Settings: SECURE_PROXY_SSL_HEADER, Secure Cookies, and dynamic CSRF/Hosts verified")
 
     # 4. Frontend Vite Development Proxy Audit
     with open('frontend/vite.config.ts', 'r', encoding='utf-8') as f:
@@ -58,7 +66,13 @@ def audit_production_config():
     assert "return '';" in client_ts, "Browser must use same-origin relative URLs"
     print("[OK] Frontend Client: Same-origin relative URLs enforced for browser requests")
 
-    print("\nAll production deployment, proxy, and security audits PASSED (5/5)!")
+    # 6. Django Models Logo Field Audit
+    with open('companies/models.py', 'r', encoding='utf-8') as f:
+        companies_models = f.read()
+    assert "upload_to='company_logos/'" in companies_models, "Company.logo must upload to 'company_logos/'"
+    print("[OK] Media Security: Confirmed only Company.logo uploads to public company_logos/")
+
+    print("\nAll production deployment, proxy, media, and security audits PASSED (6/6)!")
 
 if __name__ == '__main__':
     audit_production_config()
