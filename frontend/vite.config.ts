@@ -50,7 +50,28 @@ function zorvexLandingPlugin(): Plugin {
           }
         }
 
-        // 3. Fallback for root /assets/* requests to frontend/public/assets
+        // 3. Service Worker handling (/sw.js and /app/sw.js)
+        if (pathname === '/sw.js' || pathname === '/app/sw.js') {
+          const swFile = path.resolve((import.meta.dirname || __dirname), 'public/sw.js');
+          if (fs.existsSync(swFile)) {
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+            res.setHeader('Service-Worker-Allowed', '/');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            return fs.createReadStream(swFile).pipe(res);
+          }
+        }
+
+        // 4. Web App Manifest handling (/manifest.webmanifest and /manifest.json)
+        if (pathname === '/manifest.webmanifest' || pathname === '/manifest.json' || pathname === '/app/manifest.webmanifest' || pathname === '/app/manifest.json') {
+          const manifestFile = path.resolve((import.meta.dirname || __dirname), 'public/manifest.webmanifest');
+          if (fs.existsSync(manifestFile)) {
+            res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache');
+            return fs.createReadStream(manifestFile).pipe(res);
+          }
+        }
+
+        // 5. Fallback for root /assets/* requests to frontend/public/assets
         if (pathname.startsWith('/assets/')) {
           const relativeAsset = pathname.replace(/^\//, '');
           const assetFile = path.resolve((import.meta.dirname || __dirname), 'public', relativeAsset);
@@ -69,7 +90,7 @@ function zorvexLandingPlugin(): Plugin {
           }
         }
 
-        // 4. Redirect /app to /app/
+        // 6. Redirect /app to /app/
         if (pathname === '/app') {
           res.writeHead(302, { Location: '/app/' });
           return res.end();

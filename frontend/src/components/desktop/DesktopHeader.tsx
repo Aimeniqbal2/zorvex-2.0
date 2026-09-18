@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../auth/authStore';
 import { SettingsModal } from './SettingsModal';
+import { InstallButton } from '../../pwa';
 
 export const DesktopHeader: React.FC = () => {
     const { theme, toggleTheme } = useAppStore();
@@ -34,6 +35,7 @@ export const DesktopHeader: React.FC = () => {
             </div>
             
             <div className="header-right">
+                <InstallButton variant="header" />
                 <button className="header-action-btn" title="Toggle Theme" onClick={toggleTheme}>
                     <i className={`bx ${theme === 'light' ? 'bx-moon' : 'bx-sun'}`}></i>
                 </button>
@@ -65,6 +67,7 @@ export const DesktopHeader: React.FC = () => {
                         <button className="dropdown-item" onClick={() => { setSettingsTab('settings'); setSettingsOpen(true); setMenuOpen(false); }}>
                             <i className='bx bx-cog'></i> Settings
                         </button>
+                        <InstallButton variant="dropdown-item" onInstalled={() => setMenuOpen(false)} />
                         <div className="dropdown-divider"></div>
                         <button className="dropdown-item text-danger" onClick={handleLogout}>
                             <i className='bx bx-log-out'></i> Logout

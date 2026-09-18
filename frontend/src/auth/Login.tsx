@@ -4,6 +4,7 @@ import { useAuthStore } from './authStore';
 import { TokenManager } from './tokenManager';
 import { apiClient } from '../api/client';
 import { ZorvexLoadingScreen } from '../components/ui/ZorvexLoadingScreen';
+import { InstallButton } from '../pwa';
 import './Login.css';
 
 const MESSAGES = [
@@ -154,6 +155,9 @@ export const Login: React.FC = () => {
 
     return (
         <div className="login-page-wrapper">
+            <div style={{ position: 'absolute', top: '20px', right: '24px', zIndex: 20 }}>
+                <InstallButton variant="header" />
+            </div>
             <div className="orb orb-1"></div>
             <div className="orb orb-2"></div>
             <div className="orb orb-3"></div>
