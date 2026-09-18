@@ -70,6 +70,10 @@ else:
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
+# Secure Cookies (Enabled in production when DEBUG=False; preserved HTTP for local dev)
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
 # Application definition
 
 INSTALLED_APPS = [
