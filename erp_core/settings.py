@@ -36,26 +36,39 @@ FIELD_ENCRYPTION_KEY = env('FIELD_ENCRYPTION_KEY', default=None)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG', default=True)
 
-CSRF_TRUSTED_ORIGINS = [
-    "http://softech.ltd",
-    "https://softech.ltd",
-    "https://www.softech.ltd",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://192.168.18.163:5173",
-    "http://192.168.18.163:8000",
-]
+# Allowed Hosts & CSRF Configuration (Dynamic with defaults for development)
+_env_allowed_hosts = env.list('ALLOWED_HOSTS', default=None)
+if _env_allowed_hosts:
+    ALLOWED_HOSTS = _env_allowed_hosts
+else:
+    ALLOWED_HOSTS = [
+        "softech.ltd",
+        "www.softech.ltd",
+        "46.224.187.226",
+        "localhost",
+        "127.0.0.1",
+        "*",
+    ]
 
-ALLOWED_HOSTS = [
-    "softech.ltd",
-    "www.softech.ltd",
-    "46.224.187.226",
-    "localhost",
-    "127.0.0.1",
-    "*",
-]
+_env_csrf_trusted = env.list('CSRF_TRUSTED_ORIGINS', default=None)
+if _env_csrf_trusted:
+    CSRF_TRUSTED_ORIGINS = _env_csrf_trusted
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        "http://softech.ltd",
+        "https://softech.ltd",
+        "https://www.softech.ltd",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://192.168.18.163:5173",
+        "http://192.168.18.163:8000",
+    ]
+
+# Reverse Proxy & SSL Configuration (Nginx terminates SSL in production)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 
 # Application definition
 
@@ -210,8 +223,11 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 10,
 }
 
-# CORS
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS Configuration
+CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)
+_cors_allowed = env.list('CORS_ALLOWED_ORIGINS', default=[])
+if _cors_allowed:
+    CORS_ALLOWED_ORIGINS = _cors_allowed
 
 # JWT configuration
 from datetime import timedelta

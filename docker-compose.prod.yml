@@ -1,28 +1,36 @@
-version: '3.8'
+# ==============================================================================
+# Zorvex ERP 2.0 — Production Docker Compose Specification
+# Project: zorvex-v2 (Isolated from legacy Zorvex 1.0 on host port 8000)
+# Reverse Proxy: Bound strictly to 127.0.0.1:8081:80 (Host Nginx handles 80/443)
+# ==============================================================================
+
+name: zorvex-v2
 
 services:
   db:
     image: postgres:15-alpine
+    container_name: zorvex_v2_db
     restart: unless-stopped
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - zorvex_v2_postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
+      POSTGRES_DB: ${DB_NAME:-erp_prod_db}
+      POSTGRES_USER: ${DB_USER:-erp_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     networks:
-      - internal_net
+      - zorvex_v2_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-erp_user} -d ${DB_NAME:-erp_prod_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
+    container_name: zorvex_v2_redis
     restart: unless-stopped
     networks:
-      - internal_net
+      - zorvex_v2_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -30,12 +38,15 @@ services:
       retries: 5
 
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zorvex_v2_web
     restart: unless-stopped
     command: gunicorn erp_core.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
     volumes:
-      - media_volume:/app/media
-      - static_volume:/app/staticfiles
+      - zorvex_v2_media_volume:/app/media
+      - zorvex_v2_static_volume:/app/staticfiles
     env_file:
       - .env
     depends_on:
@@ -44,14 +55,17 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - internal_net
+      - zorvex_v2_net
 
   celery_worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zorvex_v2_celery_worker
     restart: unless-stopped
     command: celery -A erp_core worker -l info --concurrency=2
     volumes:
-      - media_volume:/app/media
+      - zorvex_v2_media_volume:/app/media
     env_file:
       - .env
     depends_on:
@@ -60,10 +74,13 @@ services:
       db:
         condition: service_healthy
     networks:
-      - internal_net
+      - zorvex_v2_net
 
   celery_beat:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zorvex_v2_celery_beat
     restart: unless-stopped
     command: celery -A erp_core beat -l info
     env_file:
@@ -74,29 +91,33 @@ services:
       db:
         condition: service_healthy
     networks:
-      - internal_net
+      - zorvex_v2_net
 
   nginx:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: ./nginx/Dockerfile
+    container_name: zorvex_v2_nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # Bound strictly to localhost 8081. Host Ubuntu Nginx proxies 80/443 -> 127.0.0.1:8081
+      - "127.0.0.1:8081:80"
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/ssl:/etc/nginx/ssl
-      - media_volume:/app/media
-      - static_volume:/app/staticfiles
-      - ./frontend/dist:/usr/share/nginx/html
+      - zorvex_v2_static_volume:/app/staticfiles:ro
+      - zorvex_v2_media_volume:/app/media:ro
     depends_on:
       - web
     networks:
-      - internal_net
+      - zorvex_v2_net
 
 volumes:
-  postgres_data:
-  media_volume:
-  static_volume:
+  zorvex_v2_postgres_data:
+    name: zorvex_v2_postgres_data
+  zorvex_v2_media_volume:
+    name: zorvex_v2_media_volume
+  zorvex_v2_static_volume:
+    name: zorvex_v2_static_volume
 
 networks:
-  internal_net:
+  zorvex_v2_net:
+    name: zorvex_v2_net

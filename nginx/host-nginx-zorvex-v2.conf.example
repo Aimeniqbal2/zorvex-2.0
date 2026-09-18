@@ -1,0 +1,62 @@
+# ==============================================================================
+# Host Nginx Configuration Template for Zorvex ERP 2.0
+# Target on Hetzner VPS: /etc/nginx/sites-available/zorvex-v2
+# Symlink: sudo ln -s /etc/nginx/sites-available/zorvex-v2 /etc/nginx/sites-enabled/
+# ==============================================================================
+
+server {
+    listen 80;
+    server_name client.domain.com www.client.domain.com;
+
+    # Let's Encrypt / Certbot challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Redirect all HTTP traffic to HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name client.domain.com www.client.domain.com;
+
+    # SSL Certificates (managed by Certbot on host Ubuntu)
+    ssl_certificate /etc/letsencrypt/live/client.domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/client.domain.com/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Maximum file upload size (for attachments, invoices, documents)
+    client_max_body_size 50M;
+
+    # Proxy all traffic to Zorvex 2.0 container Nginx on localhost port 8081
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+
+        # WebSocket support (for live notifications / chat)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+}

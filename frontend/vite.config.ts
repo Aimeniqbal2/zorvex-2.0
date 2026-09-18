@@ -13,10 +13,11 @@ function zorvexLandingPlugin(): Plugin {
 
         // 1. Root marketing website at http://localhost:5173/
         if (pathname === '/' || pathname === '/index.html') {
-          const landingPath = path.resolve((import.meta.dirname || __dirname), '../Zorvex_website/zorvex_landing.html');
+          const indexLandingPath = path.resolve((import.meta.dirname || __dirname), '../Zorvex_website/index.html');
+          const legacyLandingPath = path.resolve((import.meta.dirname || __dirname), '../Zorvex_website/zorvex_landing.html');
+          const landingPath = fs.existsSync(indexLandingPath) ? indexLandingPath : legacyLandingPath;
           if (fs.existsSync(landingPath)) {
             let html = fs.readFileSync(landingPath, 'utf-8');
-            // Clean Django template tags and wire login CTA to React 2.0
             html = html
               .replace(/{%\s*load static\s*%}/g, '')
               .replace(/{%\s*static\s*['"]([^'"]+)['"]\s*%}/g, '/$1')

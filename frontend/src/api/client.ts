@@ -6,17 +6,13 @@ export const getApiBaseUrl = (): string => {
         return import.meta.env.VITE_API_BASE_URL;
     }
     if (typeof window !== 'undefined') {
-        if (window.location.port === '5173') {
-            return '';
-        }
-        if (window.location.hostname) {
-            return `http://${window.location.hostname}:8000`;
-        }
+        // In browser (both Vite dev proxy and Production Nginx proxy), use same-origin relative URLs
+        return '';
     }
     return 'http://127.0.0.1:8000';
 };
 
-export const API_HOST_URL = getApiBaseUrl() || (typeof window !== 'undefined' ? window.location.origin : '');
+export const API_HOST_URL = (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000');
 
 export const apiClient = axios.create({
     baseURL: getApiBaseUrl(),

@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zorvex - Elevate Your Business</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+    <header class="header">
+        <div class="container header-container">
+            <a href="#" class="logo">
+                <img src="/images/logo-full.png" alt="Zorvex Icon" class="logo-full">
+            </a>
+
+            <nav class="nav">
+                <ul class="nav-list">
+                    <li><a href="#product" class="nav-link">Product</a></li>
+                    <li><a href="#pricing" class="nav-link">Pricing</a></li>
+                    <li><a href="#company" class="nav-link">Company</a></li>
+                    <li><a href="#blog" class="nav-link">Blog</a></li>
+                    <li><a href="#changelog" class="nav-link">Changelog</a></li>
+                </ul>
+            </nav>
+
+            <div class="header-actions">
+                <a href="/app/login" class="login-link">Login</a>
+                <a href="/app/login" class="btn btn-primary">Start free trial</a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="hero-content">
+                <a href="#new" class="badge">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10L12 2Z" fill="#38BDF8" />
+                    </svg>
+                    <span class="badge-text">New: Our Analytics 2.0 just landed</span>
+                </a>
+
+                <h1 class="hero-title">Elevate your entire enterprise <br>with <span
+                        class="zorvex-outline">Zorvex</span></h1>
+
+                <p class="hero-description">
+                    The all-in-one ERP that unifies your sales, inventory, and financials.
+                </p>
+
+                <div class="glow-container">
+                    <div class="black-hole-glow"></div>
+
+                    <div class="black-hole-mask">
+                        <div class="rotating-glow"></div>
+                        <div class="black-hole-arch"></div>
+                        <div class="black-hole-arch-inner"></div>
+                        <div class="black-hole-dark-core"></div>
+                    </div>
+
+                    <div class="accretion-disk"></div>
+
+                    <div class="black-hole-rings">
+                        <div class="ring ring-1"></div>
+                        <div class="ring ring-2"></div>
+                        <div class="ring ring-3"></div>
+                    </div>
+
+                    <div class="stars-bg"></div>
+                    <div id="particles-container"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="video-section">
+            <div class="container">
+                <div class="video-wrapper" id="videoWrapper">
+                    <div class="video-overlay">
+                        <button class="play-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="white"
+                                xmlns="http://www.w3.org/2000/svg">
+                                <path d="M8 5V19L19 12L8 5Z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <img src="/images/dashboard_dark_data.png" alt="Zorvex Dashboard" class="video-placeholder-img">
+                    <button id="closeVideoBtn" class="close-video-btn" style="display: none;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M18 6L6 18M6 6L18 18" stroke="white" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                        </svg>
+                    </button>
+                    <video id="introVideo" class="intro-video" src="https://www.w3schools.com/html/mov_bbb.mp4" controls
+                        style="display: none;"></video>
+                </div>
+            </div>
+        </section>
+
+        <section class="trusted-by-section">
+            <div class="container">
+                <p class="trusted-text">Trusted by innovative enterprise teams worldwide</p>
+                <div class="trusted-logos">
+                    <span class="logo-placeholder">ACME Corp</span>
+                    <span class="logo-placeholder">GlobalTech</span>
+                    <span class="logo-placeholder">Innotech</span>
+                    <span class="logo-placeholder">Nexus</span>
+                    <span class="logo-placeholder">Stark Ind.</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="features-grid-section">
+            <div class="container">
+                <div class="features-grid">
+                    <!-- Feature 1 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 12v9"></path>
+                                <path d="M12 12l3 3"></path>
+                                <path d="M12 12l-3 3"></path>
+                                <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+                                <path d="M16 16l-4-4-4 4"></path>
+                            </svg>
+                        </div>
+                        <h3>Real-time sync</h3>
+                        <p>Instantly sync operations across all locations</p>
+                    </div>
+                    <!-- Feature 2 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
+                                <path d="M2 12h20"></path>
+                            </svg>
+                        </div>
+                        <h3>Unified database</h3>
+                        <p>Connect sales, inventory, and HR in one place</p>
+                    </div>
+                    <!-- Feature 3 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                                <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                                <path d="M16 2v4"></path>
+                            </svg>
+                        </div>
+                        <h3>Mobile app</h3>
+                        <p>Manage your entire business on the go, anywhere</p>
+                    </div>
+                    <!-- Feature 4 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            </svg>
+                        </div>
+                        <h3>Bank-grade security</h3>
+                        <p>Your enterprise data is strictly protected</p>
+                    </div>
+                    <!-- Feature 5 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                                <path d="M8 14h.01"></path>
+                                <path d="M12 14h.01"></path>
+                                <path d="M16 14h.01"></path>
+                                <path d="M8 18h.01"></path>
+                                <path d="M12 18h.01"></path>
+                                <path d="M16 18h.01"></path>
+                            </svg>
+                        </div>
+                        <h3>Workflow automation</h3>
+                        <p>Automate repetitive tasks and approvals</p>
+                    </div>
+                    <!-- Feature 6 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 11l19-9-9 19-2-8-8-2z"></path>
+                            </svg>
+                        </div>
+                        <h3>Advanced reporting</h3>
+                        <p>Generate comprehensive financial reports instantly</p>
+                    </div>
+                    <!-- Feature 7 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line>
+                                <line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                        </div>
+                        <h3>Instant invoicing</h3>
+                        <p>Create and send professional invoices in seconds</p>
+                    </div>
+                    <!-- Feature 8 -->
+                    <div class="feature-item">
+                        <div class="feature-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                        </div>
+                        <h3>Global search</h3>
+                        <p>Find any order, customer, or product instantly</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="superpowers-section">
+            <div class="spire-background">
+                <!-- Vertical faint columns -->
+                <div class="spire-columns">
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                </div>
+                <!-- The central glowing blue spire -->
+                <div class="spire-glow-base"></div>
+                <div class="spire-curve-left"></div>
+                <div class="spire-curve-right"></div>
+                <div class="spire-beam"></div>
+                <!-- Rising particles -->
+                <div id="rising-particles-container"></div>
+            </div>
+
+            <div class="container relative-z">
+                <div class="section-header superpowers-header">
+                    <span class="badge badge-outline">All your departments, connected</span>
+                    <h2 class="section-title text-white">Give your business superpowers</h2>
+                    <p class="section-description text-gray">
+                        Break down silos by unifying your entire organization on a single platform.<br>
+                        Zorvex builds a centralized nervous system for your enterprise.
+                    </p>
+                </div>
+        </section>
+
+        <section class="cards-section"
+            style="padding-bottom: 150px; background: transparent; position: relative; z-index: 10;">
+            <div class="container">
+                <div class="superpowers-cards">
+                    <div class="super-card">
+                        <div class="super-card-image">
+                            <img src="/images/analytics_dark_data.png" alt="Analytics">
+                        </div>
+                        <div class="super-card-content">
+                            <h3><strong>Your data connected.</strong> Unify sales, inventory, and fulfillment to make
+                                everything easily searchable.</h3>
+                        </div>
+                    </div>
+                    <div class="super-card">
+                        <div class="super-card-image">
+                            <img src="/images/pos_dark_data.png" alt="POS">
+                        </div>
+                        <div class="super-card-content">
+                            <h3><strong>Frictionless sales capture.</strong> Record your transactions easily, so you
+                                never miss a thing.</h3>
+                        </div>
+                    </div>
+                    <div class="super-card">
+                        <div class="super-card-image">
+                            <img src="/images/inventory_dark_data.png" alt="Inventory">
+                        </div>
+                        <div class="super-card-content">
+                            <h3><strong>Smart inventory sync.</strong> Keep stock levels accurate across all your
+                                warehouses and stores effortlessly.</h3>
+                        </div>
+                    </div>
+                    <div class="super-card">
+                        <div class="super-card-image">
+                            <img src="/images/ledger_dark_data.png" alt="Ledger">
+                        </div>
+                        <div class="super-card-content">
+                            <h3><strong>Real-time financials.</strong> Track your business health with live balances,
+                                expenses, and automated ledgers.</h3>
+                        </div>
+                    </div>
+                    <div class="super-card">
+                        <div class="super-card-image">
+                            <img src="/images/team_dark_data.png" alt="Team Management">
+                        </div>
+                        <div class="super-card-content">
+                            <h3><strong>Empower your workforce.</strong> Manage payroll, performance metrics, and HR data all from one centralized hub.</h3>
+                        </div>
+                    </div>
+                    <div class="super-card">
+                        <div class="super-card-image">
+                            <img src="/images/service_dark_data.png" alt="Service Management">
+                        </div>
+                        <div class="super-card-content">
+                            <h3><strong>Streamline support.</strong> Handle service tickets, schedule technicians, and track resolutions effortlessly.</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="integrations-section">
+            <div class="container relative-z">
+                <div class="section-header text-center">
+                    <span class="badge badge-outline">Seamless workflow</span>
+                    <h2 class="section-title text-white">Connects with everything you use</h2>
+                    <p class="section-description text-gray">
+                        Zorvex integrates instantly with your favorite tools. No coding required.
+                    </p>
+                </div>
+                <div class="integrations-grid">
+                    <div class="integration-item">
+                        <div class="int-icon stripe-icon"></div><span>Stripe</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon shopify-icon"></div><span>Shopify</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon quickbooks-icon"></div><span>QuickBooks</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon slack-icon"></div><span>Slack</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon gmail-icon"></div><span>Gmail</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon zoom-icon"></div><span>Zoom</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon google-icon"></div><span>Google Drive</span>
+                    </div>
+                    <div class="integration-item">
+                        <div class="int-icon salesforce-icon"></div><span>Salesforce</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="pricing-section" id="pricing">
+            <div class="container relative-z">
+                <div class="pricing-header">
+                    <span class="badge badge-outline">Get access</span>
+                    <h2 class="section-title text-white">We like keeping things simple<br>One plan one price.</h2>
+                </div>
+
+                <div class="pricing-sphere-container">
+                    <div class="pricing-sphere">
+                        <div class="sphere-rays"></div>
+                        <div class="pricing-particles"></div>
+                        <div class="price-display relative-z">
+                            <div class="price-amount">$10</div>
+                            <div class="price-period">/month<br>(billed annually)</div>
+                        </div>
+                        <div class="pricing-features">
+                            <ul class="features-list">
+                                <li><span class="feature-dot"></span> Unlimited users & locations</li>
+                                <li><span class="feature-dot"></span> Real-time inventory sync</li>
+                                <li><span class="feature-dot"></span> Advanced financial reporting</li>
+                            </ul>
+                            <ul class="features-list">
+                                <li><span class="feature-dot"></span> Bank-grade encryption</li>
+                                <li><span class="feature-dot"></span> Automated invoicing</li>
+                                <li><span class="feature-dot"></span> Dedicated account manager</li>
+                            </ul>
+                        </div>
+                        <a href="#" class="btn btn-outline trial-btn">Start your 14-day trial</a>
+                    </div>
+                    <div class="pricing-sphere-reflection"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="faq-section">
+            <div class="container relative-z">
+                <div class="section-header text-center">
+                    <span class="badge badge-outline">FAQ</span>
+                    <h2 class="section-title text-white">Frequently Asked Questions</h2>
+                </div>
+                <div class="faq-list">
+                    <div class="faq-item">
+                        <h4>How long does implementation take?</h4>
+                        <p>Most of our customers are fully onboarded and running their operations on Zorvex within 14
+                            days, thanks to our automated data importers.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h4>Can I migrate my data from QuickBooks/NetSuite?</h4>
+                        <p>Absolutely. We provide one-click integrations to securely import your entire ledger, customer
+                            list, and inventory history without data loss.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h4>Is my financial data secure?</h4>
+                        <p>We use bank-grade AES-256 encryption. Your data is encrypted both in transit and at rest, and
+                            we comply with SOC2 and GDPR standards.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h4>Do you offer support during the trial?</h4>
+                        <p>Yes! Every trial comes with a dedicated onboarding specialist who will help you map out your
+                            custom workflows and train your team.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="get-started-section">
+            <div class="get-started-content">
+                <span class="badge badge-outline">Get started</span>
+                <h2 class="section-title text-white">Run your entire business on Zorvex</h2>
+                <p class="section-subtitle">Never miss a sale, invoice, or stock update.</p>
+                <a href="/app/login" class="btn btn-outline trial-btn">Start your 14-day trial</a>
+            </div>
+
+            <div class="glow-container bottom-glow-container">
+                <div class="black-hole-glow"></div>
+                <div class="black-hole-mask">
+                    <div class="rotating-glow"></div>
+                    <div class="black-hole-arch"></div>
+                    <div class="black-hole-arch-inner"></div>
+                    <div class="black-hole-dark-core"></div>
+                </div>
+                <div class="accretion-disk"></div>
+                <div class="black-hole-rings">
+                    <div class="ring ring-1"></div>
+                    <div class="ring ring-2"></div>
+                    <div class="ring ring-3"></div>
+                </div>
+                <div class="stars-bg"></div>
+                <div id="particles-container-bottom"></div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-top">
+                <div class="footer-brand">
+                    <a href="/" class="logo">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="24" height="24" rx="6" fill="#1E3A8A" />
+                            <path d="M12 4L4 8L12 12L20 8L12 4Z" fill="#3B82F6" />
+                            <path d="M4 16L12 20L20 16M4 12L12 16L20 12" stroke="#3B82F6" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <span>Zorvex</span>
+                    </a>
+                    <div class="social-links">
+                        <a href="#" aria-label="Discord">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+                            </svg>
+                        </a>
+                        <a href="#" aria-label="Twitter">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z" />
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Product</h4>
+                        <a href="#">Features</a>
+                        <a href="#">Integrations</a>
+                        <a href="#">Pricing</a>
+                        <a href="#">Changelog</a>
+                        <a href="#">Roadmap</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Company</h4>
+                        <a href="#">Our team</a>
+                        <a href="#">Our values</a>
+                        <a href="#">Blog</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Resources</h4>
+                        <a href="#">Downloads</a>
+                        <a href="#">Documentation</a>
+                        <a href="#">Contact</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer-newsletter">
+                <div class="newsletter-text">
+                    <h3>Join our newsletter</h3>
+                    <p>Keep up to date with everything Zorvex</p>
+                </div>
+                <form class="newsletter-form">
+                    <input type="email" placeholder="Enter your email" required>
+                    <button type="submit" class="btn btn-outline">Subscribe</button>
+                </form>
+            </div>
+
+            <div class="footer-bottom">
+                <div class="footer-legal">
+                    <a href="#">Privacy Policy</a>
+                    <span class="separator">·</span>
+                    <a href="#">Terms of Conditions</a>
+                </div>
+                <div class="footer-copyright">
+                    Zorvex App, LLC. All rights reserved.
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/script.js"></script>
+</body>
+
+</html>

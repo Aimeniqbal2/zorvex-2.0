@@ -9,8 +9,8 @@ from erp_core.search_views import GlobalSearchView
 from django.views.generic import RedirectView
 
 urlpatterns = [
-    # For local development, redirect Django root to the React development application.
-    path('', RedirectView.as_view(url='http://localhost:5173/app/', permanent=False), name='root_redirect'),
+    # Redirect Django root to the React application (Vite 5173 in dev, /app/ in production)
+    path('', RedirectView.as_view(url='http://localhost:5173/app/' if getattr(settings, 'DEBUG', True) else '/app/', permanent=False), name='root_redirect'),
 
     path('admin/', admin.site.urls),
     
