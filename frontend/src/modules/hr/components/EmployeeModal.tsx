@@ -251,6 +251,60 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         }
     };
 
+    const compressImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.85): Promise<File> => {
+        return new Promise((resolve) => {
+            if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') {
+                resolve(file);
+                return;
+            }
+            const img = new Image();
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                img.src = e.target?.result as string;
+            };
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+                if (width > maxWidth || height > maxHeight) {
+                    if (width > height) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    } else {
+                        width = Math.round((width * maxHeight) / height);
+                        height = maxHeight;
+                    }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    resolve(file);
+                    return;
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+                canvas.toBlob(
+                    (blob) => {
+                        if (!blob) {
+                            resolve(file);
+                            return;
+                        }
+                        const cleanName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
+                        const compressedFile = new File([blob], cleanName, {
+                            type: 'image/jpeg',
+                            lastModified: Date.now()
+                        });
+                        resolve(compressedFile);
+                    },
+                    'image/jpeg',
+                    quality
+                );
+            };
+            img.onerror = () => resolve(file);
+            reader.readAsDataURL(file);
+        });
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
@@ -260,6 +314,24 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             const fullNameVal = (payload.full_name || payload.name || payload.first_name || '').trim();
             payload.first_name = fullNameVal;
             payload.last_name = '';
+
+            // Clean read-only, nested relation, and calculated fields from payload
+            delete payload.full_name;
+            delete payload.name;
+            delete payload.photograph;
+            delete payload.department_name;
+            delete payload.designation_name;
+            delete payload.age;
+            delete payload.training_completed;
+            delete payload.legacy_record;
+            delete payload.documents;
+            delete payload.trainings;
+            delete payload.next_of_kin;
+            delete payload.references;
+            delete payload.history_logs;
+            delete payload.architecture_state;
+            delete payload.preferred_payment_destination;
+
             if (!payload.designation) delete payload.designation;
             if (!payload.department) delete payload.department;
             if (!payload.employee_code) delete payload.employee_code;
@@ -272,22 +344,21 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
             // Handle multipart form if photo is selected
             if (photoFile) {
+                // Compress image down to ~80KB-120KB so Nginx client_max_body_size is never exceeded
+                const fileToUpload = await compressImage(photoFile);
+
                 const fd = new FormData();
                 Object.entries(payload).forEach(([k, v]) => {
-                    if (v !== undefined && v !== null) {
+                    if (v !== undefined && v !== null && v !== '') {
                         fd.append(k, String(v));
                     }
                 });
-                fd.append('photograph', photoFile);
+                fd.append('photograph', fileToUpload);
 
                 if (employee?.id) {
-                    await apiClient.patch(`/api/hrm/employees/${employee.id}/`, fd, {
-                        headers: { 'Content-Type': 'multipart/form-data' }
-                    });
+                    await apiClient.patch(`/api/hrm/employees/${employee.id}/`, fd);
                 } else {
-                    await apiClient.post('/api/hrm/employees/', fd, {
-                        headers: { 'Content-Type': 'multipart/form-data' }
-                    });
+                    await apiClient.post('/api/hrm/employees/', fd);
                 }
             } else {
                 if (employee?.id) {
@@ -299,7 +370,17 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             onSave();
             onClose();
         } catch (err: any) {
-            setError(err.response?.data || 'Failed to save employee record');
+            console.error("Failed to save employee record:", err);
+            const errData = err.response?.data;
+            let msg = 'Failed to save employee record';
+            if (typeof errData === 'string') {
+                msg = errData;
+            } else if (errData && typeof errData === 'object') {
+                msg = errData.detail || errData.photograph || errData;
+            } else if (err.message) {
+                msg = err.message;
+            }
+            setError(msg);
         } finally {
             setLoading(false);
         }

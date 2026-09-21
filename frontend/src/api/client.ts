@@ -23,6 +23,11 @@ export const apiClient = axios.create({
 
 // Request interceptor: attach token and company context
 apiClient.interceptors.request.use((config) => {
+    // For FormData uploads, remove explicit Content-Type so browser sets multipart boundary
+    if (config.data instanceof FormData && config.headers) {
+        delete config.headers['Content-Type'];
+    }
+
     const token = TokenManager.getAccessToken();
     if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;

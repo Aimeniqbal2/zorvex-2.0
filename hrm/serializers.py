@@ -162,6 +162,13 @@ class EmployeeSerializer(BaseTenantSerializer):
                 data[f] = None
         if data.get('joining_date') and not data.get('hire_date'):
             data['hire_date'] = data['joining_date']
+
+        # Safely handle photograph: if string (URL or empty) or None, strip it so FileField does not error
+        if 'photograph' in data:
+            photo_val = data['photograph']
+            if photo_val is None or photo_val == '' or isinstance(photo_val, str):
+                data.pop('photograph', None)
+
         return super().to_internal_value(data)
 
     def get_architecture_state(self, obj):

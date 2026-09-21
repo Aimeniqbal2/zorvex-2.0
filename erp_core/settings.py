@@ -205,6 +205,7 @@ STATICFILES_DIRS = [
 # Media Files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+os.makedirs(os.path.join(MEDIA_ROOT, 'hrm', 'employee_photos'), exist_ok=True)
 
 # Auth / User configuration
 AUTH_USER_MODEL = 'accounts.User'
