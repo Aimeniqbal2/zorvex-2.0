@@ -107,12 +107,12 @@ interface DashboardStats {
 export const DesktopDashboard: React.FC = () => {
     const { openTab } = useWorkspaceStore();
     const { user } = useAuthStore();
-    const { industry } = useAppStore();
+    const { industry, company } = useAppStore();
 
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
 
-    const isSecurityIndustry = industry?.code === 'security' || user?.business_type === 'security';
+    const isSecurityIndustry = industry?.code === 'security' || user?.business_type === 'security' || company?.business_type === 'security';
 
     useEffect(() => {
         let isMounted = true;
@@ -181,9 +181,9 @@ export const DesktopDashboard: React.FC = () => {
                 <div className="dd-kpi-row">
                     <KpiCard
                         icon="bx-group"
-                        label="Active Workforce"
+                        label={isSecurityIndustry ? "Active Workforce" : "Active Employees"}
                         value={loadingStats ? '...' : (stats?.active_employees ?? 0)}
-                        sub="Guards & Operations Staff"
+                        sub={isSecurityIndustry ? "Guards & Operations Staff" : "Total Active Team"}
                         color="#092453"
                         trend="up"
                     />
@@ -222,9 +222,9 @@ export const DesktopDashboard: React.FC = () => {
                 <div className="dd-quick-actions-row">
                     <QuickAction
                         icon="bx-user-plus"
-                        label="Guards & Staff"
+                        label={isSecurityIndustry ? "Guards & Staff" : "Human Resources"}
                         color="#092453"
-                        onClick={() => openModule('guards_staff')}
+                        onClick={() => openModule('hr')}
                     />
                     <QuickAction
                         icon="bx-shield-plus"

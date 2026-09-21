@@ -8,6 +8,7 @@ interface EmployeeLifecycleWorkspaceProps {
     designations: Designation[];
     departments: Department[];
     onRefresh: () => void;
+    isSecurity?: boolean;
 }
 
 type ActionType = 
@@ -29,6 +30,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
     designations,
     departments,
     onRefresh,
+    isSecurity = false
 }) => {
     const [timeline, setTimeline] = useState<UnifiedTimelineItem[]>([]);
     const [loadingTimeline, setLoadingTimeline] = useState(false);
@@ -66,8 +68,16 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
 
     useEffect(() => {
         fetchTimeline();
-        fetchSites();
-    }, [employee.id]);
+        if (isSecurity) {
+            fetchSites();
+        }
+    }, [employee.id, isSecurity]);
+
+    useEffect(() => {
+        if (!isSecurity && (activeAction === 'TRANSFER' || activeAction === 'RELIEVE' || activeAction === 'RESOLVE_JUMP' || activeAction === 'CHANGE_CLASS')) {
+            setActiveAction(null);
+        }
+    }, [isSecurity, activeAction]);
 
     const openAction = (action: ActionType) => {
         setActionError(null);
@@ -318,14 +328,25 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                     <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>Department</div>
                     <div style={{ fontSize: '14px', fontWeight: 600 }}>{employee.department_name || '—'}</div>
                 </div>
-                <div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>Classification</div>
-                    <div style={{ fontSize: '14px', fontWeight: 600 }}>
-                        <span className={`badge ${employee.classification === 'DIRECT' ? 'badge-primary' : 'badge-secondary'}`}>
-                            {employee.classification === 'DIRECT' ? 'Direct (Field Guard)' : 'Indirect (Office)'}
-                        </span>
+                {isSecurity ? (
+                    <div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>Classification</div>
+                        <div style={{ fontSize: '14px', fontWeight: 600 }}>
+                            <span className={`badge ${employee.classification === 'DIRECT' ? 'badge-primary' : 'badge-secondary'}`}>
+                                {employee.classification === 'DIRECT' ? 'Direct (Field Guard)' : 'Indirect (Office)'}
+                            </span>
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>Employee Type</div>
+                        <div style={{ fontSize: '14px', fontWeight: 600 }}>
+                            <span className="badge badge-secondary">
+                                {employee.classification === 'DIRECT' ? 'Field Staff' : 'Office Staff'}
+                            </span>
+                        </div>
+                    </div>
+                )}
                 <div>
                     <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>Joining Date</div>
                     <div style={{ fontSize: '13px' }}>{employee.hire_date || employee.joining_date || '—'}</div>
@@ -357,18 +378,24 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                             <Button size="sm" variant="secondary" onClick={() => openAction('CHANGE_DEPT')}>
                                 <i className="bx bx-buildings" style={{ marginRight: '4px' }}></i> Change Dept
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('CHANGE_CLASS')}>
-                                <i className="bx bx-transfer-alt" style={{ marginRight: '4px' }}></i> Toggle Class
-                            </Button>
+                            {isSecurity && (
+                                <Button size="sm" variant="secondary" onClick={() => openAction('CHANGE_CLASS')}>
+                                    <i className="bx bx-transfer-alt" style={{ marginRight: '4px' }}></i> Toggle Class
+                                </Button>
+                            )}
                             <Button size="sm" variant="secondary" onClick={() => openAction('REVISE_SALARY')}>
                                 <i className="bx bx-money" style={{ marginRight: '4px' }}></i> Revise Salary
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('TRANSFER')}>
-                                <i className="bx bx-map-pin" style={{ marginRight: '4px' }}></i> Transfer Site
-                            </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('RELIEVE')}>
-                                <i className="bx bx-log-out" style={{ marginRight: '4px' }}></i> Relieve Duty
-                            </Button>
+                            {isSecurity && (
+                                <>
+                                    <Button size="sm" variant="secondary" onClick={() => openAction('TRANSFER')}>
+                                        <i className="bx bx-map-pin" style={{ marginRight: '4px' }}></i> Transfer Site
+                                    </Button>
+                                    <Button size="sm" variant="secondary" onClick={() => openAction('RELIEVE')}>
+                                        <i className="bx bx-log-out" style={{ marginRight: '4px' }}></i> Relieve Duty
+                                    </Button>
+                                </>
+                            )}
                             <Button size="sm" variant="secondary" onClick={() => openAction('SUSPEND')} style={{ color: '#d97706' }}>
                                 <i className="bx bx-pause-circle" style={{ marginRight: '4px' }}></i> Suspend
                             </Button>
@@ -395,7 +422,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                         </>
                     )}
 
-                    {isJump && (
+                    {isJump && isSecurity && (
                         <>
                             <Button size="sm" variant="primary" onClick={() => openAction('RESOLVE_JUMP')}>
                                 <i className="bx bx-check-shield" style={{ marginRight: '4px' }}></i> Resolve JUMP Status

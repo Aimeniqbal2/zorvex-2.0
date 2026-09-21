@@ -4,6 +4,11 @@ import { Button } from '../ui/Button';
 export interface Column<T> {
     key: keyof T | string;
     header: string;
+    width?: string | number;
+    minWidth?: string | number;
+    maxWidth?: string | number;
+    align?: 'left' | 'center' | 'right';
+    sticky?: 'left' | 'right';
     render?: (row: T) => React.ReactNode;
 }
 
@@ -22,6 +27,7 @@ export interface DataTableProps<T> {
     emptyMessage?: string;
     keyExtractor: (row: T) => string;
     pagination?: DataTablePagination;
+    onRowClick?: (row: T) => void;
 }
 
 export function DataTable<T>({ 
@@ -30,15 +36,38 @@ export function DataTable<T>({
     isLoading, 
     emptyMessage = 'No data available', 
     keyExtractor,
-    pagination
+    pagination,
+    onRowClick
 }: DataTableProps<T>) {
+    const getColClass = (col: Column<T>) => {
+        const classes: string[] = [];
+        if (col.sticky === 'right') classes.push('sticky-right');
+        if (col.sticky === 'left') classes.push('sticky-left');
+        return classes.length > 0 ? classes.join(' ') : undefined;
+    };
+
+    const getColStyle = (col: Column<T>): React.CSSProperties => {
+        const style: React.CSSProperties = {};
+        if (col.width) style.width = col.width;
+        if (col.minWidth) style.minWidth = col.minWidth;
+        if (col.maxWidth) style.maxWidth = col.maxWidth;
+        if (col.align) style.textAlign = col.align;
+        return style;
+    };
+
     return (
         <div className="data-table-container">
             <table className="data-table">
                 <thead>
                     <tr>
                         {columns.map(col => (
-                            <th key={col.key as string}>{col.header}</th>
+                            <th 
+                                key={col.key as string}
+                                className={getColClass(col)}
+                                style={getColStyle(col)}
+                            >
+                                {col.header}
+                            </th>
                         ))}
                     </tr>
                 </thead>
@@ -58,9 +87,18 @@ export function DataTable<T>({
                         </tr>
                     ) : (
                         data.map((row) => (
-                            <tr key={keyExtractor(row)}>
+                            <tr 
+                                key={keyExtractor(row)}
+                                onClick={() => onRowClick && onRowClick(row)}
+                                className={onRowClick ? 'clickable-row' : undefined}
+                                style={onRowClick ? { cursor: 'pointer' } : undefined}
+                            >
                                 {columns.map(col => (
-                                    <td key={col.key as string}>
+                                    <td 
+                                        key={col.key as string}
+                                        className={getColClass(col)}
+                                        style={getColStyle(col)}
+                                    >
                                         {col.render ? col.render(row) : (row[col.key as keyof T] as React.ReactNode)}
                                     </td>
                                 ))}

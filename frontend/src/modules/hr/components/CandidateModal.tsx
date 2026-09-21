@@ -65,7 +65,9 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({ isOpen, onClose,
         e.preventDefault();
         setLoading(true);
         try {
-            const payload = { ...formData };
+            const payload: any = { ...formData };
+            payload.first_name = (payload.first_name || '').trim();
+            payload.last_name = '';
             if (!payload.applied_designation) delete payload.applied_designation;
 
             if (candidate?.id) {
@@ -140,15 +142,17 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({ isOpen, onClose,
                 
                 {activeTab === 'BIO' && (
                     <>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                            <Input label="First Name *" name="first_name" value={formData.first_name || ''} onChange={handleChange} required />
-                            <Input label="Last Name *" name="last_name" value={formData.last_name || ''} onChange={handleChange} required />
+                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
+                            <Input label="Full Name *" name="first_name" value={formData.first_name || (formData as any).full_name || (formData as any).name || ''} onChange={(e) => setFormData({ ...formData, first_name: e.target.value, last_name: '' })} required placeholder="e.g. Saif ur Rehman" />
                             <Input label="Father Name" name="father_name" value={formData.father_name || ''} onChange={handleChange} />
-                            <Input label="Date of Birth" type="date" name="date_of_birth" value={formData.date_of_birth || ''} onChange={handleChange} />
                         </div>
                         
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                            <Input label="Date of Birth" type="date" name="date_of_birth" value={formData.date_of_birth || ''} onChange={handleChange} />
                             <Input label="National ID / CNIC" name="national_id" value={formData.national_id || ''} onChange={handleChange} />
+                        </div>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                             <Input label="Phone" name="phone" value={formData.phone || ''} onChange={handleChange} />
                             <Input label="Email" type="email" name="email" value={formData.email || ''} onChange={handleChange} />
                         </div>

@@ -1,10 +1,12 @@
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from erp_core.views import TenantModelViewSet
 from erp_core.permissions import RolePermission
+from erp_core.middleware import get_current_company
 from platform_core.permissions import ModulePermission
 from .models import (
     Department, Position, Designation, Employee, Employment,
@@ -34,6 +36,83 @@ class DesignationViewSet(TenantModelViewSet):
     serializer_class = DesignationSerializer
     permission_classes = [IsAuthenticated, ModulePermission]
 
+
+def check_security_workforce_access(request, employee):
+    """
+    Enforces the 5 security workforce authorization pillars:
+    1. Tenant Isolation
+    2. Company Industry Capability
+    3. Enabled CompanyModule
+    4. UserModuleAccess / access_mode
+    5. RBAC permissions
+    """
+    from rest_framework.exceptions import PermissionDenied
+    from erp_core.middleware import get_current_company
+    from platform_core.services import is_module_enabled
+
+    # 1. Tenant Isolation
+    active_company_id = get_current_company()
+    if not active_company_id and not request.user.is_superuser:
+        active_company_id = getattr(request.user, 'company_id', None)
+
+    if active_company_id and str(employee.company_id) != str(active_company_id):
+        raise PermissionDenied("Cross-tenant access prohibited.")
+
+    if not request.user.is_superuser and getattr(request.user, 'company_id', None):
+        if str(employee.company_id) != str(request.user.company_id):
+            raise PermissionDenied("Cross-tenant access prohibited.")
+
+    # 2. Industry Capability
+    company = employee.company
+    is_sec = str(getattr(company, 'business_type', '')).lower() == 'security'
+    if not is_sec:
+        try:
+            from industries.common.registry import get_industry_package
+            pkg = get_industry_package(company.business_type)
+            is_sec = bool(pkg and pkg.code == 'security')
+        except Exception:
+            is_sec = False
+    if not is_sec:
+        raise PermissionDenied("This operation is only available for security industry companies.")
+
+    # 3. Enabled CompanyModule
+    if not is_module_enabled(company.id, 'hr'):
+        raise PermissionDenied("HR module is disabled for this company.")
+    if not (is_module_enabled(company.id, 'operations') or is_module_enabled(company.id, 'security_ops')):
+        raise PermissionDenied("Security operations module is disabled for this company.")
+
+    # 4. UserModuleAccess / access_mode
+    if not request.user.is_superuser:
+        if getattr(request.user, 'access_mode', 'FULL_COMPANY') == 'CUSTOM':
+            granted = set(request.user.custom_module_access.filter(enabled=True).values_list('module__code', flat=True))
+            if 'hr' not in granted:
+                raise PermissionDenied("User does not have custom module access to HR.")
+            if not ({'operations', 'security_ops', 'guards_staff'} & granted):
+                raise PermissionDenied("User does not have custom module access to security operations.")
+
+    # 5. RBAC permissions
+    if not request.user.is_superuser:
+        role = getattr(request.user, 'role', None)
+        company_role = getattr(request.user, 'company_role', None)
+        perms = set(company_role.permissions) if company_role and hasattr(company_role, 'permissions') else set()
+
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            allowed_roles = ['admin', 'super_admin', 'manager', 'staff']
+            if role not in allowed_roles and not ({'operations.read', 'hrm.view_employee', 'hrm.read'} & perms):
+                raise PermissionDenied("Insufficient read permissions for security workforce records.")
+        else:
+            allowed_roles = ['admin', 'super_admin', 'manager']
+            if role not in allowed_roles and not ({'hrm.change_employee', 'operations.write'} & perms):
+                raise PermissionDenied("Insufficient permissions to perform this security workforce action.")
+
+
+from rest_framework.pagination import PageNumberPagination
+
+class EmployeePagination(PageNumberPagination):
+    page_size = 100
+    page_size_query_param = 'page_size'
+    max_page_size = 2000
+
 class EmployeeViewSet(TenantModelViewSet):
     required_module = 'hr'
     queryset = Employee.objects.select_related(
@@ -43,29 +122,77 @@ class EmployeeViewSet(TenantModelViewSet):
     ).all()
     serializer_class = EmployeeSerializer
     permission_classes = [IsAuthenticated, ModulePermission]
+    pagination_class = EmployeePagination
 
     def get_queryset(self):
         qs = super().get_queryset()
         if not hasattr(self, 'request') or not self.request:
             return qs
-        classification = self.request.query_params.get('classification')
+        classification = self.request.query_params.get('classification') or self.request.query_params.get('workforce_type')
         if classification:
             qs = qs.filter(classification=classification)
+        department = self.request.query_params.get('department')
+        if department:
+            qs = qs.filter(department_id=department)
+        designation = self.request.query_params.get('designation')
+        if designation:
+            qs = qs.filter(designation_id=designation)
         employment_status = self.request.query_params.get('employment_status')
         if employment_status:
             qs = qs.filter(employment_status=employment_status)
         background_type = self.request.query_params.get('background_type')
         if background_type:
             qs = qs.filter(background_type=background_type)
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() in ('true', '1'):
+                qs = qs.filter(is_active=True)
+            elif is_active.lower() in ('false', '0'):
+                qs = qs.filter(is_active=False)
+        joining_date_from = self.request.query_params.get('joining_date_from')
+        if joining_date_from:
+            qs = qs.filter(joining_date__gte=joining_date_from)
+        joining_date_to = self.request.query_params.get('joining_date_to')
+        if joining_date_to:
+            qs = qs.filter(joining_date__lte=joining_date_to)
+        site_id = self.request.query_params.get('site_id') or self.request.query_params.get('location_id')
+        client_id = self.request.query_params.get('client_id')
+        if site_id or client_id:
+            try:
+                from operations.models import Deployment
+                dep_qs = Deployment.objects.filter(is_deleted=False)
+                if site_id:
+                    dep_qs = dep_qs.filter(site_id=site_id)
+                if client_id:
+                    dep_qs = dep_qs.filter(site__client_id=client_id)
+                matched_emp_ids = dep_qs.values_list('employee_id', flat=True).distinct()
+                qs = qs.filter(id__in=matched_emp_ids)
+            except Exception:
+                pass
         search = self.request.query_params.get('search')
+        search_field = (self.request.query_params.get('search_field') or 'ALL').upper()
         if search:
             from django.db.models import Q
-            qs = qs.filter(
-                Q(first_name__icontains=search) |
-                Q(last_name__icontains=search) |
-                Q(employee_code__icontains=search) |
-                Q(cnic_number__icontains=search)
-            )
+            if search_field == 'NAME':
+                qs = qs.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search) | Q(father_name__icontains=search))
+            elif search_field == 'CODE':
+                qs = qs.filter(Q(employee_code__icontains=search) | Q(previous_employee_code__icontains=search))
+            elif search_field == 'CNIC':
+                qs = qs.filter(cnic_number__icontains=search)
+            elif search_field == 'PHONE':
+                qs = qs.filter(Q(phone__icontains=search) | Q(telephone_number__icontains=search))
+            else:
+                qs = qs.filter(
+                    Q(first_name__icontains=search) |
+                    Q(last_name__icontains=search) |
+                    Q(father_name__icontains=search) |
+                    Q(employee_code__icontains=search) |
+                    Q(previous_employee_code__icontains=search) |
+                    Q(cnic_number__icontains=search) |
+                    Q(phone__icontains=search) |
+                    Q(telephone_number__icontains=search) |
+                    Q(caste__icontains=search)
+                )
         return qs
 
     def perform_create(self, serializer):
@@ -85,6 +212,7 @@ class EmployeeViewSet(TenantModelViewSet):
     @action(detail=True, methods=['get'], url_path='deployments')
     def deployments(self, request, pk=None):
         employee = self.get_object()
+        check_security_workforce_access(request, employee)
         from operations.models import Deployment, DeploymentStatus
         from operations.serializers import DeploymentListSerializer
         deps = Deployment.objects.filter(
@@ -218,6 +346,7 @@ class EmployeeViewSet(TenantModelViewSet):
     @action(detail=True, methods=['post'], url_path='transfer')
     def transfer(self, request, pk=None):
         employee = self.get_object()
+        check_security_workforce_access(request, employee)
         from hrm.serializers import TransferDeploymentActionSerializer, EmploymentHistorySerializer
         from hrm.services.lifecycle_service import LifecycleService
         from operations.serializers import DeploymentListSerializer
@@ -259,6 +388,7 @@ class EmployeeViewSet(TenantModelViewSet):
     @action(detail=True, methods=['post'], url_path='relieve')
     def relieve(self, request, pk=None):
         employee = self.get_object()
+        check_security_workforce_access(request, employee)
         from hrm.serializers import RelieveDeploymentActionSerializer, EmploymentHistorySerializer
         from hrm.services.lifecycle_service import LifecycleService
         from operations.serializers import DeploymentListSerializer
@@ -378,6 +508,7 @@ class EmployeeViewSet(TenantModelViewSet):
     @action(detail=True, methods=['post'], url_path='resolve-jump')
     def resolve_jump(self, request, pk=None):
         employee = self.get_object()
+        check_security_workforce_access(request, employee)
         from hrm.serializers import ResolveJumpActionSerializer, EmploymentHistorySerializer, JumpRecordSerializer
         from hrm.services.lifecycle_service import LifecycleService
         serializer = ResolveJumpActionSerializer(data=request.data)
@@ -474,6 +605,82 @@ class EmployeeViewSet(TenantModelViewSet):
             'status': 'success',
             'history': EmploymentHistorySerializer(history).data
         })
+
+    @action(detail=False, methods=['get'], url_path='export-register')
+    def export_register(self, request):
+        import csv
+        import io
+        from django.http import HttpResponse
+        qs = self.filter_queryset(self.get_queryset())
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            'Employee Code', 'Legacy Code', 'Full Name', 'Father/Husband Name',
+            'Gender', 'DOB', 'CNIC', 'Phone', 'Landline', 'Department', 'Designation',
+            'Workforce Type', 'Joining Date', 'Status', 'EOBI #', 'SESSI #', 'Address'
+        ])
+        for emp in qs:
+            writer.writerow([
+                emp.employee_code,
+                emp.previous_employee_code,
+                emp.get_full_name(),
+                emp.father_name,
+                emp.gender,
+                emp.date_of_birth.strftime('%Y-%m-%d') if emp.date_of_birth else '',
+                emp.cnic_number,
+                emp.phone or emp.telephone_number,
+                emp.telephone_number,
+                emp.department.name if emp.department else '',
+                emp.designation.name if emp.designation else '',
+                emp.workforce_type,
+                emp.joining_date.strftime('%Y-%m-%d') if emp.joining_date else '',
+                'ACTIVE' if emp.is_active else 'INACTIVE',
+                emp.eobi_number,
+                emp.sessi_number,
+                emp.permanent_address or emp.current_address
+            ])
+        response = HttpResponse(output.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="employee_register.csv"'
+        return response
+
+    @action(detail=False, methods=['get'], url_path='import-template')
+    def import_template(self, request):
+        from hrm.services.employee_import_service import EmployeeImportService
+        from django.http import HttpResponse
+        csv_data = EmployeeImportService.get_template_csv()
+        response = HttpResponse(csv_data, content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="employee_import_template.csv"'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='import-preview')
+    def import_preview(self, request):
+        from hrm.services.employee_import_service import EmployeeImportService
+        file_obj = request.FILES.get('file')
+        content = file_obj if file_obj else request.data.get('content', '')
+        if not content:
+            return Response({'error': 'CSV file or content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        res = EmployeeImportService.preview(company_id=company_id, file_content=content)
+        return Response(res, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='import-execute')
+    def import_execute(self, request):
+        from hrm.services.employee_import_service import EmployeeImportService
+        file_obj = request.FILES.get('file')
+        content = file_obj if file_obj else request.data.get('content', '')
+        if not content:
+            return Response({'error': 'CSV file or content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        update_existing = request.data.get('update_existing', False)
+        if isinstance(update_existing, str):
+            update_existing = update_existing.lower() in ('true', '1')
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        res = EmployeeImportService.execute(
+            company_id=company_id,
+            file_content=content,
+            update_existing=update_existing,
+            user=request.user
+        )
+        return Response(res, status=status.HTTP_200_OK)
 
 class EmploymentViewSet(TenantModelViewSet):
     required_module = 'hr'
@@ -581,6 +788,56 @@ from .serializers import (
 class WorkforceAttendanceViewSet(TenantModelViewSet):
     queryset = WorkforceAttendance.objects.select_related('employee', 'employment').all()
     serializer_class = WorkforceAttendanceSerializer
+
+    @action(detail=False, methods=['get'], url_path='register')
+    def register(self, request):
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        from hrm.services.attendance_register_service import AttendanceRegisterService
+        data = AttendanceRegisterService.get_attendance_register(
+            company_id=company_id,
+            date_from=request.query_params.get('date_from'),
+            date_to=request.query_params.get('date_to'),
+            month=request.query_params.get('month'),
+            year=request.query_params.get('year'),
+            employee_id=request.query_params.get('employee_id'),
+            employee_from=request.query_params.get('employee_from'),
+            employee_to=request.query_params.get('employee_to'),
+            workforce_type=request.query_params.get('workforce_type'),
+            department_id=request.query_params.get('department_id'),
+            designation_id=request.query_params.get('designation_id'),
+            site_id=request.query_params.get('site_id'),
+            shift_id=request.query_params.get('shift_id'),
+            client_id=request.query_params.get('client_id'),
+            status_filter=request.query_params.get('status')
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='export-register')
+    def export_register(self, request):
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        from hrm.services.attendance_register_service import AttendanceRegisterService
+        data = AttendanceRegisterService.get_attendance_register(
+            company_id=company_id,
+            date_from=request.query_params.get('date_from'),
+            date_to=request.query_params.get('date_to'),
+            month=request.query_params.get('month'),
+            year=request.query_params.get('year'),
+            employee_id=request.query_params.get('employee_id'),
+            employee_from=request.query_params.get('employee_from'),
+            employee_to=request.query_params.get('employee_to'),
+            workforce_type=request.query_params.get('workforce_type'),
+            department_id=request.query_params.get('department_id'),
+            designation_id=request.query_params.get('designation_id'),
+            site_id=request.query_params.get('site_id'),
+            shift_id=request.query_params.get('shift_id'),
+            client_id=request.query_params.get('client_id'),
+            status_filter=request.query_params.get('status')
+        )
+        csv_content = AttendanceRegisterService.export_attendance_register_csv(data)
+        from django.http import HttpResponse
+        response = HttpResponse(csv_content, content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="attendance_register.csv"'
+        return response
 
 class ShiftViewSet(TenantModelViewSet):
     queryset = Shift.objects.all()
@@ -743,6 +1000,90 @@ class PayslipViewSet(TenantModelViewSet):
     queryset = Payslip.objects.filter(is_deleted=False)
     serializer_class = PayslipSerializer
     module_name = 'HRM'
+
+    @action(detail=True, methods=['post'], url_path='toggle-hold')
+    def toggle_hold(self, request, pk=None):
+        payslip = self.get_object()
+        payslip.is_stop_payment = not payslip.is_stop_payment
+        if payslip.is_stop_payment:
+            payslip.stop_payment_reason = request.data.get('reason', 'Payment hold placed')
+            payslip.stop_payment_at = timezone.now()
+            payslip.stop_payment_by = request.user
+        else:
+            payslip.stop_payment_reason = ''
+            payslip.stop_payment_at = None
+            payslip.stop_payment_by = None
+        payslip.save()
+        return Response(PayslipSerializer(payslip).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='report')
+    def report(self, request):
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        from hrm.services.payslip_report_service import PayslipReportService
+        data = PayslipReportService.get_payslip_report(
+            company_id=company_id,
+            date_from=request.query_params.get('date_from'),
+            date_to=request.query_params.get('date_to'),
+            month_from=request.query_params.get('month_from'),
+            month_to=request.query_params.get('month_to'),
+            date_range_preset=request.query_params.get('date_range_preset'),
+            employee_from=request.query_params.get('employee_from'),
+            employee_to=request.query_params.get('employee_to'),
+            employee_id=request.query_params.get('employee_id'),
+            site_id=request.query_params.get('site_id') or request.query_params.get('location_id'),
+            client_id=request.query_params.get('client_id'),
+            region=request.query_params.get('region'),
+            is_paid=request.query_params.get('is_paid', 'BOTH'),
+            is_stop_payment=request.query_params.get('is_stop_payment', 'BOTH'),
+            account_type=request.query_params.get('account_type', 'ALL'),
+            in_main_payroll=request.query_params.get('in_main_payroll', 'true').lower() in ('true', '1')
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='export-report')
+    def export_report(self, request):
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        from hrm.services.payslip_report_service import PayslipReportService
+        data = PayslipReportService.get_payslip_report(
+            company_id=company_id,
+            date_from=request.query_params.get('date_from'),
+            date_to=request.query_params.get('date_to'),
+            month_from=request.query_params.get('month_from'),
+            month_to=request.query_params.get('month_to'),
+            date_range_preset=request.query_params.get('date_range_preset'),
+            employee_from=request.query_params.get('employee_from'),
+            employee_to=request.query_params.get('employee_to'),
+            employee_id=request.query_params.get('employee_id'),
+            site_id=request.query_params.get('site_id') or request.query_params.get('location_id'),
+            client_id=request.query_params.get('client_id'),
+            region=request.query_params.get('region'),
+            is_paid=request.query_params.get('is_paid', 'BOTH'),
+            is_stop_payment=request.query_params.get('is_stop_payment', 'BOTH'),
+            account_type=request.query_params.get('account_type', 'ALL'),
+            in_main_payroll=request.query_params.get('in_main_payroll', 'true').lower() in ('true', '1')
+        )
+        csv_content = PayslipReportService.export_payslip_report_csv(data)
+        from django.http import HttpResponse
+        response = HttpResponse(csv_content, content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="payslip_report.csv"'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='bulk-print')
+    def bulk_print(self, request):
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        payslip_ids = request.data.get('payslip_ids', [])
+        from hrm.services.payslip_report_service import PayslipReportService
+        data = PayslipReportService.get_payslip_report(
+            company_id=company_id,
+            is_paid='BOTH',
+            is_stop_payment='BOTH',
+            account_type='ALL',
+            in_main_payroll=False
+        )
+        if payslip_ids:
+            p_set = set(str(pid) for pid in payslip_ids)
+            data['rows'] = [r for r in data['rows'] if str(r['payslip_id']) in p_set]
+        return Response(data, status=status.HTTP_200_OK)
 
 class PayslipLineViewSet(TenantModelViewSet):
     queryset = PayslipLine.objects.filter(is_deleted=False)
@@ -921,10 +1262,13 @@ class PayslipDisbursementViewSet(TenantModelViewSet):
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from .models import EmployeeNextOfKin, EmployeeDocument, EmployeeTraining, EmploymentHistory, StatutorySchemeRateHistory
+from .models import (
+    EmployeeNextOfKin, EmployeeDocument, EmployeeTraining, EmploymentHistory,
+    StatutorySchemeRateHistory, EmployeeReference
+)
 from .serializers import (
     EmployeeNextOfKinSerializer, EmployeeDocumentSerializer, EmployeeTrainingSerializer,
-    EmploymentHistorySerializer, StatutorySchemeRateHistorySerializer
+    EmploymentHistorySerializer, StatutorySchemeRateHistorySerializer, EmployeeReferenceSerializer
 )
 
 class EmployeeNextOfKinViewSet(TenantModelViewSet):
@@ -964,3 +1308,20 @@ class StatutorySchemeRateHistoryViewSet(TenantModelViewSet):
     serializer_class = StatutorySchemeRateHistorySerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['scheme']
+
+class EmployeeReferenceViewSet(TenantModelViewSet):
+    queryset = EmployeeReference.objects.select_related('employee', 'verified_by').all()
+    serializer_class = EmployeeReferenceSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['employee', 'is_verified']
+
+    @action(detail=True, methods=['post'], url_path='verify')
+    def verify(self, request, pk=None):
+        ref = self.get_object()
+        ref.is_verified = True
+        ref.verified_by = request.user
+        ref.verified_at = timezone.now()
+        ref.remarks = request.data.get('remarks', ref.remarks)
+        ref.save()
+        return Response(EmployeeReferenceSerializer(ref).data, status=status.HTTP_200_OK)
+

@@ -46,7 +46,11 @@ from django.http import HttpResponseForbidden
 def block_sensitive_media(request, path):
     return HttpResponseForbidden("Direct access to sensitive attachments is forbidden. Please use the authenticated API endpoint.")
 
+import os
+
 urlpatterns += [
+    # Employee profile photos for roster, identity badge & modal display
+    re_path(r'^media/hrm/employee_photos/(?P<path>.*)$', serve, {'document_root': os.path.join(str(settings.MEDIA_ROOT), 'hrm', 'employee_photos')}),
     re_path(r'^media/crm/(?P<path>.*)$', block_sensitive_media),
     re_path(r'^media/operations/incidents/(?P<path>.*)$', block_sensitive_media),
     re_path(r'^media/finance/(?P<path>.*)$', block_sensitive_media),

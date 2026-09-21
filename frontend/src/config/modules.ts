@@ -17,7 +17,7 @@ export const MODULE_REGISTRY: ERPModule[] = [
     { code: 'inventory', name: 'Inventory', icon: 'bx-box', route: '/inventory', minRole: 'manager', category: 'Operations' },
     { code: 'purchasing', name: 'Purchasing', icon: 'bx-buildings', route: '/purchasing', minRole: 'manager', category: 'Operations' },
     { code: 'finance', name: 'Accounting', icon: 'bx-calculator', route: '/accounting', minRole: 'manager', category: 'Finance' },
-    { code: 'hr', name: 'Team', icon: 'bx-group', route: '/team', minRole: 'admin', category: 'Human Resources' },
+    { code: 'hr', name: 'Human Resources', icon: 'bx-group', route: '/team', minRole: 'admin', category: 'Human Resources' },
     { code: 'crm', name: 'CRM', icon: 'bx-user-circle', route: '/crm', minRole: 'manager', category: 'Sales' },
     { code: 'security_ops', name: 'Security Operations', icon: 'bx-shield', route: '/security-ops', minRole: 'manager', category: 'Operations' },
     { code: 'reports', name: 'Reports', icon: 'bx-pie-chart-alt-2', route: '/reports', minRole: 'manager', category: 'Reporting' },

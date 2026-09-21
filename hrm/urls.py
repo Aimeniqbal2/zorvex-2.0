@@ -12,7 +12,7 @@ from .views import (
     StatutorySchemeViewSet, StatutoryRuleViewSet, EmployeeStatutoryEnrollmentViewSet,
     PayrollDisbursementViewSet, PayslipDisbursementViewSet, CompanyPayrollPolicyViewSet,
     EmployeeNextOfKinViewSet, EmployeeDocumentViewSet, EmployeeTrainingViewSet,
-    EmploymentHistoryViewSet, StatutorySchemeRateHistoryViewSet
+    EmploymentHistoryViewSet, StatutorySchemeRateHistoryViewSet, EmployeeReferenceViewSet
 )
 
 router = DefaultRouter()
@@ -60,6 +60,7 @@ router.register(r'company-payroll-policy', CompanyPayrollPolicyViewSet, basename
 # PHASE S-5A WORKFORCE
 router.register(r'employee-next-of-kin', EmployeeNextOfKinViewSet, basename='employeenextofkin')
 router.register(r'employee-documents', EmployeeDocumentViewSet, basename='employeedocument')
+router.register(r'employee-references', EmployeeReferenceViewSet, basename='employeereference')
 router.register(r'employee-trainings', EmployeeTrainingViewSet, basename='employeetraining')
 router.register(r'employment-history', EmploymentHistoryViewSet, basename='employmenthistory')
 router.register(r'statutory-scheme-rate-history', StatutorySchemeRateHistoryViewSet, basename='statutoryschemeratehistory')

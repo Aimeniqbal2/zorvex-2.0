@@ -21,6 +21,8 @@ export interface WorkspaceState {
     activateTab: (tabId: string) => void;
     hasTab: (tabId: string) => boolean;
     resetWorkspace: () => void;
+    updateTab: (tabId: string, updates: Partial<WorkspaceTab>) => void;
+    pruneStaleIndustryTabs: (isSecurity: boolean) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()(
@@ -93,6 +95,62 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
     resetWorkspace: () => {
         set({ tabs: [], activeTabId: null });
+    },
+
+    updateTab: (tabId: string, updates: Partial<WorkspaceTab>) => {
+        const { tabs } = get();
+        set({
+            tabs: tabs.map(t => t.id === tabId ? { ...t, ...updates } : t)
+        });
+    },
+
+    pruneStaleIndustryTabs: (isSecurity: boolean) => {
+        const { tabs, activeTabId } = get();
+        const securityOnlyCodes = ['security_ops', 'store_equipment', 'clients_contracts', 'security_finance', 'vendors_purchasing'];
+        let updatedTabs = [...tabs];
+        
+        if (!isSecurity) {
+            // In non-security company:
+            // 1. Convert guards_staff to universal hr
+            updatedTabs = updatedTabs.map(t => {
+                if (t.moduleCode === 'guards_staff' || t.id === 'guards_staff') {
+                    return {
+                        ...t,
+                        id: 'hr',
+                        moduleCode: 'hr',
+                        title: 'Human Resources',
+                        path: '/app/hr',
+                        icon: 'bx-group'
+                    };
+                }
+                return t;
+            });
+            // 2. Remove other security-only tabs
+            updatedTabs = updatedTabs.filter(t => !securityOnlyCodes.includes(t.moduleCode));
+        } else {
+            // In security company:
+            // Convert universal hr to guards_staff
+            updatedTabs = updatedTabs.map(t => {
+                if (t.moduleCode === 'hr' || t.id === 'hr') {
+                    return {
+                        ...t,
+                        id: 'guards_staff',
+                        moduleCode: 'guards_staff',
+                        title: 'Guards & Staff',
+                        path: '/app/guards-staff',
+                        icon: 'bx-shield-quarter'
+                    };
+                }
+                return t;
+            });
+        }
+        
+        // Ensure activeTabId is valid
+        let newActiveTabId = activeTabId;
+        if (activeTabId && !updatedTabs.some(t => t.id === activeTabId)) {
+            newActiveTabId = updatedTabs.length > 0 ? updatedTabs[0].id : null;
+        }
+        set({ tabs: updatedTabs, activeTabId: newActiveTabId });
     }
         }),
         {

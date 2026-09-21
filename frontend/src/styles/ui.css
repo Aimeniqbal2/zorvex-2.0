@@ -64,6 +64,46 @@
     background-color: var(--color-surface-secondary);
 }
 
+.btn-sm,
+.btn-small {
+    height: 30px;
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: var(--radius-sm, 4px);
+    gap: 4px;
+}
+
+.btn-action-edit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--color-primary);
+    background-color: rgba(37, 99, 235, 0.07);
+    border: 1px solid rgba(37, 99, 235, 0.24);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease-in-out;
+    box-sizing: border-box;
+}
+
+.btn-action-edit:hover {
+    background-color: var(--color-primary);
+    color: #ffffff;
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.28);
+    transform: translateY(-1px);
+}
+
+.btn-action-edit:active {
+    transform: translateY(0);
+}
+
 /* INPUTS & FORMS */
 .form-field {
     display: flex;
@@ -173,33 +213,36 @@
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    padding: var(--spacing-4);
+    padding: 20px 24px;
 }
 
 .modal-content {
     background-color: var(--color-surface-elevated);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.35), 0 10px 20px -5px rgba(0, 0, 0, 0.2);
     width: 100%;
-    max-width: 500px;
-    max-height: 90vh;
+    max-width: 600px;
+    max-height: 92vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    border: 1px solid var(--color-border);
 }
 
 .modal-header {
-    padding: var(--spacing-4);
+    padding: 16px 24px;
     border-bottom: 1px solid var(--color-border);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    background-color: var(--color-surface);
 }
 
 .modal-title {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
     margin: 0;
+    color: var(--color-text);
 }
 
 .modal-close {
@@ -207,31 +250,147 @@
     border: none;
     color: var(--color-text-muted);
     cursor: pointer;
-    font-size: 20px;
-    padding: 4px;
+    font-size: 22px;
+    padding: 6px;
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: all 0.15s ease;
 }
 .modal-close:hover {
     background-color: var(--color-surface-secondary);
-    color: var(--color-text);
+    color: var(--color-danger);
+    transform: rotate(90deg);
 }
 
 .modal-body {
-    padding: var(--spacing-4);
+    padding: 20px 24px;
     overflow-y: auto;
     flex: 1;
+    max-height: calc(92vh - 130px);
 }
 
 .modal-footer {
-    padding: var(--spacing-4);
+    padding: 14px 24px;
     border-top: 1px solid var(--color-border);
     display: flex;
     justify-content: flex-end;
     gap: var(--spacing-3);
     background-color: var(--color-surface-secondary);
+}
+
+/* EXECUTIVE MODAL FORM SYSTEM */
+.modal-tab-strip {
+    display: flex;
+    gap: 6px;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 8px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+.modal-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 13px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.modal-tab-btn:hover {
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
+}
+
+.modal-tab-btn.active {
+    background: var(--color-primary);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.modal-tab-badge {
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.25);
+    color: inherit;
+    font-weight: 600;
+}
+
+.modal-tab-btn:not(.active) .modal-tab-badge {
+    background: var(--color-surface-secondary);
+    color: var(--color-primary);
+}
+
+.modal-form-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.modal-form-card-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-primary);
+    margin: 0 0 14px 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.modal-select {
+    width: 100%;
+    height: 36px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 13.5px;
+    outline: none;
+    transition: var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.modal-select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-focus);
+}
+
+.modal-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 13.5px;
+    font-family: inherit;
+    outline: none;
+    transition: var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.modal-textarea:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-focus);
 }
 
 /* TOASTS */
@@ -290,25 +449,30 @@
 .data-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
+    font-size: 13.5px;
 }
 
 .data-table th {
     text-align: left;
-    padding: var(--spacing-3) var(--spacing-4);
+    padding: 10px 12px;
     background-color: var(--color-surface-secondary);
     color: var(--color-text-muted);
     font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
     border-bottom: 1px solid var(--color-border);
     position: sticky;
     top: 0;
     z-index: 10;
+    white-space: nowrap;
 }
 
 .data-table td {
-    padding: var(--spacing-3) var(--spacing-4);
+    padding: 9px 12px;
     border-bottom: 1px solid var(--color-border);
     color: var(--color-text);
+    vertical-align: middle;
 }
 
 .data-table tbody tr:hover {
@@ -317,6 +481,62 @@
 
 .data-table tbody tr:last-child td {
     border-bottom: none;
+}
+
+.data-table tbody tr.clickable-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.data-table tbody tr.clickable-row:hover {
+    background-color: rgba(37, 99, 235, 0.05);
+}
+
+.data-table tbody tr.clickable-row:hover td {
+    background-color: rgba(37, 99, 235, 0.05);
+}
+
+/* Sticky Column Support */
+.data-table th.sticky-right,
+.data-table td.sticky-right {
+    position: sticky;
+    right: 0;
+    box-shadow: -4px 0 8px -2px rgba(0, 0, 0, 0.08);
+}
+
+.data-table th.sticky-right {
+    z-index: 12;
+    background-color: var(--color-surface-secondary);
+}
+
+.data-table td.sticky-right {
+    z-index: 5;
+    background-color: var(--color-surface);
+}
+
+.data-table tbody tr:hover td.sticky-right {
+    background-color: var(--color-surface-secondary);
+}
+
+.data-table th.sticky-left,
+.data-table td.sticky-left {
+    position: sticky;
+    left: 0;
+    box-shadow: 4px 0 8px -2px rgba(0, 0, 0, 0.08);
+}
+
+.data-table th.sticky-left {
+    z-index: 12;
+    background-color: var(--color-surface-secondary);
+}
+
+.data-table td.sticky-left {
+    z-index: 5;
+    background-color: var(--color-surface);
+}
+
+.data-table tbody tr:hover td.sticky-left {
+    background-color: var(--color-surface-secondary);
 }
 
 /* MODULE LAYOUT (Sidebar & Header) */

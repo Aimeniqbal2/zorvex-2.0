@@ -8,7 +8,7 @@ from crm.mixins import CRMBridgeValidationMixin
 from platform_core.models import Branch
 
 class Department(BaseModel):
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=255)
 
     class Meta:
         ordering = ['name']
@@ -58,7 +58,7 @@ class Position(BaseModel):
         return self.name
 
 class Designation(BaseModel):
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=255)
     code = models.CharField(max_length=30, blank=True, default='')
     description = models.TextField(blank=True, default='')
     is_active = models.BooleanField(default=True)
@@ -85,8 +85,8 @@ class Employee(BaseModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='employee_profile_new')
     crm_entity = models.ForeignKey('crm.CRMEntity', on_delete=models.RESTRICT, null=True, blank=True, related_name='employees')
     employee_code = models.CharField(max_length=50, blank=True, default='')
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    first_name = models.CharField(max_length=200, help_text="Full Name of the employee")
+    last_name = models.CharField(max_length=100, blank=True, default='')
     email = models.EmailField(blank=True, default='')
     phone = models.CharField(max_length=30, blank=True, default='')
     date_of_birth = models.DateField(null=True, blank=True)
@@ -134,6 +134,33 @@ class Employee(BaseModel):
     last_working_date = models.DateField(null=True, blank=True)
     rehire_date = models.DateField(null=True, blank=True)
 
+    # Legacy & Extended Personal Details
+    previous_employee_code = models.CharField(max_length=50, blank=True, default='', db_index=True)
+    photograph = models.FileField(upload_to='hrm/employee_photos/', null=True, blank=True)
+    gender = models.CharField(
+        max_length=10,
+        choices=[('MALE', 'Male'), ('FEMALE', 'Female'), ('OTHER', 'Other')],
+        default='MALE'
+    )
+    place_of_birth = models.CharField(max_length=100, blank=True, default='')
+    children_male = models.PositiveIntegerField(default=0)
+    children_female = models.PositiveIntegerField(default=0)
+    cnic_issue_date = models.DateField(null=True, blank=True)
+    cnic_expiry_date = models.DateField(null=True, blank=True)
+    telephone_number = models.CharField(max_length=30, blank=True, default='')
+    caste = models.CharField(max_length=50, blank=True, default='')
+    ntn_number = models.CharField(max_length=50, blank=True, default='')
+
+    # Statutory & Insurance Registration Numbers
+    eobi_number = models.CharField(max_length=50, blank=True, default='')
+    sessi_number = models.CharField(max_length=50, blank=True, default='')
+    insurance_policy_number = models.CharField(max_length=50, blank=True, default='')
+
+    # Security Guard Specific Badges & Flags
+    is_guard_vaccine = models.BooleanField(default=False)
+    is_guard_apsa_verified = models.BooleanField(default=False)
+    visible_for_activity = models.BooleanField(default=True)
+
     class Meta:
         ordering = ['first_name', 'last_name']
         constraints = [
@@ -166,7 +193,33 @@ class Employee(BaseModel):
 
     @property
     def full_name(self):
-        return f"{self.first_name} {self.last_name}".strip()
+        if self.last_name:
+            return f"{self.first_name} {self.last_name}".strip()
+        return (self.first_name or '').strip()
+
+    @full_name.setter
+    def full_name(self, value):
+        self.first_name = (value or '').strip()
+        self.last_name = ''
+
+    @property
+    def name(self):
+        return self.full_name
+
+    @name.setter
+    def name(self, value):
+        self.full_name = value
+
+    def get_full_name(self):
+        return self.full_name
+
+    @property
+    def workforce_type(self):
+        return self.classification
+
+    @workforce_type.setter
+    def workforce_type(self, value):
+        self.classification = value
 
     def clean(self):
         super().clean()
@@ -267,11 +320,41 @@ class EmployeeNextOfKin(BaseModel):
         return f"{self.name} ({self.relationship}) - {self.employee}"
 
 
+class EmployeeReference(BaseModel):
+    """
+    Reference person details for security workforce verification.
+    """
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='references')
+    name = models.CharField(max_length=255)
+    relationship = models.CharField(max_length=100, blank=True, default='')
+    contact_number = models.CharField(max_length=50, blank=True, default='')
+    cnic_number = models.CharField(max_length=50, blank=True, default='')
+    address = models.TextField(blank=True, default='')
+    remarks = models.TextField(blank=True, default='')
+    is_verified = models.BooleanField(default=False)
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(BaseModel.Meta):
+        ordering = ['name']
+
+    def clean(self):
+        super().clean()
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+        if self.verified_by_id and hasattr(self.verified_by, 'company_id') and str(self.verified_by.company_id) != str(self.company_id):
+            raise ValidationError({'verified_by': 'Verifier must belong to the same company.'})
+
+    def __str__(self):
+        return f"{self.name} (Ref for {self.employee})"
+
+
 class EmployeeDocumentType(models.TextChoices):
     CNIC = 'CNIC', 'CNIC'
     POLICE_VERIFICATION = 'POLICE_VERIFICATION', 'Police Verification'
     OTHER_VERIFICATION = 'OTHER_VERIFICATION', 'Other Verification'
     CRO = 'CRO', 'Criminal Records Office (CRO)'
+    NADRA_VERIFICATION = 'NADRA_VERIFICATION', 'NADRA Verification'
     FINGERPRINT = 'FINGERPRINT', 'Fingerprint Record'
     EMPLOYMENT_CONTRACT = 'EMPLOYMENT_CONTRACT', 'Employment Contract'
     TERMS_AND_CONDITIONS = 'TERMS_AND_CONDITIONS', 'Terms & Conditions'
@@ -1251,6 +1334,12 @@ class Payslip(BaseModel):
     operational_calculation = models.ForeignKey('operations.EmployeePayrollCalculation', null=True, blank=True, on_delete=models.SET_NULL, related_name='payslips')
     is_frozen = models.BooleanField(default=False)
 
+    # Payment Hold / Stop Payment
+    is_stop_payment = models.BooleanField(default=False, db_index=True)
+    stop_payment_reason = models.TextField(blank=True, default='')
+    stop_payment_at = models.DateTimeField(null=True, blank=True)
+    stop_payment_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -1445,14 +1534,25 @@ class CandidateStatus(models.TextChoices):
 
 class Candidate(BaseModel):
     candidate_number = models.CharField(max_length=50, blank=True, default='')
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    first_name = models.CharField(max_length=200, help_text="Full Name of the candidate")
+    last_name = models.CharField(max_length=100, blank=True, default='')
     father_name = models.CharField(max_length=100, blank=True, default='')
     date_of_birth = models.DateField(null=True, blank=True)
     national_id = models.CharField(max_length=50, blank=True, default='')
     phone = models.CharField(max_length=30, blank=True, default='')
     email = models.EmailField(blank=True, default='')
     address = models.TextField(blank=True, default='')
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def name(self) -> str:
+        return self.full_name
+
+    def get_full_name(self) -> str:
+        return self.full_name
     
     applied_designation = models.ForeignKey(Designation, on_delete=models.RESTRICT, related_name='candidates')
     status = models.CharField(max_length=20, choices=CandidateStatus.choices, default=CandidateStatus.APPLIED)

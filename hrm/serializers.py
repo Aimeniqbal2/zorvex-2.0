@@ -4,7 +4,8 @@ from django.db import models
 from erp_core.middleware import get_current_company
 from .models import (
     Department, Position, Designation, Employee, Employment, EmployeeRecord, Attendance,
-    EmployeeNextOfKin, EmployeeDocument, EmployeeTraining, EmploymentHistory, StatutorySchemeRateHistory
+    EmployeeNextOfKin, EmployeeDocument, EmployeeTraining, EmploymentHistory, StatutorySchemeRateHistory,
+    EmployeeReference
 )
 
 class BaseTenantSerializer(serializers.ModelSerializer):
@@ -76,6 +77,14 @@ class EmployeeDocumentSerializer(BaseTenantSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted', 'verified_by', 'verified_at']
 
+class EmployeeReferenceSerializer(BaseTenantSerializer):
+    verified_by_name = serializers.CharField(source='verified_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = EmployeeReference
+        fields = '__all__'
+        read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'is_deleted', 'verified_by', 'verified_at']
+
 class EmployeeTrainingSerializer(BaseTenantSerializer):
     class Meta:
         model = EmployeeTraining
@@ -103,22 +112,144 @@ class EmployeeSerializer(BaseTenantSerializer):
     department_name = serializers.CharField(source='department.name', read_only=True)
     designation_name = serializers.CharField(source='designation.name', read_only=True)
     joining_date = serializers.DateField(required=False, allow_null=True)
+    hire_date = serializers.DateField(required=False, allow_null=True)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    cnic_issue_date = serializers.DateField(required=False, allow_null=True)
+    cnic_expiry_date = serializers.DateField(required=False, allow_null=True)
     age = serializers.IntegerField(read_only=True)
     training_completed = serializers.BooleanField(read_only=True)
     full_name = serializers.CharField(read_only=True)
+    name = serializers.CharField(source='full_name', required=False, allow_blank=True)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True, default='')
     next_of_kin = EmployeeNextOfKinSerializer(many=True, read_only=True)
     documents = EmployeeDocumentSerializer(many=True, read_only=True)
     trainings = EmployeeTrainingSerializer(many=True, read_only=True)
     history_logs = EmploymentHistorySerializer(many=True, read_only=True)
+    references = EmployeeReferenceSerializer(many=True, read_only=True)
+    preferred_payment_destination = serializers.SerializerMethodField()
+
+    # Write-only payment fields to sync with finance.EmployeePaymentDestination
+    payment_method = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    bank_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    account_title = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    account_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    iban = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    wallet_provider = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    wallet_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Employee
         fields = '__all__'
         read_only_fields = ['id', 'company', 'employee_code', 'created_at', 'updated_at', 'is_deleted']
 
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        
+        # Single full name support: allows "name", "full_name", or "first_name" without requiring last_name
+        name_val = data.get('name') or data.get('full_name') or data.get('first_name')
+        if name_val is not None:
+            data['first_name'] = str(name_val).strip()
+            data['last_name'] = str(data.get('last_name') or '').strip()
+
+        date_fields = [
+            'date_of_birth', 'hire_date', 'joining_date', 
+            'confirmation_date', 'resignation_date', 'termination_date',
+            'last_working_date', 'rehire_date', 'cnic_issue_date', 'cnic_expiry_date'
+        ]
+        for f in date_fields:
+            if f in data and (data[f] == '' or data[f] is None):
+                data[f] = None
+        if data.get('joining_date') and not data.get('hire_date'):
+            data['hire_date'] = data['joining_date']
+        return super().to_internal_value(data)
+
     def get_architecture_state(self, obj):
         from hrm.services.compatibility import get_hr_architecture_state
         return get_hr_architecture_state(obj)
+
+    def get_preferred_payment_destination(self, obj):
+        try:
+            dest = obj.payment_destinations.filter(is_active=True, is_preferred=True).first()
+            if not dest:
+                dest = obj.payment_destinations.filter(is_active=True).first()
+            if dest:
+                return {
+                    'id': str(dest.id),
+                    'payment_method': dest.payment_method,
+                    'bank_name': dest.bank_name,
+                    'account_title': dest.account_title,
+                    'account_number': dest.account_number,
+                    'iban': dest.iban,
+                    'wallet_provider': dest.wallet_provider,
+                    'wallet_number': dest.wallet_number,
+                    'is_preferred': dest.is_preferred,
+                }
+        except Exception:
+            pass
+        return None
+
+    def _sync_payment_destination(self, employee, validated_data):
+        payment_method = validated_data.pop('payment_method', None)
+        bank_name = validated_data.pop('bank_name', '')
+        account_title = validated_data.pop('account_title', '')
+        account_number = validated_data.pop('account_number', '')
+        iban = validated_data.pop('iban', '')
+        wallet_provider = validated_data.pop('wallet_provider', '')
+        wallet_number = validated_data.pop('wallet_number', '')
+
+        if payment_method or bank_name or account_number or wallet_number:
+            from finance.models import EmployeePaymentDestination
+            method = payment_method or ('WALLET' if wallet_number else ('BANK_TRANSFER' if account_number else 'CASH'))
+            dest = employee.payment_destinations.filter(is_preferred=True, is_active=True).first()
+            if not dest:
+                dest = employee.payment_destinations.filter(is_active=True).first()
+            
+            if dest:
+                dest.payment_method = method
+                if bank_name:
+                    dest.bank_name = bank_name
+                if account_title:
+                    dest.account_title = account_title
+                if account_number:
+                    dest.account_number = account_number
+                if iban:
+                    dest.iban = iban
+                if wallet_provider:
+                    dest.wallet_provider = wallet_provider
+                if wallet_number:
+                    dest.wallet_number = wallet_number
+                dest.save()
+            else:
+                EmployeePaymentDestination.objects.create(
+                    company=employee.company,
+                    employee=employee,
+                    payment_method=method,
+                    bank_name=bank_name or '',
+                    account_title=account_title or '',
+                    account_number=account_number or '',
+                    iban=iban or '',
+                    wallet_provider=wallet_provider or '',
+                    wallet_number=wallet_number or '',
+                    is_preferred=True,
+                    is_active=True,
+                )
+
+    def create(self, validated_data):
+        payment_keys = ['payment_method', 'bank_name', 'account_title', 'account_number', 'iban', 'wallet_provider', 'wallet_number']
+        payment_data = {k: validated_data.pop(k, None) for k in payment_keys if k in validated_data}
+        employee = super().create(validated_data)
+        if payment_data:
+            self._sync_payment_destination(employee, payment_data)
+        return employee
+
+    def update(self, instance, validated_data):
+        payment_keys = ['payment_method', 'bank_name', 'account_title', 'account_number', 'iban', 'wallet_provider', 'wallet_number']
+        payment_data = {k: validated_data.pop(k, None) for k in payment_keys if k in validated_data}
+        employee = super().update(instance, validated_data)
+        if payment_data:
+            self._sync_payment_destination(employee, payment_data)
+        return employee
 
 class EmploymentSerializer(BaseTenantSerializer):
     class Meta:
@@ -320,18 +451,27 @@ class PayslipLineSerializer(BaseTenantSerializer):
 
 class PayslipSerializer(BaseTenantSerializer):
     lines = PayslipLineSerializer(many=True, read_only=True)
+    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    previous_employee_code = serializers.CharField(source='employee.previous_employee_code', read_only=True)
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    department_name = serializers.CharField(source='employee.department.name', read_only=True)
+    designation_name = serializers.CharField(source='employee.designation.name', read_only=True)
+    stop_payment_by_name = serializers.CharField(source='stop_payment_by.get_full_name', read_only=True)
     
     class Meta:
         model = Payslip
         fields = [
             'id', 'company', 'payroll_run', 'employee', 'employment',
+            'employee_code', 'previous_employee_code', 'employee_name', 'department_name', 'designation_name',
             'salary_assignment', 'payslip_number', 'status', 'currency',
             'gross_amount', 'deduction_amount', 'tax_amount', 'net_amount', 'lines',
+            'is_stop_payment', 'stop_payment_reason', 'stop_payment_at', 'stop_payment_by', 'stop_payment_by_name',
             'created_at', 'updated_at', 'is_deleted'
         ]
         read_only_fields = [
             'id', 'company', 'payslip_number', 'gross_amount', 'deduction_amount',
-            'tax_amount', 'net_amount', 'created_at', 'updated_at', 'is_deleted'
+            'tax_amount', 'net_amount', 'stop_payment_at', 'stop_payment_by',
+            'created_at', 'updated_at', 'is_deleted'
         ]
 
 from hrm.models import    PayrollDisbursement, PayslipDisbursement, CompanyPayrollPolicy, PayrollAccountingConfiguration
@@ -366,6 +506,10 @@ class CandidateVerificationSerializer(serializers.ModelSerializer):
         read_only_fields = ['company', 'created_at', 'updated_at', 'is_deleted', 'deleted_at']
 
 class CandidateSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='full_name', read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    first_name = serializers.CharField(required=False, allow_blank=True, default='')
+    last_name = serializers.CharField(required=False, allow_blank=True, default='')
     documents = CandidateDocumentSerializer(many=True, read_only=True)
     verifications = CandidateVerificationSerializer(many=True, read_only=True)
     applied_designation_name = serializers.CharField(source='applied_designation.name', read_only=True)
@@ -374,6 +518,14 @@ class CandidateSerializer(serializers.ModelSerializer):
         model = Candidate
         fields = '__all__'
         read_only_fields = ['company', 'created_at', 'updated_at', 'is_deleted', 'deleted_at', 'candidate_number', 'converted_employee']
+
+    def to_internal_value(self, data):
+        ret = super().to_internal_value(data)
+        raw_name = data.get('name') or data.get('full_name') or data.get('first_name') or ''
+        if raw_name:
+            ret['first_name'] = str(raw_name).strip()
+            ret['last_name'] = str(data.get('last_name') or '').strip()
+        return ret
 
 # ==============================================================================
 # PHASE C-6: STATUTORY PAYROLL & PAYROLL DISBURSEMENT

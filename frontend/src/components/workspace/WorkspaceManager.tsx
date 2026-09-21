@@ -29,18 +29,23 @@ import { SettingsWorkspace } from '../desktop/SettingsWorkspace';
 export const WorkspaceManager: React.FC = () => {
     const { tabs, activeTabId, openTab, activateTab } = useWorkspaceStore();
     const { user } = useAuthStore();
-    const { enabledModules, fetchModuleState, industry } = useAppStore();
+    const { enabledModules, fetchModuleState, industry, company } = useAppStore();
     const location = useLocation();
     const navigate = useNavigate();
     const mounted = useRef(false);
 
-    // Determine industry synchronously: JWT business_type is available immediately,
-    // industry from runtime-config arrives after async fetch. Use either.
-    const isSecurityIndustry = industry?.code === 'security' || user?.business_type === 'security';
+    // Authoritative industry context: active company business_type takes precedence
+    const isSecurityIndustry = company?.business_type 
+        ? company.business_type.toLowerCase() === 'security'
+        : (industry?.code === 'security' || user?.business_type === 'security');
 
     useEffect(() => {
         fetchModuleState();
     }, [fetchModuleState]);
+
+    useEffect(() => {
+        useWorkspaceStore.getState().pruneStaleIndustryTabs(isSecurityIndustry);
+    }, [isSecurityIndustry, company?.id]);
 
     // Synchronize URL with active tab
     useEffect(() => {
@@ -100,21 +105,21 @@ export const WorkspaceManager: React.FC = () => {
                         }}
                     >
                         {tab.moduleCode === 'inventory' || tab.moduleCode === 'store_equipment' ? (
-                            (isSecurityIndustry || tab.moduleCode === 'store_equipment') ? <SecurityInventoryWorkspace /> : <InventoryModule />
+                            isSecurityIndustry ? <SecurityInventoryWorkspace /> : <InventoryModule />
                         ) : tab.moduleCode === 'pos' ? (
                             <POSModule />
                         ) : tab.moduleCode === 'crm' || tab.moduleCode === 'clients_contracts' ? (
-                            (isSecurityIndustry || tab.moduleCode === 'clients_contracts') ? <SecurityCRMModule /> : <CRMModule />
+                            isSecurityIndustry ? <SecurityCRMModule /> : <CRMModule />
                         ) : tab.moduleCode === 'security_ops' || tab.moduleCode === 'operations' ? (
                             <SecurityOperationsModule />
                         ) : tab.moduleCode === 'platform' ? (
                             <PlatformModule />
                         ) : tab.moduleCode === 'hr' || tab.moduleCode === 'guards_staff' ? (
-                            <HRModule />
+                            <HRModule isSecurity={isSecurityIndustry} />
                         ) : tab.moduleCode === 'finance' || tab.moduleCode === 'security_finance' ? (
-                            (isSecurityIndustry || tab.moduleCode === 'security_finance') ? <SecurityFinanceModule /> : <FinanceModule />
+                            isSecurityIndustry ? <SecurityFinanceModule /> : <FinanceModule />
                         ) : tab.moduleCode === 'purchasing' || tab.moduleCode === 'vendors_purchasing' ? (
-                            (isSecurityIndustry || tab.moduleCode === 'vendors_purchasing') ? <SecurityPurchasingModule /> : <PurchasingModule />
+                            isSecurityIndustry ? <SecurityPurchasingModule /> : <PurchasingModule />
                         ) : tab.moduleCode === 'reports' ? (
                             isSecurityIndustry ? <SecurityReportsWorkspace /> : <ModulePlaceholder title={tab.title} />
                         ) : tab.moduleCode === 'settings' ? (

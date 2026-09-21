@@ -78,15 +78,38 @@ export interface UnifiedTimelineItem {
     metadata?: Record<string, any>;
 }
 
+export interface EmployeeReference {
+    id: string;
+    employee: string;
+    name: string;
+    relationship?: string;
+    contact_number?: string;
+    cnic_number?: string;
+    address?: string;
+    remarks?: string;
+    is_verified: boolean;
+    verified_by?: string;
+    verified_by_name?: string;
+    verified_at?: string;
+}
+
 export interface Employee {
     id: string;
     employee_code: string;
+    previous_employee_code?: string;
+    photograph?: string | null;
     first_name: string;
     last_name: string;
     full_name?: string;
     email?: string;
     phone?: string;
+    telephone_number?: string;
+    gender?: 'MALE' | 'FEMALE' | 'OTHER';
     date_of_birth?: string;
+    place_of_birth?: string;
+    children_male?: number;
+    children_female?: number;
+    caste?: string;
     hire_date?: string;
     joining_date?: string;
     confirmation_date?: string;
@@ -102,6 +125,9 @@ export interface Employee {
     classification: 'DIRECT' | 'INDIRECT';
     father_name?: string;
     cnic_number?: string;
+    cnic_issue_date?: string;
+    cnic_expiry_date?: string;
+    ntn_number?: string;
     permanent_address?: string;
     current_address?: string;
     education?: string;
@@ -110,10 +136,25 @@ export interface Employee {
     employment_status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'TERMINATED' | 'JUMP';
     is_active: boolean;
     training_completed?: boolean;
+    eobi_number?: string;
+    sessi_number?: string;
+    insurance_policy_number?: string;
+    is_guard_vaccine?: boolean;
+    is_guard_apsa_verified?: boolean;
+    visible_for_activity?: boolean;
     next_of_kin?: EmployeeNextOfKin[];
     documents?: EmployeeDocument[];
     trainings?: EmployeeTraining[];
     history_logs?: EmploymentHistory[];
+    references?: EmployeeReference[];
+    preferred_payment_destination?: any;
+    payment_method?: string;
+    bank_name?: string;
+    account_title?: string;
+    account_number?: string;
+    iban?: string;
+    wallet_provider?: string;
+    wallet_number?: string;
 }
 
 export interface Employment {

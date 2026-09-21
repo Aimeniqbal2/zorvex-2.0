@@ -21,11 +21,17 @@ export const apiClient = axios.create({
     }
 });
 
-// Request interceptor: attach token
+// Request interceptor: attach token and company context
 apiClient.interceptors.request.use((config) => {
     const token = TokenManager.getAccessToken();
     if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
+    }
+    if (typeof window !== 'undefined') {
+        const companyId = localStorage.getItem('current_company_id');
+        if (companyId && config.headers && !config.headers['X-Company-ID']) {
+            config.headers['X-Company-ID'] = companyId;
+        }
     }
     return config;
 }, (error) => {
