@@ -44,6 +44,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     const [photoFile, setPhotoFile] = useState<File | null>(null);
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
     const [photoError, setPhotoError] = useState(false);
+    const [photoFallback, setPhotoFallback] = useState(false);
 
     const getPhotoUrl = (photo: string | null | undefined): string | null => {
         if (!photo || photo === 'null' || photo === 'undefined' || photo === 'None' || photo === '1') return null;
@@ -136,6 +137,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             });
             setPhotoPreview(getPhotoUrl(employee.photograph));
             setPhotoError(false);
+            setPhotoFallback(false);
             fetchChildData(employee.id);
         } else {
             setFormData({
@@ -248,6 +250,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             setPhotoFile(file);
             setPhotoPreview(URL.createObjectURL(file));
             setPhotoError(false);
+            setPhotoFallback(false);
         }
     };
 
@@ -715,9 +718,19 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     <div style={{ width: '100px', height: '110px', border: '2px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden', background: 'var(--color-surface-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                         {photoPreview && !photoError ? (
                                             <img
-                                                src={photoPreview}
+                                                src={
+                                                    photoFallback && photoPreview.includes('/media/hrm/employee_photos/')
+                                                        ? photoPreview.replace('/media/hrm/employee_photos/', '/api/hrm/employee_photos/')
+                                                        : photoPreview
+                                                }
                                                 alt={formData.first_name || 'Guard Photo'}
-                                                onError={() => setPhotoError(true)}
+                                                onError={() => {
+                                                    if (!photoFallback && photoPreview.includes('/media/hrm/employee_photos/')) {
+                                                        setPhotoFallback(true);
+                                                    } else {
+                                                        setPhotoError(true);
+                                                    }
+                                                }}
                                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                             />
                                         ) : (

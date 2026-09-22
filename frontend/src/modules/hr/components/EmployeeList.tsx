@@ -15,6 +15,7 @@ interface EmployeeListProps {
 
 const EmployeePhotoAvatar: React.FC<{ employee: Employee }> = ({ employee }) => {
     const [imgFailed, setImgFailed] = useState(false);
+    const [photoFallback, setPhotoFallback] = useState(false);
 
     const photoUrl = React.useMemo(() => {
         const photo = employee.photograph;
@@ -27,6 +28,10 @@ const EmployeePhotoAvatar: React.FC<{ employee: Employee }> = ({ employee }) => 
     const initial = (employee.full_name || employee.first_name || employee.last_name || 'G').trim().charAt(0).toUpperCase();
 
     if (photoUrl && !imgFailed) {
+        const src = (photoFallback && photoUrl.includes('/media/hrm/employee_photos/'))
+            ? photoUrl.replace('/media/hrm/employee_photos/', '/api/hrm/employee_photos/')
+            : photoUrl;
+
         return (
             <div style={{
                 width: '36px',
@@ -41,9 +46,15 @@ const EmployeePhotoAvatar: React.FC<{ employee: Employee }> = ({ employee }) => 
                 flexShrink: 0
             }}>
                 <img
-                    src={photoUrl}
+                    src={src}
                     alt={employee.first_name || 'Guard'}
-                    onError={() => setImgFailed(true)}
+                    onError={() => {
+                        if (!photoFallback && photoUrl.includes('/media/hrm/employee_photos/')) {
+                            setPhotoFallback(true);
+                        } else {
+                            setImgFailed(true);
+                        }
+                    }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
             </div>

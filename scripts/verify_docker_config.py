@@ -30,11 +30,14 @@ def audit_production_config():
     assert 'internal;' in nginx_conf and 'alias /app/media/;' in nginx_conf, "Protected media must enforce internal directive"
     assert 'location /media/company_logos/' in nginx_conf, "Missing /media/company_logos/ location"
     assert 'alias /app/media/company_logos/;' in nginx_conf, "Missing alias for company_logos"
-    # Verify precedence: /media/company_logos/ appears before /media/ in config
+    assert 'location /media/hrm/employee_photos/' in nginx_conf, "Missing /media/hrm/employee_photos/ location"
+    assert 'alias /app/media/hrm/employee_photos/;' in nginx_conf, "Missing alias for employee_photos"
+    # Verify precedence: public media locations appear before /media/ in config
     pos_logos = nginx_conf.find('location /media/company_logos/ {')
+    pos_photos = nginx_conf.find('location /media/hrm/employee_photos/ {')
     pos_media = nginx_conf.find('location /media/ {')
-    assert pos_logos != -1 and pos_media != -1 and pos_logos < pos_media, "location /media/company_logos/ must precede location /media/"
-    print("[OK] Container Nginx: Public company logos routed with internal protected media guard")
+    assert pos_logos != -1 and pos_photos != -1 and pos_media != -1 and pos_logos < pos_media and pos_photos < pos_media, "Public media locations must precede internal location /media/"
+    print("[OK] Container Nginx: Public company logos & employee photos routed with internal protected media guard")
 
     # 3. Django Security Settings Audit
     with open('erp_core/settings.py', 'r', encoding='utf-8') as f:

@@ -49,8 +49,9 @@ def block_sensitive_media(request, path):
 import os
 
 urlpatterns += [
-    # Employee profile photos for roster, identity badge & modal display
+    # Employee profile photos for roster, identity badge & modal display (routed via both /media/ and /api/hrm/ for reverse proxy compatibility)
     re_path(r'^media/hrm/employee_photos/(?P<path>.*)$', serve, {'document_root': os.path.join(str(settings.MEDIA_ROOT), 'hrm', 'employee_photos')}),
+    re_path(r'^api/hrm/employee_photos/(?P<path>.*)$', serve, {'document_root': os.path.join(str(settings.MEDIA_ROOT), 'hrm', 'employee_photos')}),
     re_path(r'^media/crm/(?P<path>.*)$', block_sensitive_media),
     re_path(r'^media/operations/incidents/(?P<path>.*)$', block_sensitive_media),
     re_path(r'^media/finance/(?P<path>.*)$', block_sensitive_media),
