@@ -167,8 +167,9 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
     };
 
     useEffect(() => {
+        setCurrentPage(1);
         fetchEmployees(1, pageSize);
-    }, [filterTab]);
+    }, [filterTab, dateFrom, dateTo]);
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();

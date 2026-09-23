@@ -149,12 +149,22 @@ class EmployeeViewSet(TenantModelViewSet):
                 qs = qs.filter(is_active=True)
             elif is_active.lower() in ('false', '0'):
                 qs = qs.filter(is_active=False)
-        joining_date_from = self.request.query_params.get('joining_date_from')
-        if joining_date_from:
-            qs = qs.filter(joining_date__gte=joining_date_from)
-        joining_date_to = self.request.query_params.get('joining_date_to')
-        if joining_date_to:
-            qs = qs.filter(joining_date__lte=joining_date_to)
+        joining_date_from = self.request.query_params.get('joining_date_from') or self.request.query_params.get('hire_date_from')
+        if joining_date_from and str(joining_date_from).strip():
+            try:
+                from datetime import datetime
+                parsed_from = datetime.strptime(str(joining_date_from).strip(), '%Y-%m-%d').date()
+                qs = qs.filter(hire_date__gte=parsed_from)
+            except (ValueError, TypeError):
+                pass
+        joining_date_to = self.request.query_params.get('joining_date_to') or self.request.query_params.get('hire_date_to')
+        if joining_date_to and str(joining_date_to).strip():
+            try:
+                from datetime import datetime
+                parsed_to = datetime.strptime(str(joining_date_to).strip(), '%Y-%m-%d').date()
+                qs = qs.filter(hire_date__lte=parsed_to)
+            except (ValueError, TypeError):
+                pass
         site_id = self.request.query_params.get('site_id') or self.request.query_params.get('location_id')
         client_id = self.request.query_params.get('client_id')
         if site_id or client_id:
