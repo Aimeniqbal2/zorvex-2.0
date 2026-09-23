@@ -259,17 +259,102 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
     }
 
     const lineColumns: Column<ProposalServiceLine>[] = [
-        { key: 'service_type', header: 'Service Type', render: (l) => l.service_type_name || l.service_type },
-        { key: 'location', header: 'Location', render: (l) => l.location_name || l.location },
-        { key: 'quantity', header: 'Qty', render: (l) => l.quantity },
-        { key: 'client_rate', header: 'Rate', render: (l) => `${l.client_rate} / ${l.billing_unit}` },
-        { key: 'total', header: 'Total', render: (l) => l.total || (Number(l.quantity) * Number(l.client_rate)) },
+        { 
+            key: 'service_type', 
+            header: 'Service Type / Rank', 
+            render: (l) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                        width: '34px',
+                        height: '34px',
+                        borderRadius: '8px',
+                        background: 'rgba(9, 36, 83, 0.08)',
+                        color: 'var(--color-primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '17px',
+                        flexShrink: 0
+                    }}>
+                        <i className='bx bx-shield-quarter'></i>
+                    </div>
+                    <div>
+                        <div style={{ fontWeight: 600, color: 'var(--color-text)', fontSize: '13.5px' }}>
+                            {l.service_type_name || l.service_type}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                            {l.billing_unit} Billing Contract
+                        </div>
+                    </div>
+                </div>
+            )
+        },
+        { 
+            key: 'location', 
+            header: 'Client Location', 
+            render: (l) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--color-text)' }}>
+                    <i className='bx bx-map-pin' style={{ color: 'var(--color-primary)', fontSize: '15px' }}></i>
+                    <span>{l.location_name || l.location}</span>
+                </div>
+            )
+        },
+        { 
+            key: 'quantity', 
+            header: 'Personnel Qty', 
+            render: (l) => (
+                <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '3px 10px',
+                    borderRadius: '14px',
+                    background: 'rgba(9, 36, 83, 0.08)',
+                    color: 'var(--color-primary)',
+                    fontWeight: 700,
+                    fontSize: '12px'
+                }}>
+                    <i className='bx bx-group'></i> {l.quantity} Personnel
+                </span>
+            )
+        },
+        { 
+            key: 'client_rate', 
+            header: 'Unit Rate', 
+            render: (l) => (
+                <span style={{ fontSize: '13px', color: 'var(--color-text)', fontWeight: 500 }}>
+                    PKR {Number(l.client_rate).toLocaleString()} <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>/ {l.billing_unit.toLowerCase()}</span>
+                </span>
+            )
+        },
+        { 
+            key: 'total', 
+            header: 'Line Total', 
+            render: (l) => {
+                const total = l.total || (Number(l.quantity) * Number(l.client_rate));
+                return (
+                    <span style={{ fontWeight: 700, color: 'var(--color-primary)', fontSize: '13.5px' }}>
+                        PKR {Number(total).toLocaleString()}
+                    </span>
+                );
+            }
+        },
         { 
             key: 'actions', 
             header: '', 
             render: (l) => (
-                <Button variant="ghost" onClick={() => handleDeleteService(l.id)}>
-                    <i className='bx bx-trash' style={{ color: 'var(--color-error)' }}></i>
+                <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => {
+                        if (window.confirm('Are you sure you want to remove this security service line?')) {
+                            handleDeleteService(l.id);
+                        }
+                    }}
+                    style={{ color: 'var(--color-danger, #ef4444)', padding: '6px' }}
+                    title="Remove service line"
+                >
+                    <i className='bx bx-trash' style={{ fontSize: '17px' }}></i>
                 </Button>
             )
         }
@@ -650,41 +735,88 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
             {/* TAB 1: SERVICE REQUIREMENTS */}
             {activeTab === 'services' && (
                 <div className="sec-panel">
-                    <div className="sec-panel-header">
+                    <div className="sec-panel-header" style={{ marginBottom: isAddingService ? '20px' : '24px' }}>
                         <div>
-                            <h3 className="sec-panel-title">
-                                <i className='bx bx-shield'></i> Service Requirements (Version {activeVersion?.version_number || 1})
-                            </h3>
-                            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                                Configure security personnel, patrol units, and billing rates for this client
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                <h3 className="sec-panel-title" style={{ fontSize: '17px', fontWeight: 700 }}>
+                                    <i className='bx bx-shield-alt-2' style={{ color: 'var(--color-primary)', fontSize: '20px' }}></i> 
+                                    Service Requirements
+                                </h3>
+                                <span className="sec-version-pill-badge">
+                                    Version {activeVersion?.version_number || 1}
+                                </span>
+                                {activeVersion?.is_frozen && (
+                                    <span style={{
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        padding: '2px 8px',
+                                        border: '1px solid rgba(239, 68, 68, 0.25)',
+                                        borderRadius: '12px',
+                                        background: 'rgba(239, 68, 68, 0.08)',
+                                        color: 'var(--color-danger, #ef4444)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                    }}>
+                                        <i className='bx bx-lock-alt'></i> Frozen
+                                    </span>
+                                )}
+                            </div>
+                            <p style={{ margin: '6px 0 0 0', fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                                Configure security personnel, post deployments, and contract billing rates for this client
                             </p>
                         </div>
                         {!activeVersion?.is_frozen && !isAddingService && (
-                            <Button variant="primary" onClick={() => {
-                                if (locations.length === 0 || serviceTypes.length === 0) {
-                                    useToastStore.getState().error('Missing locations or service types for this client.');
-                                    return;
-                                }
-                                setNewService({
-                                    ...newService,
-                                    typeId: serviceTypes[0]?.id || '',
-                                    locId: locations[0]?.id || ''
-                                });
-                                setIsAddingService(true);
-                            }}>
-                                <i className='bx bx-plus'></i> Add Service Requirement
+                            <Button 
+                                variant="primary" 
+                                onClick={() => {
+                                    if (locations.length === 0 || serviceTypes.length === 0) {
+                                        useToastStore.getState().error('Missing locations or service types for this client.');
+                                        return;
+                                    }
+                                    setNewService({
+                                        ...newService,
+                                        typeId: serviceTypes[0]?.id || '',
+                                        locId: locations[0]?.id || ''
+                                    });
+                                    setIsAddingService(true);
+                                }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                            >
+                                <i className='bx bx-plus' style={{ fontSize: '18px' }}></i> Add Service Requirement
                             </Button>
                         )}
                     </div>
 
                     {isAddingService && (
                         <div className="sec-form-card">
-                            <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '14px', color: 'var(--color-text)' }}>
-                                Add New Security Service Line
+                            <div className="sec-form-card-header">
+                                <div className="sec-form-card-title-group">
+                                    <div className="sec-form-card-icon">
+                                        <i className='bx bx-plus-circle'></i>
+                                    </div>
+                                    <div>
+                                        <h4 className="sec-form-card-title">Add New Security Service Line</h4>
+                                        <p className="sec-form-card-desc">
+                                            Configure rank, post location, guard headcount, and client billing rate
+                                        </p>
+                                    </div>
+                                </div>
+                                <button 
+                                    type="button" 
+                                    className="sec-form-close-btn" 
+                                    onClick={() => setIsAddingService(false)}
+                                    title="Close form"
+                                >
+                                    <i className='bx bx-x'></i>
+                                </button>
                             </div>
+
                             <form onSubmit={handleAddService} className="sec-form-grid">
-                                <div className="sec-form-group">
-                                    <label className="sec-form-label">Service Type *</label>
+                                <div className="sec-form-group sec-form-col-6">
+                                    <label className="sec-form-label">
+                                        <i className='bx bx-user-pin'></i> Service Type / Rank *
+                                    </label>
                                     <select 
                                         className="sec-form-select"
                                         value={newService.typeId} 
@@ -696,8 +828,11 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                                         ))}
                                     </select>
                                 </div>
-                                <div className="sec-form-group">
-                                    <label className="sec-form-label">Client Location *</label>
+
+                                <div className="sec-form-group sec-form-col-6">
+                                    <label className="sec-form-label">
+                                        <i className='bx bx-map-pin'></i> Client Location / Post *
+                                    </label>
                                     <select 
                                         className="sec-form-select"
                                         value={newService.locId} 
@@ -709,60 +844,149 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                                         ))}
                                     </select>
                                 </div>
-                                <div className="sec-form-group">
-                                    <label className="sec-form-label">Quantity (Personnel) *</label>
+
+                                <div className="sec-form-group sec-form-col-4">
+                                    <label className="sec-form-label">
+                                        <i className='bx bx-group'></i> Quantity (Personnel) *
+                                    </label>
                                     <input 
                                         type="number" 
                                         min="1" 
                                         className="sec-form-input"
                                         value={newService.quantity} 
-                                        onChange={(e) => setNewService({ ...newService, quantity: parseInt(e.target.value) || 1 })}
+                                        onChange={(e) => setNewService({ ...newService, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
                                         required
+                                        placeholder="e.g. 2"
                                     />
                                 </div>
-                                <div className="sec-form-group">
-                                    <label className="sec-form-label">Client Rate (PKR) *</label>
+
+                                <div className="sec-form-group sec-form-col-4">
+                                    <label className="sec-form-label">
+                                        <i className='bx bx-money'></i> Client Rate (PKR) *
+                                    </label>
                                     <input 
                                         type="number" 
                                         min="0" 
+                                        step="any"
                                         className="sec-form-input"
                                         value={newService.clientRate} 
                                         onChange={(e) => setNewService({ ...newService, clientRate: parseFloat(e.target.value) || 0 })}
                                         required
+                                        placeholder="e.g. 45000"
                                     />
                                 </div>
-                                <div className="sec-form-group">
-                                    <label className="sec-form-label">Billing Unit</label>
+
+                                <div className="sec-form-group sec-form-col-4">
+                                    <label className="sec-form-label">
+                                        <i className='bx bx-calendar'></i> Billing Unit *
+                                    </label>
                                     <select 
                                         className="sec-form-select"
                                         value={newService.billingUnit} 
                                         onChange={(e) => setNewService({ ...newService, billingUnit: e.target.value })}
                                     >
-                                        <option value="MONTH">Month</option>
-                                        <option value="HOUR">Hour</option>
-                                        <option value="DAY">Day</option>
-                                        <option value="SHIFT">Shift</option>
+                                        <option value="MONTH">Month (Monthly Retainer)</option>
+                                        <option value="HOUR">Hour (Hourly Deployment)</option>
+                                        <option value="DAY">Day (Daily Rate)</option>
+                                        <option value="SHIFT">Shift (Per Shift Rate)</option>
                                     </select>
                                 </div>
-                                <div className="flex gap-2">
-                                    <Button type="submit" variant="primary">
-                                        <i className='bx bx-check'></i> Save
+
+                                {/* Live Calculation Banner */}
+                                <div className="sec-calc-preview">
+                                    <div className="sec-calc-preview-left">
+                                        <i className='bx bx-calculator'></i>
+                                        <span>Estimated Total: </span>
+                                        <span className="sec-calc-preview-formula">
+                                            {newService.quantity || 1} personnel &times; PKR {(Number(newService.clientRate) || 0).toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="sec-calc-preview-total">
+                                        PKR {((Number(newService.quantity) || 1) * (Number(newService.clientRate) || 0)).toLocaleString()} / {newService.billingUnit.toLowerCase()}
+                                    </div>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="sec-form-actions">
+                                    <Button 
+                                        type="button" 
+                                        variant="secondary" 
+                                        onClick={() => setIsAddingService(false)}
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        <i className='bx bx-x'></i> Cancel
                                     </Button>
-                                    <Button type="button" variant="ghost" onClick={() => setIsAddingService(false)}>
-                                        Cancel
+                                    <Button 
+                                        type="submit" 
+                                        variant="primary"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        <i className='bx bx-check'></i> Save Service Line
                                     </Button>
                                 </div>
                             </form>
                         </div>
                     )}
 
-
-                    <DataTable 
-                        data={serviceLines}
-                        columns={lineColumns as any}
-                        keyExtractor={(row: any) => row.id}
-                        emptyMessage="No service lines configured yet for this proposal version."
-                    />
+                    {serviceLines.length === 0 && !isAddingService ? (
+                        <div style={{
+                            padding: '36px 20px',
+                            textAlign: 'center',
+                            background: 'var(--color-surface-secondary)',
+                            borderRadius: '10px',
+                            border: '1px dashed var(--color-border)',
+                            color: 'var(--color-text-muted)'
+                        }}>
+                            <div style={{
+                                width: '48px',
+                                height: '48px',
+                                borderRadius: '12px',
+                                background: 'rgba(9, 36, 83, 0.08)',
+                                color: 'var(--color-primary)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '24px',
+                                marginBottom: '12px'
+                            }}>
+                                <i className='bx bx-shield-quarter'></i>
+                            </div>
+                            <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--color-text)', marginBottom: '4px' }}>
+                                No Security Service Lines Configured Yet
+                            </div>
+                            <p style={{ fontSize: '13px', margin: '0 0 16px 0', maxWidth: '440px', marginLeft: 'auto', marginRight: 'auto' }}>
+                                Add the guard ranks, patrol units, and billing rates required for this client to generate accurate commercials.
+                            </p>
+                            {!activeVersion?.is_frozen && (
+                                <Button 
+                                    variant="primary" 
+                                    size="sm"
+                                    onClick={() => {
+                                        if (locations.length === 0 || serviceTypes.length === 0) {
+                                            useToastStore.getState().error('Missing locations or service types for this client.');
+                                            return;
+                                        }
+                                        setNewService({
+                                            ...newService,
+                                            typeId: serviceTypes[0]?.id || '',
+                                            locId: locations[0]?.id || ''
+                                        });
+                                        setIsAddingService(true);
+                                    }}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                >
+                                    <i className='bx bx-plus'></i> Add First Service Line
+                                </Button>
+                            )}
+                        </div>
+                    ) : (
+                        <DataTable 
+                            data={serviceLines}
+                            columns={lineColumns as any}
+                            keyExtractor={(row: any) => row.id}
+                            emptyMessage="No service lines configured yet for this proposal version."
+                        />
+                    )}
                 </div>
             )}
 

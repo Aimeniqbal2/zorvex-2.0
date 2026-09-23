@@ -153,6 +153,21 @@
     margin-bottom: 24px;
     overflow-x: auto;
     padding-bottom: 2px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+}
+
+.sec-tabs-nav::-webkit-scrollbar {
+    height: 4px;
+}
+
+.sec-tabs-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sec-tabs-nav::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 4px;
 }
 
 .sec-tab-btn {
@@ -227,6 +242,232 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+/* ==========================================================================
+   4A. FORM CARDS & SERVICE REQUIREMENTS INPUT SYSTEM
+   ========================================================================== */
+.sec-form-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-primary, #092453);
+    border-radius: 12px;
+    padding: 22px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 18px -2px rgba(0, 0, 0, 0.05);
+    position: relative;
+    animation: secFormSlideDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes secFormSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.sec-form-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.sec-form-card-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.sec-form-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: rgba(9, 36, 83, 0.08);
+    color: var(--color-primary, #092453);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    flex-shrink: 0;
+}
+
+.sec-form-card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-text);
+    margin: 0;
+    line-height: 1.2;
+}
+
+.sec-form-card-desc {
+    font-size: 12.5px;
+    color: var(--color-text-muted);
+    margin: 3px 0 0 0;
+}
+
+.sec-form-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.sec-form-close-btn:hover {
+    background: var(--color-surface-secondary);
+    color: var(--color-danger, #ef4444);
+}
+
+.sec-form-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 16px 20px;
+}
+
+.sec-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sec-form-col-12 { grid-column: span 12; }
+.sec-form-col-8 { grid-column: span 8; }
+.sec-form-col-6 { grid-column: span 6; }
+.sec-form-col-4 { grid-column: span 4; }
+.sec-form-col-3 { grid-column: span 3; }
+
+@media (max-width: 900px) {
+    .sec-form-col-8,
+    .sec-form-col-6,
+    .sec-form-col-4,
+    .sec-form-col-3 {
+        grid-column: span 12;
+    }
+}
+
+.sec-form-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+    margin-bottom: 2px;
+}
+
+.sec-form-label i {
+    font-size: 14px;
+    color: var(--color-primary);
+}
+
+.sec-form-select,
+.sec-form-input {
+    width: 100%;
+    height: 40px;
+    padding: 0 14px;
+    font-size: 13.5px;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.sec-form-select {
+    cursor: pointer;
+}
+
+.sec-form-select:hover,
+.sec-form-input:hover {
+    border-color: var(--color-text-muted);
+}
+
+.sec-form-select:focus,
+.sec-form-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(9, 36, 83, 0.12);
+}
+
+/* Calculation Preview Banner */
+.sec-calc-preview {
+    grid-column: span 12;
+    background: var(--color-surface-secondary);
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.sec-calc-preview-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.sec-calc-preview-left i {
+    font-size: 18px;
+    color: var(--color-primary);
+}
+
+.sec-calc-preview-formula {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.sec-calc-preview-total {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-primary);
+    background: rgba(9, 36, 83, 0.08);
+    padding: 4px 12px;
+    border-radius: 6px;
+    letter-spacing: -0.01em;
+}
+
+.sec-form-actions {
+    grid-column: span 12;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 6px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+}
+
+.sec-version-pill-badge {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 14px;
+    background: rgba(9, 36, 83, 0.08);
+    color: var(--color-primary);
+    border: 1px solid rgba(9, 36, 83, 0.18);
 }
 
 /* ==========================================================================
