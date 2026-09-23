@@ -171,6 +171,79 @@ class EmployeeSerializer(BaseTenantSerializer):
 
         return super().to_internal_value(data)
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        company_id = get_current_company()
+        if not company_id and 'request' in self.context and self.context['request']:
+            company_id = self.context['request'].META.get('HTTP_X_COMPANY_ID') or getattr(self.context['request'].user, 'company_id', None)
+        if not company_id and self.instance:
+            company_id = getattr(self.instance, 'company_id', None)
+
+        # 1. Phone validation (exact 11 digits)
+        phone = attrs.get('phone')
+        if phone:
+            raw_phone = str(phone).strip()
+            digits_phone = ''.join(filter(str.isdigit, raw_phone))
+            if len(digits_phone) != 11:
+                raise serializers.ValidationError({
+                    'phone': "Mobile number must be exactly 11 digits (e.g. 03001234567)."
+                })
+            attrs['phone'] = digits_phone
+
+        # 2. CNIC format & uniqueness validation
+        cnic = attrs.get('cnic_number')
+        if cnic:
+            raw_cnic_str = str(cnic).strip()
+            digits_cnic = ''.join(filter(str.isdigit, raw_cnic_str))
+            if len(digits_cnic) != 13:
+                raise serializers.ValidationError({
+                    'cnic_number': "CNIC must be exactly 13 digits in standard format (XXXXX-XXXXXXX-X)."
+                })
+            formatted_cnic = f"{digits_cnic[:5]}-{digits_cnic[5:12]}-{digits_cnic[12]}"
+
+            if company_id:
+                dup_cnic = Employee.objects.filter(
+                    company_id=company_id,
+                    is_deleted=False
+                ).filter(
+                    models.Q(cnic_number=formatted_cnic) | models.Q(cnic_number=digits_cnic)
+                )
+                if self.instance:
+                    dup_cnic = dup_cnic.exclude(pk=self.instance.pk)
+                dup_emp = dup_cnic.first()
+                if dup_emp:
+                    emp_name = f"{dup_emp.first_name} {dup_emp.last_name or ''}".strip()
+                    code = dup_emp.previous_employee_code or dup_emp.employee_code
+                    raise serializers.ValidationError({
+                        'cnic_number': f"This CNIC is already assigned to {emp_name} ({code}). Please enter a unique CNIC."
+                    })
+            attrs['cnic_number'] = formatted_cnic
+
+        # 3. Badge / Previous Employee Code uniqueness
+        badge_code = attrs.get('previous_employee_code')
+        if badge_code:
+            code_str = str(badge_code).strip()
+            if code_str and company_id:
+                dup_code = Employee.objects.filter(
+                    company_id=company_id,
+                    is_deleted=False
+                ).filter(
+                    models.Q(previous_employee_code__iexact=code_str) |
+                    models.Q(employee_code__iexact=code_str)
+                )
+                if self.instance:
+                    dup_code = dup_code.exclude(pk=self.instance.pk)
+                dup_emp_code = dup_code.first()
+                if dup_emp_code:
+                    emp_name = f"{dup_emp_code.first_name} {dup_emp_code.last_name or ''}".strip()
+                    existing_code = dup_emp_code.previous_employee_code or dup_emp_code.employee_code
+                    raise serializers.ValidationError({
+                        'previous_employee_code': f"Employee Code / Badge '{code_str}' is already assigned to {emp_name} ({existing_code})."
+                    })
+            attrs['previous_employee_code'] = code_str
+
+        return attrs
+
     def get_architecture_state(self, obj):
         from hrm.services.compatibility import get_hr_architecture_state
         return get_hr_architecture_state(obj)

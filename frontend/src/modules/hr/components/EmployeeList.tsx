@@ -96,6 +96,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
     const [searchQuery, setSearchQuery] = useState('');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
+    const [cnicAlerts, setCnicAlerts] = useState<{ total_alerts: number; expired_count: number; expiring_soon_count: number } | null>(null);
 
     const [totalCount, setTotalCount] = useState<number>(0);
     const [currentPage, setCurrentPage] = useState<number>(1);
@@ -119,6 +120,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             if (filterTab === 'JUMP') params.append('employment_status', 'JUMP');
             if (filterTab === 'ACTIVE') params.append('is_active', 'true');
             if (filterTab === 'INACTIVE') params.append('is_active', 'false');
+            if (filterTab === 'CNIC_ALERTS') params.append('cnic_expiring', 'true');
             if (searchQuery.trim()) {
                 params.append('search', searchQuery.trim());
                 if (searchField !== 'ALL') {
@@ -142,10 +144,20 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                 setTotalCount(0);
             }
             setError(null);
+            fetchCnicAlerts();
         } catch (err: any) {
             setError(err.response?.data?.detail || err.message || 'Failed to load workforce directory');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchCnicAlerts = async () => {
+        try {
+            const res = await apiClient.get('/api/hrm/employees/cnic-alerts-summary/');
+            setCnicAlerts(res.data);
+        } catch {
+            // Silently ignore
         }
     };
 
@@ -159,6 +171,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         setDateTo('');
         setCurrentPage(1);
         fetchEmployees(1, pageSize);
+        fetchCnicAlerts();
     }, [company?.id, isSecurity]);
 
     const handleTabChange = (tab: string) => {
@@ -195,6 +208,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         if (filterTab === 'JUMP') params.append('employment_status', 'JUMP');
         if (filterTab === 'ACTIVE') params.append('is_active', 'true');
         if (filterTab === 'INACTIVE') params.append('is_active', 'false');
+        if (filterTab === 'CNIC_ALERTS') params.append('cnic_expiring', 'true');
         if (searchQuery.trim()) {
             params.append('search', searchQuery.trim());
             if (searchField !== 'ALL') {
@@ -256,6 +270,23 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         }
     };
 
+    const getCnicExpiryInfo = (expiryDateStr?: string | null) => {
+        if (!expiryDateStr) return null;
+        const expiry = new Date(expiryDateStr);
+        if (isNaN(expiry.getTime())) return null;
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        expiry.setHours(0, 0, 0, 0);
+        const diffTime = expiry.getTime() - now.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) {
+            return { isExpired: true, isExpiringSoon: false, days: Math.abs(diffDays) };
+        } else if (diffDays <= 183) {
+            return { isExpired: false, isExpiringSoon: true, days: diffDays };
+        }
+        return { isExpired: false, isExpiringSoon: false, days: diffDays };
+    };
+
     const columns: Column<Employee>[] = [
         {
             key: 'photo',
@@ -288,12 +319,27 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             key: 'Name', 
             header: 'Full Name',  
             minWidth: '150px',
-            render: (e: Employee) => (
-                <div>
-                    <div style={{ fontWeight: 600 }}>{e.full_name || `${e.first_name} ${e.last_name}`}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{e.cnic_number || 'No CNIC'}</div>
-                </div>
-            ) 
+            render: (e: Employee) => {
+                const exp = getCnicExpiryInfo(e.cnic_expiry_date);
+                return (
+                    <div>
+                        <div style={{ fontWeight: 600 }}>{e.full_name || `${e.first_name} ${e.last_name}`}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                            <span>{e.cnic_number || 'No CNIC'}</span>
+                            {exp?.isExpired && (
+                                <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '0 4px', borderRadius: '3px', fontSize: '9.5px', fontWeight: 700 }}>
+                                    EXPIRED
+                                </span>
+                            )}
+                            {exp?.isExpiringSoon && (
+                                <span style={{ background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', padding: '0 4px', borderRadius: '3px', fontSize: '9.5px', fontWeight: 700 }}>
+                                    EXPIRING ({exp.days}d)
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                );
+            } 
         },
         { 
             key: 'father_name', 
@@ -313,7 +359,98 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         },
         { key: 'Designation', header: 'Designation', minWidth: '110px', render: (e: Employee) => e.designation_name || '—' },
         { key: 'Department', header: 'Department / Site', minWidth: '130px', render: (e: Employee) => e.department_name || '—' },
-        { key: 'Phone', header: 'Contact', width: '115px', render: (e: Employee) => e.phone || e.telephone_number || '—' },
+        {
+            key: 'cnic_expiry',
+            header: 'CNIC Expiry',
+            width: '145px',
+            render: (e: Employee) => {
+                if (!e.cnic_expiry_date) {
+                    return <span style={{ color: 'var(--color-text-muted)', fontSize: '11.5px' }}>Not recorded</span>;
+                }
+                const exp = getCnicExpiryInfo(e.cnic_expiry_date);
+                if (exp?.isExpired) {
+                    return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 600, color: '#dc2626' }}>{e.cnic_expiry_date}</span>
+                            <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                color: '#ef4444',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                width: 'fit-content'
+                            }}>
+                                <i className="bx bx-error-circle"></i> Expired {exp.days}d ago
+                            </span>
+                        </div>
+                    );
+                }
+                if (exp?.isExpiringSoon) {
+                    return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 600, color: '#d97706' }}>{e.cnic_expiry_date}</span>
+                            <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                background: 'rgba(245, 158, 11, 0.1)',
+                                color: '#b45309',
+                                border: '1px solid rgba(245, 158, 11, 0.3)',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                width: 'fit-content'
+                            }}>
+                                <i className="bx bx-time-five"></i> In {exp.days} days
+                            </span>
+                        </div>
+                    );
+                }
+                return (
+                    <span style={{ fontSize: '12px', color: 'var(--color-text)' }}>
+                        {e.cnic_expiry_date}
+                    </span>
+                );
+            }
+        },
+        { 
+            key: 'Phone', 
+            header: 'Contact', 
+            width: '135px', 
+            render: (e: Employee) => {
+                const phoneNum = e.phone || e.telephone_number;
+                if (!phoneNum) return <span style={{ color: 'var(--color-text-muted)' }}>—</span>;
+                return (
+                    <a
+                        href={`tel:${phoneNum}`}
+                        onClick={(ev) => ev.stopPropagation()}
+                        style={{
+                            color: 'var(--color-primary)',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontWeight: 600,
+                            fontSize: '11.5px',
+                            background: 'rgba(37, 99, 235, 0.06)',
+                            padding: '3px 7px',
+                            borderRadius: '4px',
+                            border: '1px solid rgba(37, 99, 235, 0.15)'
+                        }}
+                        title={`Click to call ${phoneNum}`}
+                    >
+                        <i className="bx bx-phone-call" style={{ fontSize: '13px' }}></i>
+                        <span>{phoneNum}</span>
+                    </a>
+                );
+            } 
+        },
         { 
             key: 'Status', 
             header: 'Status',  
@@ -390,24 +527,49 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', background: 'var(--color-surface)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
                 {/* Tabs */}
                 <div style={{ display: 'flex', gap: '4px' }}>
-                    {['ALL', 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : [])].map(t => (
-                        <button
-                            key={t}
-                            onClick={() => handleTabChange(t)}
-                            style={{
-                                padding: '5px 10px',
-                                borderRadius: '4px',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: '12px',
-                                fontWeight: filterTab === t ? 600 : 400,
-                                background: filterTab === t ? 'var(--color-primary)' : 'transparent',
-                                color: filterTab === t ? '#fff' : 'var(--color-text)'
-                            }}
-                        >
-                            {t}
-                        </button>
-                    ))}
+                    {['ALL', 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
+                        const isAlertsTab = t === 'CNIC_ALERTS';
+                        const isSelected = filterTab === t;
+                        return (
+                            <button
+                                key={t}
+                                onClick={() => handleTabChange(t)}
+                                style={{
+                                    padding: '5px 10px',
+                                    borderRadius: '4px',
+                                    border: isAlertsTab ? (isSelected ? 'none' : '1px solid rgba(239, 68, 68, 0.3)') : 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '12px',
+                                    fontWeight: isSelected ? 600 : 400,
+                                    background: isSelected 
+                                        ? (isAlertsTab ? '#ef4444' : 'var(--color-primary)') 
+                                        : (isAlertsTab ? 'rgba(239, 68, 68, 0.08)' : 'transparent'),
+                                    color: isSelected 
+                                        ? '#fff' 
+                                        : (isAlertsTab ? '#dc2626' : 'var(--color-text)'),
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px'
+                                }}
+                            >
+                                {isAlertsTab && <i className="bx bx-bell" style={{ fontSize: '13px' }}></i>}
+                                <span>{isAlertsTab ? 'CNIC Expiry Alerts' : t}</span>
+                                {isAlertsTab && (cnicAlerts?.total_alerts !== undefined && cnicAlerts.total_alerts > 0) && (
+                                    <span style={{
+                                        background: isSelected ? '#fff' : '#ef4444',
+                                        color: isSelected ? '#ef4444' : '#fff',
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        padding: '1px 5px',
+                                        borderRadius: '10px',
+                                        lineHeight: 1.2
+                                    }}>
+                                        {cnicAlerts.total_alerts}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
                 </div>
 
                 <div style={{ width: '1px', height: '24px', background: 'var(--color-border)', margin: '0 4px' }}></div>
@@ -456,6 +618,55 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     )}
                 </div>
             </div>
+
+            {/* CNIC Alerts Banner when on Alerts tab */}
+            {filterTab === 'CNIC_ALERTS' && (
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    padding: '12px 16px',
+                    background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(245, 158, 11, 0.06) 100%)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: '6px'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '50%',
+                            background: '#ef4444',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '18px'
+                        }}>
+                            <i className="bx bx-error-circle"></i>
+                        </div>
+                        <div>
+                            <div style={{ fontWeight: 700, fontSize: '13.5px', color: '#b91c1c' }}>
+                                CNIC Expiry Attention Register (Within 6 Months)
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                Showing workforce personnel whose CNIC is already expired or expiring within 180 days. Click phone numbers to call employees and request updated CNICs.
+                            </div>
+                        </div>
+                    </div>
+                    {cnicAlerts && (
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            <span style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 600 }}>
+                                Already Expired: <strong>{cnicAlerts.expired_count}</strong>
+                            </span>
+                            <span style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 600 }}>
+                                Expiring &le; 6 Months: <strong>{cnicAlerts.expiring_soon_count}</strong>
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Employee Table */}
             {loading ? (

@@ -118,6 +118,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     const [newTraining, setNewTraining] = useState({ training_type: 'Basic Guard & Fire Safety', training_date: new Date().toISOString().split('T')[0], institute_or_trainer: '', status: 'COMPLETED' });
     const [compData, setCompData] = useState({ base_salary: '35000.00', single_ot_rate: '200.00', double_ot_rate: '400.00', effective_from: new Date().toISOString().split('T')[0] });
 
+    // Real-time Field Validation & Uniqueness States
+    const [codeDuplicateError, setCodeDuplicateError] = useState<string | null>(null);
+    const [isCheckingCode, setIsCheckingCode] = useState(false);
+    const [cnicDuplicateError, setCnicDuplicateError] = useState<string | null>(null);
+    const [cnicFormatError, setCnicFormatError] = useState<string | null>(null);
+    const [isCheckingCnic, setIsCheckingCnic] = useState(false);
+    const [phoneError, setPhoneError] = useState<string | null>(null);
+
     useEffect(() => {
         if (employee) {
             const prefPay = employee.preferred_payment_destination;
@@ -195,6 +203,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             setDeploymentHistory([]);
         }
         setError(null);
+        setCodeDuplicateError(null);
+        setCnicDuplicateError(null);
+        setCnicFormatError(null);
+        setPhoneError(null);
         setActiveModalTab('GENERAL');
     }, [employee, isOpen, isSecurity]);
 
@@ -242,6 +254,122 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
         setFormData({ ...formData, [e.target.name]: value });
+    };
+
+    const formatCnic = (val: string) => {
+        const digits = val.replace(/\D/g, '').slice(0, 13);
+        if (digits.length <= 5) return digits;
+        if (digits.length <= 12) return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+        return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+    };
+
+    const handleCnicChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const raw = e.target.value;
+        const formatted = formatCnic(raw);
+        setFormData(prev => ({ ...prev, cnic_number: formatted }));
+
+        const digits = formatted.replace(/\D/g, '');
+        if (digits.length === 0) {
+            setCnicFormatError(null);
+            setCnicDuplicateError(null);
+            return;
+        }
+        if (digits.length < 13) {
+            setCnicFormatError(`CNIC must be 13 digits in standard format (XXXXX-XXXXXXX-X). Entered: ${digits.length}/13`);
+            setCnicDuplicateError(null);
+            return;
+        }
+
+        setCnicFormatError(null);
+        setIsCheckingCnic(true);
+        try {
+            const res = await apiClient.get('/api/hrm/employees/check-duplicate/', {
+                params: {
+                    field: 'cnic',
+                    value: formatted,
+                    exclude_id: employee?.id || ''
+                }
+            });
+            if (res.data?.exists) {
+                setCnicDuplicateError(res.data.message || 'This CNIC is already registered to another employee.');
+            } else {
+                setCnicDuplicateError(null);
+            }
+        } catch {
+            // Silently ignore network check fail
+        } finally {
+            setIsCheckingCnic(false);
+        }
+    };
+
+    const handleCodeChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setFormData(prev => ({ ...prev, previous_employee_code: val }));
+
+        const trimmed = val.trim();
+        if (!trimmed) {
+            setCodeDuplicateError(null);
+            return;
+        }
+
+        setIsCheckingCode(true);
+        try {
+            const res = await apiClient.get('/api/hrm/employees/check-duplicate/', {
+                params: {
+                    field: 'code',
+                    value: trimmed,
+                    exclude_id: employee?.id || ''
+                }
+            });
+            if (res.data?.exists) {
+                setCodeDuplicateError(res.data.message || `Employee code '${trimmed}' is already assigned.`);
+            } else {
+                setCodeDuplicateError(null);
+            }
+        } catch {
+            // Silently ignore
+        } finally {
+            setIsCheckingCode(false);
+        }
+    };
+
+    const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const raw = e.target.value;
+        const digits = raw.replace(/\D/g, '').slice(0, 11);
+        setFormData(prev => ({ ...prev, phone: digits }));
+
+        if (digits.length === 0) {
+            setPhoneError(null);
+        } else if (digits.length < 11) {
+            setPhoneError(`Mobile number must be exactly 11 digits (e.g. 03001234567). Current: ${digits.length}/11`);
+        } else {
+            setPhoneError(null);
+        }
+    };
+
+    const getCnicExpiryStatus = (dateStr?: string | null) => {
+        if (!dateStr) return null;
+        const expiry = new Date(dateStr);
+        if (isNaN(expiry.getTime())) return null;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        expiry.setHours(0, 0, 0, 0);
+        const diffTime = expiry.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) {
+            return {
+                isExpired: true,
+                isExpiringSoon: false,
+                message: `⚠️ CNIC EXPIRED ${Math.abs(diffDays)} days ago on ${dateStr}. Renewal required immediately!`
+            };
+        } else if (diffDays <= 183) {
+            return {
+                isExpired: false,
+                isExpiringSoon: true,
+                message: `⚠️ CNIC expires in ${diffDays} days on ${dateStr} (within 6 months). Please request updated CNIC.`
+            };
+        }
+        return null;
     };
 
     const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -310,6 +438,48 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // 1. Guard against duplicate badge/employee code
+        if (codeDuplicateError) {
+            setError(codeDuplicateError);
+            setActiveModalTab('GENERAL');
+            return;
+        }
+
+        // 2. Guard against CNIC format and duplicate errors
+        if (cnicFormatError || cnicDuplicateError) {
+            setError(cnicDuplicateError || cnicFormatError);
+            setActiveModalTab('PERSONAL');
+            return;
+        }
+        if (formData.cnic_number) {
+            const cnicDigits = formData.cnic_number.replace(/\D/g, '');
+            if (cnicDigits.length > 0 && cnicDigits.length !== 13) {
+                const msg = `CNIC must be exactly 13 digits in standard format (XXXXX-XXXXXXX-X). Currently ${cnicDigits.length}/13 digits.`;
+                setCnicFormatError(msg);
+                setError(msg);
+                setActiveModalTab('PERSONAL');
+                return;
+            }
+        }
+
+        // 3. Guard against mobile number format (must be 11 digits)
+        if (phoneError) {
+            setError(phoneError);
+            setActiveModalTab('PERSONAL');
+            return;
+        }
+        if (formData.phone) {
+            const phoneDigits = formData.phone.replace(/\D/g, '');
+            if (phoneDigits.length > 0 && phoneDigits.length !== 11) {
+                const msg = `Mobile number must be exactly 11 digits (e.g. 03XXXXXXXXX). Currently ${phoneDigits.length}/11 digits.`;
+                setPhoneError(msg);
+                setError(msg);
+                setActiveModalTab('PERSONAL');
+                return;
+            }
+        }
+
         setLoading(true);
         setError(null);
         try {
@@ -379,7 +549,24 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             if (typeof errData === 'string') {
                 msg = errData;
             } else if (errData && typeof errData === 'object') {
-                msg = errData.detail || errData.photograph || errData;
+                if (errData.cnic_number) {
+                    const cnicMsg = Array.isArray(errData.cnic_number) ? errData.cnic_number[0] : String(errData.cnic_number);
+                    setCnicDuplicateError(cnicMsg);
+                    msg = cnicMsg;
+                    setActiveModalTab('PERSONAL');
+                } else if (errData.previous_employee_code) {
+                    const codeMsg = Array.isArray(errData.previous_employee_code) ? errData.previous_employee_code[0] : String(errData.previous_employee_code);
+                    setCodeDuplicateError(codeMsg);
+                    msg = codeMsg;
+                    setActiveModalTab('GENERAL');
+                } else if (errData.phone) {
+                    const phoneMsg = Array.isArray(errData.phone) ? errData.phone[0] : String(errData.phone);
+                    setPhoneError(phoneMsg);
+                    msg = phoneMsg;
+                    setActiveModalTab('PERSONAL');
+                } else {
+                    msg = errData.detail || errData.photograph || JSON.stringify(errData);
+                }
             } else if (err.message) {
                 msg = err.message;
             }
@@ -602,8 +789,38 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     <i className="bx bx-barcode"></i> Employee Identification & Category
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-                                    <Input label="System Code (Auto)" name="employee_code" value={formData.employee_code || ''} onChange={handleChange} placeholder="Auto (EMP-000001)" />
-                                    <Input label="Legacy / Badge Code" name="previous_employee_code" value={formData.previous_employee_code || ''} onChange={handleChange} placeholder="e.g. 010404 (Leading zeros preserved)" />
+                                    <div className="form-field">
+                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>System Code (Auto)</span>
+                                            <span style={{ fontSize: '10.5px', color: 'var(--color-primary)', background: 'rgba(37, 99, 235, 0.08)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>System Generated (Read-Only)</span>
+                                        </label>
+                                        <input 
+                                            className="modal-input" 
+                                            value={formData.employee_code || (employee ? employee.employee_code : 'Auto-generated on save (EMP-XXXXXX)')} 
+                                            readOnly 
+                                            disabled 
+                                            style={{ background: 'var(--color-surface-secondary, rgba(0,0,0,0.03))', cursor: 'not-allowed', color: 'var(--color-text-muted)', fontFamily: 'monospace', fontWeight: 600 }} 
+                                        />
+                                    </div>
+                                    <div className="form-field">
+                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>Legacy / Badge Code</span>
+                                            {isCheckingCode && <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>Checking uniqueness...</span>}
+                                        </label>
+                                        <input
+                                            className="modal-input"
+                                            name="previous_employee_code"
+                                            value={formData.previous_employee_code || ''}
+                                            onChange={handleCodeChange}
+                                            placeholder="e.g. 010404 (Unique per company)"
+                                            style={codeDuplicateError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}
+                                        />
+                                        {codeDuplicateError && (
+                                            <div style={{ color: '#ef4444', fontSize: '11.5px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <i className="bx bx-error-circle"></i> {codeDuplicateError}
+                                            </div>
+                                        )}
+                                    </div>
                                     <div className="form-field">
                                         <label className="form-label">{isSecurity ? 'Workforce Classification' : 'Classification'} <span className="required">*</span></label>
                                         <select 
@@ -837,9 +1054,52 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     <i className="bx bx-card"></i> National Identity & Verification (NADRA)
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-                                    <Input label="CNIC Number (13 Digits)" name="cnic_number" value={formData.cnic_number || ''} onChange={handleChange} placeholder="e.g. 45501-3990113-9" />
+                                    <div className="form-field">
+                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>CNIC Number (13 Digits)</span>
+                                            {isCheckingCnic && <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>Checking uniqueness...</span>}
+                                        </label>
+                                        <input
+                                            className="modal-input"
+                                            name="cnic_number"
+                                            value={formData.cnic_number || ''}
+                                            onChange={handleCnicChange}
+                                            placeholder="XXXXX-XXXXXXX-X"
+                                            maxLength={15}
+                                            style={(cnicFormatError || cnicDuplicateError) ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}
+                                        />
+                                        {(cnicFormatError || cnicDuplicateError) && (
+                                            <div style={{ color: '#ef4444', fontSize: '11.5px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <i className="bx bx-error-circle"></i> {cnicDuplicateError || cnicFormatError}
+                                            </div>
+                                        )}
+                                    </div>
                                     <Input label="CNIC Issue Date" type="date" name="cnic_issue_date" value={formData.cnic_issue_date || ''} onChange={handleChange} />
-                                    <Input label="CNIC Expiry Date" type="date" name="cnic_expiry_date" value={formData.cnic_expiry_date || ''} onChange={handleChange} />
+                                    <div>
+                                        <Input label="CNIC Expiry Date" type="date" name="cnic_expiry_date" value={formData.cnic_expiry_date || ''} onChange={handleChange} />
+                                        {(() => {
+                                            const status = getCnicExpiryStatus(formData.cnic_expiry_date);
+                                            if (!status) return null;
+                                            return (
+                                                <div style={{
+                                                    marginTop: '6px',
+                                                    padding: '6px 10px',
+                                                    borderRadius: '4px',
+                                                    fontSize: '11.5px',
+                                                    fontWeight: 600,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    background: status.isExpired ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                                                    color: status.isExpired ? '#ef4444' : '#d97706',
+                                                    border: `1px solid ${status.isExpired ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`
+                                                }}>
+                                                    <i className={`bx ${status.isExpired ? 'bx-error-circle' : 'bx-time-five'}`}></i>
+                                                    <span>{status.message}</span>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
                                 </div>
                             </div>
 
@@ -849,7 +1109,26 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     <i className="bx bx-phone-call"></i> Contact & Communications
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-                                    <Input label="Primary Mobile / Cell" name="phone" value={formData.phone || ''} onChange={handleChange} placeholder="03XXXXXXXXX" />
+                                    <div className="form-field">
+                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>Primary Mobile / Cell</span>
+                                            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>11 Digits</span>
+                                        </label>
+                                        <input
+                                            className="modal-input"
+                                            name="phone"
+                                            value={formData.phone || ''}
+                                            onChange={handlePhoneChange}
+                                            placeholder="03XXXXXXXXX"
+                                            maxLength={11}
+                                            style={phoneError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}
+                                        />
+                                        {phoneError && (
+                                            <div style={{ color: '#ef4444', fontSize: '11.5px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <i className="bx bx-error-circle"></i> {phoneError}
+                                            </div>
+                                        )}
+                                    </div>
                                     <Input label="Secondary Landline / Tel" name="telephone_number" value={formData.telephone_number || ''} onChange={handleChange} placeholder="021-XXXXXXX" />
                                     <Input label="Email Address" type="email" name="email" value={formData.email || ''} onChange={handleChange} placeholder="guard@zorvexsecurity.com" />
                                 </div>

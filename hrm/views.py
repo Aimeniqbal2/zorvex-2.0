@@ -165,6 +165,15 @@ class EmployeeViewSet(TenantModelViewSet):
                 qs = qs.filter(hire_date__lte=parsed_to)
             except (ValueError, TypeError):
                 pass
+        cnic_expiring = self.request.query_params.get('cnic_expiring')
+        if cnic_expiring and str(cnic_expiring).lower() in ('true', '1'):
+            from datetime import date, timedelta
+            today = date.today()
+            six_months_ahead = today + timedelta(days=183)
+            qs = qs.filter(
+                cnic_expiry_date__isnull=False,
+                cnic_expiry_date__lte=six_months_ahead
+            ).order_by('cnic_expiry_date')
         site_id = self.request.query_params.get('site_id') or self.request.query_params.get('location_id')
         client_id = self.request.query_params.get('client_id')
         if site_id or client_id:
@@ -218,6 +227,83 @@ class EmployeeViewSet(TenantModelViewSet):
             serializer.save(company_id=company_id, employee_code=new_code)
         else:
             serializer.save(company_id=company_id)
+
+    @action(detail=False, methods=['get'], url_path='check-duplicate')
+    def check_duplicate(self, request):
+        field_type = request.query_params.get('field', '').strip().lower()
+        value = request.query_params.get('value', '').strip()
+        exclude_id = request.query_params.get('exclude_id', '').strip()
+
+        if not field_type or not value:
+            return Response({'exists': False})
+
+        qs = self.get_queryset()
+        if exclude_id:
+            qs = qs.exclude(id=exclude_id)
+
+        from django.db.models import Q
+
+        if field_type == 'cnic':
+            clean_cnic = value.replace(' ', '').strip()
+            raw_digits = ''.join(filter(str.isdigit, clean_cnic))
+            if len(raw_digits) == 13:
+                formatted_cnic = f"{raw_digits[:5]}-{raw_digits[5:12]}-{raw_digits[12]}"
+            else:
+                formatted_cnic = clean_cnic
+
+            matched = qs.filter(
+                Q(cnic_number=formatted_cnic) |
+                Q(cnic_number=clean_cnic) |
+                Q(cnic_number=raw_digits)
+            ).first()
+            if matched:
+                emp_name = f"{matched.first_name} {matched.last_name or ''}".strip()
+                code = matched.previous_employee_code or matched.employee_code
+                return Response({
+                    'exists': True,
+                    'message': f"This CNIC is already assigned to {emp_name} ({code}). Please enter a unique CNIC.",
+                    'employee_name': emp_name,
+                    'employee_code': code,
+                    'employee_id': str(matched.id)
+                })
+        elif field_type == 'code':
+            matched = qs.filter(
+                Q(previous_employee_code__iexact=value) |
+                Q(employee_code__iexact=value)
+            ).first()
+            if matched:
+                emp_name = f"{matched.first_name} {matched.last_name or ''}".strip()
+                code = matched.previous_employee_code or matched.employee_code
+                return Response({
+                    'exists': True,
+                    'message': f"Employee Code / Badge '{value}' is already used by {emp_name} ({code}).",
+                    'employee_name': emp_name,
+                    'employee_code': code,
+                    'employee_id': str(matched.id)
+                })
+
+        return Response({'exists': False})
+
+    @action(detail=False, methods=['get'], url_path='cnic-alerts-summary')
+    def cnic_alerts_summary(self, request):
+        from datetime import date, timedelta
+        today = date.today()
+        six_months_ahead = today + timedelta(days=183)
+        qs = self.get_queryset()
+
+        expired_count = qs.filter(cnic_expiry_date__isnull=False, cnic_expiry_date__lt=today).count()
+        expiring_soon_count = qs.filter(
+            cnic_expiry_date__isnull=False,
+            cnic_expiry_date__gte=today,
+            cnic_expiry_date__lte=six_months_ahead
+        ).count()
+        total_alerts = expired_count + expiring_soon_count
+
+        return Response({
+            'total_alerts': total_alerts,
+            'expired_count': expired_count,
+            'expiring_soon_count': expiring_soon_count,
+        })
 
     @action(detail=True, methods=['get'], url_path='deployments')
     def deployments(self, request, pk=None):
