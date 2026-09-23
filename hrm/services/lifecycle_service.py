@@ -960,13 +960,21 @@ class LifecycleService:
 
         for h in hist_qs:
             actor = h.approved_by.get_full_name() if h.approved_by else (h.changed_by.get_full_name() if h.changed_by else None)
+            # Prioritize employee's actual hire_date/joining_date over system upload timestamps
+            event_date = h.effective_date
+            if h.event_type in ['JOINING', 'JOIN', LifecycleEventType.JOIN] and employee.hire_date:
+                event_date = employee.hire_date
+            elif not event_date:
+                event_date = h.created_at.date()
+
+            ts = f"{event_date}T00:00:00" if (h.event_type in ['JOINING', 'JOIN', LifecycleEventType.JOIN] and employee.hire_date) else h.created_at.isoformat()
             timeline.append({
                 'id': f"hist_{h.id}",
                 'source_type': 'EMPLOYMENT_HISTORY',
                 'source_id': str(h.id),
                 'event_type': h.event_type,
-                'date': str(h.effective_date or h.created_at.date()),
-                'timestamp': h.created_at.isoformat(),
+                'date': str(event_date),
+                'timestamp': ts,
                 'title': cls._format_history_title(h),
                 'description': h.notes or h.reason or '',
                 'reason': h.reason,
@@ -1058,6 +1066,25 @@ class LifecycleService:
                     'status': j.status,
                     'consecutive_absent_days': j.consecutive_absent_days,
                 }
+            })
+
+        # Ensure a JOINING event exists if employee has an actual hire_date
+        has_join_event = any(item['event_type'] in ['JOINING', 'JOIN', LifecycleEventType.JOIN] for item in timeline)
+        if not has_join_event and employee.hire_date:
+            timeline.append({
+                'id': f"emp_join_{employee.id}",
+                'source_type': 'EMPLOYEE_MASTER',
+                'source_id': str(employee.id),
+                'event_type': 'JOINING',
+                'date': str(employee.hire_date),
+                'timestamp': f"{employee.hire_date}T00:00:00",
+                'title': 'Joined Organization',
+                'description': f"Employee enrolled with status {employee.employment_status} and code {employee.employee_code}",
+                'reason': '',
+                'old_value': '',
+                'new_value': employee.employment_status,
+                'actor': None,
+                'metadata': {},
             })
 
         # Sort chronological descending (by date, then by timestamp)

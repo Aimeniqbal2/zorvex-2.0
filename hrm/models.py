@@ -273,6 +273,11 @@ class Employee(BaseModel):
                 changes.append(('CLASSIFICATION_CHANGE', f"Classification: {old_inst.classification} -> {self.classification}"))
             if old_inst.employment_status != self.employment_status:
                 changes.append(('STATUS_CHANGE', f"Status: {old_inst.employment_status} -> {self.employment_status}"))
+            if old_inst.hire_date != self.hire_date and self.hire_date:
+                EmploymentHistory.objects.filter(
+                    employee=self,
+                    event_type__in=['JOINING', 'JOIN']
+                ).update(effective_date=self.hire_date)
             
             for event_type, msg in changes:
                 EmploymentHistory.objects.create(
@@ -286,6 +291,7 @@ class Employee(BaseModel):
                 company=self.company,
                 employee=self,
                 event_type='JOINING',
+                effective_date=self.hire_date or date.today(),
                 notes=f"Employee created with status {self.employment_status} and code {self.employee_code}"
             )
 
