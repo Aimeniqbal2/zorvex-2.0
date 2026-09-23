@@ -457,6 +457,36 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         }
     };
 
+    const handleDeleteKin = async (kinId: string) => {
+        if (!confirm('Are you sure you want to remove this emergency contact?')) return;
+        try {
+            await apiClient.delete(`/api/hrm/employee-next-of-kin/${kinId}/`);
+            if (employee?.id) fetchChildData(employee.id);
+        } catch (e) {
+            alert('Failed to delete next of kin contact');
+        }
+    };
+
+    const handleDeleteReference = async (refId: string) => {
+        if (!confirm('Are you sure you want to remove this reference person?')) return;
+        try {
+            await apiClient.delete(`/api/hrm/employee-references/${refId}/`);
+            if (employee?.id) fetchChildData(employee.id);
+        } catch (e) {
+            alert('Failed to delete reference');
+        }
+    };
+
+    const handleDeleteDoc = async (docId: string) => {
+        if (!confirm('Are you sure you want to delete this document?')) return;
+        try {
+            await apiClient.delete(`/api/hrm/employee-documents/${docId}/`);
+            if (employee?.id) fetchChildData(employee.id);
+        } catch (e) {
+            alert('Failed to delete document');
+        }
+    };
+
     const handleAddTraining = async () => {
         if (!employee?.id || !newTraining.training_type) return;
         try {
@@ -467,6 +497,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             fetchChildData(employee.id);
         } catch (e) {
             alert('Failed to add training record');
+        }
+    };
+
+    const handleDeleteTraining = async (trainId: string) => {
+        if (!confirm('Are you sure you want to delete this training record?')) return;
+        try {
+            await apiClient.delete(`/api/hrm/employee-trainings/${trainId}/`);
+            if (employee?.id) fetchChildData(employee.id);
+        } catch (e) {
+            alert('Failed to delete training record');
         }
     };
 
@@ -844,8 +884,19 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                                 <div>
                                                     <strong>{k.name}</strong> <span style={{ color: 'var(--color-text-muted)' }}>({k.relationship})</span>
                                                     <span style={{ marginLeft: '12px', color: 'var(--color-primary)', fontWeight: 500 }}>📞 {k.contact_number}</span>
+                                                    {k.cnic_number && <span style={{ marginLeft: '12px', color: 'var(--color-text-muted)', fontSize: '12px' }}>CNIC: {k.cnic_number}</span>}
                                                 </div>
-                                                <div>{k.is_primary ? <span className="badge badge-success">Primary Emergency Contact</span> : ''}</div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                    {k.is_primary ? <span className="badge badge-success">Primary Emergency Contact</span> : ''}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteKin(k.id)}
+                                                        style={{ background: 'none', border: 'none', color: 'var(--color-danger, #ef4444)', cursor: 'pointer', padding: '4px 6px', fontSize: '16px', display: 'flex', alignItems: 'center', borderRadius: '4px' }}
+                                                        title="Delete Contact"
+                                                    >
+                                                        <i className="bx bx-trash"></i>
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -924,11 +975,21 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                                     </span>
                                                 </td>
                                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                                    {!ref.is_verified && (
-                                                        <Button type="button" variant="secondary" size="sm" onClick={() => handleVerifyReference(ref.id)}>
-                                                            Verify
-                                                        </Button>
-                                                    )}
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                        {!ref.is_verified && (
+                                                            <Button type="button" variant="secondary" size="sm" onClick={() => handleVerifyReference(ref.id)}>
+                                                                Verify
+                                                            </Button>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteReference(ref.id)}
+                                                            style={{ background: 'none', border: 'none', color: 'var(--color-danger, #ef4444)', cursor: 'pointer', padding: '4px', fontSize: '16px', display: 'flex', alignItems: 'center' }}
+                                                            title="Delete Reference"
+                                                        >
+                                                            <i className="bx bx-trash"></i>
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -992,11 +1053,21 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                                 </td>
                                                 <td style={{ padding: '10px 12px' }}>{doc.verified_by_name || '—'}</td>
                                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                                    {doc.verification_status !== 'VERIFIED' && (
-                                                        <Button type="button" variant="secondary" size="sm" onClick={() => handleVerifyDoc(doc.id)}>
-                                                            Verify
-                                                        </Button>
-                                                    )}
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                        {doc.verification_status !== 'VERIFIED' && (
+                                                            <Button type="button" variant="secondary" size="sm" onClick={() => handleVerifyDoc(doc.id)}>
+                                                                Verify
+                                                            </Button>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteDoc(doc.id)}
+                                                            style={{ background: 'none', border: 'none', color: 'var(--color-danger, #ef4444)', cursor: 'pointer', padding: '4px', fontSize: '16px', display: 'flex', alignItems: 'center' }}
+                                                            title="Delete Document"
+                                                        >
+                                                            <i className="bx bx-trash"></i>
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -1044,6 +1115,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             <th style={{ padding: '10px 12px' }}>Date</th>
                                             <th style={{ padding: '10px 12px' }}>Trainer / Institute</th>
                                             <th style={{ padding: '10px 12px' }}>Status</th>
+                                            <th style={{ padding: '10px 12px', textAlign: 'center' }}>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1053,6 +1125,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                                 <td style={{ padding: '10px 12px' }}>{t.training_date}</td>
                                                 <td style={{ padding: '10px 12px' }}>{t.institute_or_trainer || '—'}</td>
                                                 <td style={{ padding: '10px 12px' }}><span className="badge badge-success">{t.status}</span></td>
+                                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteTraining(t.id)}
+                                                        style={{ background: 'none', border: 'none', color: 'var(--color-danger, #ef4444)', cursor: 'pointer', padding: '4px', fontSize: '16px', display: 'flex', alignItems: 'center', margin: '0 auto' }}
+                                                        title="Delete Training"
+                                                    >
+                                                        <i className="bx bx-trash"></i>
+                                                    </button>
+                                                </td>
                                             </tr>
                                         ))}
                                         {trainingsList.length === 0 && (

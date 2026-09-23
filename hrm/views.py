@@ -1277,11 +1277,37 @@ class EmployeeNextOfKinViewSet(TenantModelViewSet):
     permission_classes = [IsAuthenticated]
     filterset_fields = ['employee', 'is_primary']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        emp_id = self.request.query_params.get('employee') or self.request.query_params.get('employee_id')
+        if emp_id:
+            qs = qs.filter(employee_id=emp_id)
+        is_primary = self.request.query_params.get('is_primary')
+        if is_primary is not None:
+            if is_primary.lower() in ('true', '1'):
+                qs = qs.filter(is_primary=True)
+            elif is_primary.lower() in ('false', '0'):
+                qs = qs.filter(is_primary=False)
+        return qs
+
 class EmployeeDocumentViewSet(TenantModelViewSet):
     queryset = EmployeeDocument.objects.select_related('employee', 'verified_by').all()
     serializer_class = EmployeeDocumentSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['employee', 'document_type', 'verification_status']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        emp_id = self.request.query_params.get('employee') or self.request.query_params.get('employee_id')
+        if emp_id:
+            qs = qs.filter(employee_id=emp_id)
+        doc_type = self.request.query_params.get('document_type')
+        if doc_type:
+            qs = qs.filter(document_type=doc_type)
+        status_val = self.request.query_params.get('verification_status')
+        if status_val:
+            qs = qs.filter(verification_status=status_val)
+        return qs
 
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
@@ -1297,11 +1323,34 @@ class EmployeeTrainingViewSet(TenantModelViewSet):
     permission_classes = [IsAuthenticated]
     filterset_fields = ['employee', 'status', 'training_type']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        emp_id = self.request.query_params.get('employee') or self.request.query_params.get('employee_id')
+        if emp_id:
+            qs = qs.filter(employee_id=emp_id)
+        training_type = self.request.query_params.get('training_type')
+        if training_type:
+            qs = qs.filter(training_type=training_type)
+        status_val = self.request.query_params.get('status')
+        if status_val:
+            qs = qs.filter(status=status_val)
+        return qs
+
 class EmploymentHistoryViewSet(TenantModelViewSet):
     queryset = EmploymentHistory.objects.select_related('employee', 'changed_by').all()
     serializer_class = EmploymentHistorySerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['employee', 'event_type']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        emp_id = self.request.query_params.get('employee') or self.request.query_params.get('employee_id')
+        if emp_id:
+            qs = qs.filter(employee_id=emp_id)
+        event_type = self.request.query_params.get('event_type')
+        if event_type:
+            qs = qs.filter(event_type=event_type)
+        return qs
 
 class StatutorySchemeRateHistoryViewSet(TenantModelViewSet):
     queryset = StatutorySchemeRateHistory.objects.select_related('scheme').all()
@@ -1314,6 +1363,19 @@ class EmployeeReferenceViewSet(TenantModelViewSet):
     serializer_class = EmployeeReferenceSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['employee', 'is_verified']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        emp_id = self.request.query_params.get('employee') or self.request.query_params.get('employee_id')
+        if emp_id:
+            qs = qs.filter(employee_id=emp_id)
+        is_verified = self.request.query_params.get('is_verified')
+        if is_verified is not None:
+            if is_verified.lower() in ('true', '1'):
+                qs = qs.filter(is_verified=True)
+            elif is_verified.lower() in ('false', '0'):
+                qs = qs.filter(is_verified=False)
+        return qs
 
     @action(detail=True, methods=['post'], url_path='verify')
     def verify(self, request, pk=None):
