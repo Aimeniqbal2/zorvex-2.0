@@ -524,9 +524,21 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             </div>
 
             {/* Filter Bar */}
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', background: 'var(--color-surface)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                {/* Tabs */}
-                <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{
+                display: 'flex',
+                gap: '8px 12px',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                background: 'var(--color-surface)',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--color-border)',
+                boxSizing: 'border-box',
+                width: '100%'
+            }}>
+                {/* Left: Tabs */}
+                <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', alignItems: 'center' }}>
                     {['ALL', 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
                         const isAlertsTab = t === 'CNIC_ALERTS';
                         const isSelected = filterTab === t;
@@ -535,11 +547,11 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                                 key={t}
                                 onClick={() => handleTabChange(t)}
                                 style={{
-                                    padding: '5px 10px',
+                                    padding: '4px 8px',
                                     borderRadius: '4px',
-                                    border: isAlertsTab ? (isSelected ? 'none' : '1px solid rgba(239, 68, 68, 0.3)') : 'none',
+                                    border: isAlertsTab ? (isSelected ? 'none' : '1px solid rgba(239, 68, 68, 0.35)') : 'none',
                                     cursor: 'pointer',
-                                    fontSize: '12px',
+                                    fontSize: '11.5px',
                                     fontWeight: isSelected ? 600 : 400,
                                     background: isSelected 
                                         ? (isAlertsTab ? '#ef4444' : 'var(--color-primary)') 
@@ -549,19 +561,20 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                                         : (isAlertsTab ? '#dc2626' : 'var(--color-text)'),
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '5px'
+                                    gap: '4px',
+                                    whiteSpace: 'nowrap'
                                 }}
                             >
-                                {isAlertsTab && <i className="bx bx-bell" style={{ fontSize: '13px' }}></i>}
-                                <span>{isAlertsTab ? 'CNIC Expiry Alerts' : t}</span>
+                                {isAlertsTab && <i className="bx bx-bell" style={{ fontSize: '12px' }}></i>}
+                                <span>{isAlertsTab ? 'CNIC Alerts' : t}</span>
                                 {isAlertsTab && (cnicAlerts?.total_alerts !== undefined && cnicAlerts.total_alerts > 0) && (
                                     <span style={{
                                         background: isSelected ? '#fff' : '#ef4444',
                                         color: isSelected ? '#ef4444' : '#fff',
-                                        fontSize: '10px',
+                                        fontSize: '9.5px',
                                         fontWeight: 700,
-                                        padding: '1px 5px',
-                                        borderRadius: '10px',
+                                        padding: '0 4px',
+                                        borderRadius: '8px',
                                         lineHeight: 1.2
                                     }}>
                                         {cnicAlerts.total_alerts}
@@ -572,50 +585,95 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     })}
                 </div>
 
-                <div style={{ width: '1px', height: '24px', background: 'var(--color-border)', margin: '0 4px' }}></div>
+                {/* Right: Search & Date Range */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', flex: '1 1 340px', justifyContent: 'flex-end', minWidth: '0' }}>
+                    {/* Search Form */}
+                    <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '6px', flex: '1 1 200px', maxWidth: '360px', minWidth: '0' }}>
+                        <select
+                            value={searchField}
+                            onChange={(e) => setSearchField(e.target.value)}
+                            style={{
+                                width: '92px',
+                                height: '30px',
+                                padding: '0 4px',
+                                borderRadius: '4px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                color: 'var(--color-text)',
+                                fontSize: '11.5px',
+                                flexShrink: 0
+                            }}
+                        >
+                            <option value="ALL">All Fields</option>
+                            <option value="NAME">Name</option>
+                            <option value="CODE">Employee Code</option>
+                            <option value="CNIC">CNIC</option>
+                            <option value="PHONE">Phone</option>
+                        </select>
+                        <input
+                            type="text"
+                            placeholder="Search name, code, CNIC..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            style={{
+                                flex: 1,
+                                minWidth: '0',
+                                padding: '0 8px',
+                                height: '30px',
+                                borderRadius: '4px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                color: 'var(--color-text)',
+                                fontSize: '12px'
+                            }}
+                        />
+                        <Button
+                            type="submit"
+                            variant="secondary"
+                            size="sm"
+                            style={{
+                                height: '30px',
+                                padding: '0 10px',
+                                fontSize: '11.5px',
+                                flexShrink: 0,
+                                whiteSpace: 'nowrap',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                            }}
+                        >
+                            <i className="bx bx-search"></i>
+                            <span>Search</span>
+                        </Button>
+                    </form>
 
-                {/* Search Form */}
-                <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '8px', flex: 1, minWidth: '260px' }}>
-                    <select
-                        value={searchField}
-                        onChange={(e) => setSearchField(e.target.value)}
-                        style={{ padding: '0 8px', height: '32px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '12px' }}
-                    >
-                        <option value="ALL">All Fields</option>
-                        <option value="NAME">Name</option>
-                        <option value="CODE">Employee Code</option>
-                        <option value="CNIC">CNIC</option>
-                        <option value="PHONE">Phone</option>
-                    </select>
-                    <input
-                        type="text"
-                        placeholder="Search by name, code, CNIC, caste..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        style={{ flex: 1, padding: '0 10px', height: '32px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '12.5px' }}
-                    />
-                    <Button type="submit" variant="secondary" size="sm">Search</Button>
-                </form>
-
-                {/* Enrollment Date Range */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-                    <span style={{ color: 'var(--color-text-muted)' }}>Enrolled:</span>
-                    <input
-                        type="date"
-                        value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
-                        style={{ height: '32px', padding: '0 6px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11.5px' }}
-                    />
-                    <span style={{ color: 'var(--color-text-muted)' }}>to</span>
-                    <input
-                        type="date"
-                        value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
-                        style={{ height: '32px', padding: '0 6px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11.5px' }}
-                    />
-                    {(dateFrom || dateTo) && (
-                        <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); setCurrentPage(1); fetchEmployees(1, pageSize); }} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '14px' }}>✕</button>
-                    )}
+                    {/* Enrollment Date Range */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', flexShrink: 0, color: 'var(--color-text-muted)' }}>
+                        <span>Enrolled:</span>
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                            style={{ height: '30px', padding: '0 4px', width: '115px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11px' }}
+                        />
+                        <span>to</span>
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={(e) => setDateTo(e.target.value)}
+                            style={{ height: '30px', padding: '0 4px', width: '115px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11px' }}
+                        />
+                        {(dateFrom || dateTo) && (
+                            <button
+                                type="button"
+                                onClick={() => { setDateFrom(''); setDateTo(''); setCurrentPage(1); fetchEmployees(1, pageSize); }}
+                                style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '13px', padding: '2px 4px' }}
+                                title="Clear dates"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
