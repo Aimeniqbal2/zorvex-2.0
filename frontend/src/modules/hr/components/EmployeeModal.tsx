@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -51,6 +51,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         if (photo.startsWith('http://') || photo.startsWith('https://') || photo.startsWith('data:')) return photo;
         if (photo.startsWith('/')) return photo;
         return `/media/${photo}`;
+    };
+
+    const getFileUrl = (filePath: string | null | undefined): string | null => {
+        if (!filePath || filePath === 'null' || filePath === 'undefined' || filePath === 'None' || filePath === '1') return null;
+        if (filePath.startsWith('http://') || filePath.startsWith('https://') || filePath.startsWith('blob:') || filePath.startsWith('data:')) return filePath;
+        if (filePath.startsWith('/')) return filePath;
+        return `/media/${filePath}`;
     };
 
     // Form Data
@@ -114,8 +121,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     // Form inputs for inline creation
     const [newKin, setNewKin] = useState({ name: '', relationship: '', contact_number: '', cnic_number: '', is_primary: true });
     const [newDoc, setNewDoc] = useState({ document_type: 'POLICE_VERIFICATION', document_number: '', notes: '' });
+    const [docFile, setDocFile] = useState<File | null>(null);
+    const [isSubmittingDoc, setIsSubmittingDoc] = useState(false);
+    const docFileInputRef = useRef<HTMLInputElement>(null);
+
     const [newRef, setNewRef] = useState({ name: '', relationship: '', contact_number: '', cnic_number: '', address: '', remarks: '' });
     const [newTraining, setNewTraining] = useState({ training_type: 'Basic Guard & Fire Safety', training_date: new Date().toISOString().split('T')[0], institute_or_trainer: '', status: 'COMPLETED' });
+    const [trainingCertFile, setTrainingCertFile] = useState<File | null>(null);
+    const [isSubmittingTraining, setIsSubmittingTraining] = useState(false);
+    const trainingCertFileInputRef = useRef<HTMLInputElement>(null);
+
     const [compData, setCompData] = useState({ base_salary: '35000.00', single_ot_rate: '200.00', double_ot_rate: '400.00', effective_from: new Date().toISOString().split('T')[0] });
 
     // Real-time Field Validation & Uniqueness States
@@ -605,16 +620,34 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     // Document handlers
     const handleAddDoc = async () => {
         if (!employee?.id) return;
+        setIsSubmittingDoc(true);
         try {
-            await apiClient.post('/api/hrm/employee-documents/', {
-                ...newDoc,
-                employee: employee.id,
-                verification_status: 'PENDING'
+            const formData = new FormData();
+            formData.append('employee', employee.id);
+            formData.append('document_type', newDoc.document_type);
+            formData.append('verification_status', docFile ? 'UPLOADED' : 'PENDING');
+            if (newDoc.document_number) formData.append('document_number', newDoc.document_number);
+            if (newDoc.notes) formData.append('notes', newDoc.notes);
+            if (docFile) {
+                formData.append('file', docFile);
+            }
+
+            await apiClient.post('/api/hrm/employee-documents/', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             });
             setNewDoc({ document_type: 'POLICE_VERIFICATION', document_number: '', notes: '' });
+            setDocFile(null);
+            if (docFileInputRef.current) docFileInputRef.current.value = '';
             fetchChildData(employee.id);
-        } catch (e) {
-            alert('Failed to upload document record');
+        } catch (e: any) {
+            console.error('Failed to upload document record:', e);
+            const errData = e?.response?.data;
+            const msg = errData?.detail || errData?.file || (typeof errData === 'object' ? JSON.stringify(errData) : 'Failed to upload document record');
+            alert(`Document upload error: ${msg}`);
+        } finally {
+            setIsSubmittingDoc(false);
         }
     };
 
@@ -676,14 +709,34 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
     const handleAddTraining = async () => {
         if (!employee?.id || !newTraining.training_type) return;
+        setIsSubmittingTraining(true);
         try {
-            await apiClient.post('/api/hrm/employee-trainings/', {
-                ...newTraining,
-                employee: employee.id
+            const formData = new FormData();
+            formData.append('employee', employee.id);
+            formData.append('training_type', newTraining.training_type);
+            formData.append('training_date', newTraining.training_date);
+            if (newTraining.institute_or_trainer) formData.append('institute_or_trainer', newTraining.institute_or_trainer);
+            if (newTraining.status) formData.append('status', newTraining.status);
+            if (trainingCertFile) {
+                formData.append('certificate', trainingCertFile);
+            }
+
+            await apiClient.post('/api/hrm/employee-trainings/', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             });
+            setNewTraining({ training_type: 'Basic Guard & Fire Safety', training_date: new Date().toISOString().split('T')[0], institute_or_trainer: '', status: 'COMPLETED' });
+            setTrainingCertFile(null);
+            if (trainingCertFileInputRef.current) trainingCertFileInputRef.current.value = '';
             fetchChildData(employee.id);
-        } catch (e) {
-            alert('Failed to add training record');
+        } catch (e: any) {
+            console.error('Failed to add training record:', e);
+            const errData = e?.response?.data;
+            const msg = errData?.detail || errData?.certificate || (typeof errData === 'object' ? JSON.stringify(errData) : 'Failed to add training record');
+            alert(`Training record error: ${msg}`);
+        } finally {
+            setIsSubmittingTraining(false);
         }
     };
 
@@ -1315,6 +1368,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                         <tr style={{ borderBottom: '1px solid var(--color-border)', textAlign: 'left', background: 'var(--color-surface-secondary)' }}>
                                             <th style={{ padding: '10px 12px' }}>Document Type</th>
                                             <th style={{ padding: '10px 12px' }}>Ref / Number</th>
+                                            <th style={{ padding: '10px 12px' }}>Attachment / Scan</th>
                                             <th style={{ padding: '10px 12px' }}>Status</th>
                                             <th style={{ padding: '10px 12px' }}>Verified By</th>
                                             <th style={{ padding: '10px 12px', textAlign: 'center' }}>Action</th>
@@ -1325,6 +1379,38 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             <tr key={doc.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                                                 <td style={{ padding: '10px 12px', fontWeight: 600 }}>{doc.document_type_display || doc.document_type}</td>
                                                 <td style={{ padding: '10px 12px' }}>{doc.document_number || '—'}</td>
+                                                <td style={{ padding: '10px 12px' }}>
+                                                    {doc.file ? (
+                                                        <a
+                                                            href={getFileUrl(doc.file) || '#'}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '6px',
+                                                                padding: '4px 10px',
+                                                                background: 'rgba(16, 185, 129, 0.1)',
+                                                                color: '#059669',
+                                                                borderRadius: '6px',
+                                                                fontSize: '12px',
+                                                                fontWeight: 600,
+                                                                textDecoration: 'none',
+                                                                border: '1px solid rgba(16, 185, 129, 0.25)',
+                                                                transition: 'all 0.15s ease'
+                                                            }}
+                                                            title="Click to view/download scanned document in new tab"
+                                                        >
+                                                            <i className="bx bx-file" style={{ fontSize: '14px' }}></i>
+                                                            <span>View Scan</span>
+                                                            <i className="bx bx-link-external" style={{ fontSize: '11px', opacity: 0.7 }}></i>
+                                                        </a>
+                                                    ) : (
+                                                        <span style={{ color: 'var(--color-text-muted)', fontSize: '12px', fontStyle: 'italic' }}>
+                                                            No scan attached
+                                                        </span>
+                                                    )}
+                                                </td>
                                                 <td style={{ padding: '10px 12px' }}>
                                                     <span className={`badge ${doc.verification_status === 'VERIFIED' ? 'badge-success' : 'badge-warning'}`}>
                                                         {doc.verification_status}
@@ -1352,7 +1438,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                         ))}
                                         {documentsList.length === 0 && (
                                             <tr>
-                                                <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                                <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                                                     No documents registered yet.
                                                 </td>
                                             </tr>
@@ -1361,22 +1447,164 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                 </table>
 
                                 {employee && (
-                                    <div style={{ padding: '16px', background: 'var(--color-surface-secondary)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '12px' }}>Register Document Record</div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr)) auto', gap: '10px' }}>
-                                            <select className="modal-select" value={newDoc.document_type} onChange={e => setNewDoc({ ...newDoc, document_type: e.target.value })}>
-                                                <option value="POLICE_VERIFICATION">Police Verification</option>
-                                                <option value="CRO">Criminal Records Office (CRO)</option>
-                                                <option value="CNIC">CNIC Copy</option>
-                                                <option value="NADRA_VERIFICATION">NADRA Verification Slip (Manual)</option>
-                                                <option value="FINGERPRINT">Fingerprint Record</option>
-                                                <option value="EMPLOYMENT_CONTRACT">Employment Contract</option>
-                                                <option value="TRAINING_CERTIFICATE">Training Certificate</option>
-                                                <option value="EX_ARMY_DOCUMENT">Ex-Army Discharge Record</option>
-                                            </select>
-                                            <input placeholder="Document # / Ref" value={newDoc.document_number} onChange={e => setNewDoc({ ...newDoc, document_number: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <input placeholder="Notes / Issuing Authority" value={newDoc.notes} onChange={e => setNewDoc({ ...newDoc, notes: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <Button type="button" variant="primary" size="sm" onClick={handleAddDoc}>Add Doc</Button>
+                                    <div style={{ padding: '16px', background: 'var(--color-surface-secondary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                                            <div style={{ fontWeight: 600, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <i className="bx bx-scan" style={{ color: 'var(--color-primary, #0d9488)', fontSize: '17px' }}></i>
+                                                Register & Upload Scanned Document Record
+                                            </div>
+                                            <span style={{ fontSize: '11.5px', color: 'var(--color-text-muted)' }}>
+                                                Supported: PDF scans, JPG, PNG, DOC (Max 15MB)
+                                            </span>
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '12px' }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-muted)' }}>Document Type *</label>
+                                                <select className="modal-select" style={{ width: '100%' }} value={newDoc.document_type} onChange={e => setNewDoc({ ...newDoc, document_type: e.target.value })}>
+                                                    <option value="POLICE_VERIFICATION">Police Verification</option>
+                                                    <option value="CRO">Criminal Records Office (CRO)</option>
+                                                    <option value="CNIC">CNIC Copy</option>
+                                                    <option value="NADRA_VERIFICATION">NADRA Verification Slip (Manual)</option>
+                                                    <option value="FINGERPRINT">Fingerprint Record</option>
+                                                    <option value="EMPLOYMENT_CONTRACT">Employment Contract</option>
+                                                    <option value="TERMS_AND_CONDITIONS">Terms & Conditions</option>
+                                                    <option value="TRAINING_CERTIFICATE">Training Certificate</option>
+                                                    <option value="EX_ARMY_DOCUMENT">Ex-Army Discharge Record</option>
+                                                    <option value="EDUCATION_DOCUMENT">Education Document</option>
+                                                    <option value="OTHER_VERIFICATION">Other Verification</option>
+                                                    <option value="OTHER">Other Document</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-muted)' }}>Document # / Ref</label>
+                                                <input placeholder="e.g. PV-2024-8841" value={newDoc.document_number} onChange={e => setNewDoc({ ...newDoc, document_number: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-muted)' }}>Notes / Issuing Authority</label>
+                                                <input placeholder="e.g. SSP Operations / Police Station" value={newDoc.notes} onChange={e => setNewDoc({ ...newDoc, notes: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                            </div>
+                                        </div>
+
+                                        {/* File Attachment / Scan Upload Section */}
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', background: 'var(--color-surface)', padding: '12px', borderRadius: '6px', border: '1px dashed var(--color-border)', marginBottom: '12px' }}>
+                                            <input
+                                                type="file"
+                                                ref={docFileInputRef}
+                                                style={{ display: 'none' }}
+                                                accept=".pdf,image/*,.doc,.docx"
+                                                onChange={e => {
+                                                    if (e.target.files && e.target.files[0]) {
+                                                        const file = e.target.files[0];
+                                                        if (file.size > 15 * 1024 * 1024) {
+                                                            alert('Selected file exceeds the 15MB limit. Please choose a smaller or compressed file.');
+                                                            return;
+                                                        }
+                                                        setDocFile(file);
+                                                    }
+                                                }}
+                                            />
+
+                                            {!docFile ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '10px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div style={{ width: '38px', height: '38px', borderRadius: '6px', background: 'var(--color-surface-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: '20px' }}>
+                                                            <i className="bx bx-upload"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--color-text)' }}>Scan or Select Document File</div>
+                                                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Attach scanned paper document, camera snapshot, or digital PDF for employee record</div>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => docFileInputRef.current?.click()}
+                                                        style={{
+                                                            padding: '6px 14px',
+                                                            background: 'var(--color-surface-secondary)',
+                                                            border: '1px solid var(--color-border)',
+                                                            borderRadius: '6px',
+                                                            fontSize: '12px',
+                                                            fontWeight: 600,
+                                                            color: 'var(--color-text)',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px'
+                                                        }}
+                                                    >
+                                                        <i className="bx bx-scan"></i> Browse / Scan Document
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '10px' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div style={{ width: '38px', height: '38px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', fontSize: '22px' }}>
+                                                            <i className={docFile.type.includes('pdf') ? 'bx bxs-file-pdf' : docFile.type.startsWith('image/') ? 'bx bx-image' : 'bx bx-file'}></i>
+                                                        </div>
+                                                        <div>
+                                                            <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--color-text)', maxWidth: '350px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                {docFile.name}
+                                                            </div>
+                                                            <div style={{ fontSize: '11px', color: '#059669', fontWeight: 500 }}>
+                                                                {(docFile.size / (1024 * 1024)).toFixed(2)} MB • Scanned file attached
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => docFileInputRef.current?.click()}
+                                                            style={{
+                                                                padding: '4px 10px',
+                                                                background: 'none',
+                                                                border: '1px solid var(--color-border)',
+                                                                borderRadius: '4px',
+                                                                fontSize: '11.5px',
+                                                                cursor: 'pointer',
+                                                                color: 'var(--color-text)'
+                                                            }}
+                                                        >
+                                                            Change
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setDocFile(null);
+                                                                if (docFileInputRef.current) docFileInputRef.current.value = '';
+                                                            }}
+                                                            style={{
+                                                                padding: '4px 10px',
+                                                                background: 'rgba(239, 68, 68, 0.1)',
+                                                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                                                borderRadius: '4px',
+                                                                fontSize: '11.5px',
+                                                                color: '#ef4444',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '4px'
+                                                            }}
+                                                        >
+                                                            <i className="bx bx-trash"></i> Remove
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                            <Button
+                                                type="button"
+                                                variant="primary"
+                                                size="sm"
+                                                onClick={handleAddDoc}
+                                                disabled={isSubmittingDoc}
+                                                loading={isSubmittingDoc}
+                                                icon={docFile ? 'bx-cloud-upload' : 'bx-plus'}
+                                            >
+                                                {docFile ? 'Upload & Register Document' : 'Add Doc Record'}
+                                            </Button>
                                         </div>
                                     </div>
                                 )}
@@ -1393,6 +1621,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             <th style={{ padding: '10px 12px' }}>Course / Training</th>
                                             <th style={{ padding: '10px 12px' }}>Date</th>
                                             <th style={{ padding: '10px 12px' }}>Trainer / Institute</th>
+                                            <th style={{ padding: '10px 12px' }}>Certificate Scan</th>
                                             <th style={{ padding: '10px 12px' }}>Status</th>
                                             <th style={{ padding: '10px 12px', textAlign: 'center' }}>Action</th>
                                         </tr>
@@ -1403,6 +1632,38 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                                 <td style={{ padding: '10px 12px', fontWeight: 600 }}>{t.training_type}</td>
                                                 <td style={{ padding: '10px 12px' }}>{t.training_date}</td>
                                                 <td style={{ padding: '10px 12px' }}>{t.institute_or_trainer || '—'}</td>
+                                                <td style={{ padding: '10px 12px' }}>
+                                                    {t.certificate ? (
+                                                        <a
+                                                            href={getFileUrl(t.certificate) || '#'}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '6px',
+                                                                padding: '4px 10px',
+                                                                background: 'rgba(16, 185, 129, 0.1)',
+                                                                color: '#059669',
+                                                                borderRadius: '6px',
+                                                                fontSize: '12px',
+                                                                fontWeight: 600,
+                                                                textDecoration: 'none',
+                                                                border: '1px solid rgba(16, 185, 129, 0.25)',
+                                                                transition: 'all 0.15s ease'
+                                                            }}
+                                                            title="Click to view/download training certificate in new tab"
+                                                        >
+                                                            <i className="bx bx-award" style={{ fontSize: '14px' }}></i>
+                                                            <span>View Certificate</span>
+                                                            <i className="bx bx-link-external" style={{ fontSize: '11px', opacity: 0.7 }}></i>
+                                                        </a>
+                                                    ) : (
+                                                        <span style={{ color: 'var(--color-text-muted)', fontSize: '12px', fontStyle: 'italic' }}>
+                                                            No certificate scan
+                                                        </span>
+                                                    )}
+                                                </td>
                                                 <td style={{ padding: '10px 12px' }}><span className="badge badge-success">{t.status}</span></td>
                                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                                                     <button
@@ -1418,7 +1679,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                         ))}
                                         {trainingsList.length === 0 && (
                                             <tr>
-                                                <td colSpan={4} style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                                <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                                                     No training history logged yet.
                                                 </td>
                                             </tr>
@@ -1427,13 +1688,94 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                 </table>
 
                                 {employee && (
-                                    <div style={{ padding: '16px', background: 'var(--color-surface-secondary)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '12px' }}>Log Completed Training Record</div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr)) auto', gap: '10px' }}>
-                                            <input placeholder="Course (e.g. Weapon Safety / Fire Drill)" value={newTraining.training_type} onChange={e => setNewTraining({ ...newTraining, training_type: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <input type="date" value={newTraining.training_date} onChange={e => setNewTraining({ ...newTraining, training_date: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <input placeholder="Trainer / Academy Name" value={newTraining.institute_or_trainer} onChange={e => setNewTraining({ ...newTraining, institute_or_trainer: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <Button type="button" variant="primary" size="sm" onClick={handleAddTraining}>Log Training</Button>
+                                    <div style={{ padding: '16px', background: 'var(--color-surface-secondary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                                            <div style={{ fontWeight: 600, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <i className="bx bx-award" style={{ color: 'var(--color-primary, #0d9488)', fontSize: '17px' }}></i>
+                                                Log Completed Training & Certificate
+                                            </div>
+                                            <span style={{ fontSize: '11.5px', color: 'var(--color-text-muted)' }}>
+                                                Upload training certificate scan (PDF, Image)
+                                            </span>
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '12px' }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-muted)' }}>Course / Training *</label>
+                                                <input placeholder="e.g. Weapon Safety / Fire Drill" value={newTraining.training_type} onChange={e => setNewTraining({ ...newTraining, training_type: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-muted)' }}>Training Date *</label>
+                                                <input type="date" value={newTraining.training_date} onChange={e => setNewTraining({ ...newTraining, training_date: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-muted)' }}>Trainer / Academy Name</label>
+                                                <input placeholder="e.g. APSAA Training School" value={newTraining.institute_or_trainer} onChange={e => setNewTraining({ ...newTraining, institute_or_trainer: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12.5px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                            </div>
+                                        </div>
+
+                                        {/* Certificate Attachment */}
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', background: 'var(--color-surface)', padding: '10px 12px', borderRadius: '6px', border: '1px dashed var(--color-border)', marginBottom: '12px' }}>
+                                            <input
+                                                type="file"
+                                                ref={trainingCertFileInputRef}
+                                                style={{ display: 'none' }}
+                                                accept=".pdf,image/*,.doc,.docx"
+                                                onChange={e => {
+                                                    if (e.target.files && e.target.files[0]) {
+                                                        const file = e.target.files[0];
+                                                        if (file.size > 15 * 1024 * 1024) {
+                                                            alert('Selected certificate file exceeds 15MB limit.');
+                                                            return;
+                                                        }
+                                                        setTrainingCertFile(file);
+                                                    }
+                                                }}
+                                            />
+                                            {!trainingCertFile ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
+                                                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                                        <i className="bx bx-paperclip" style={{ marginRight: '4px' }}></i> Optional: Attach Certificate Scan or Image
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => trainingCertFileInputRef.current?.click()}
+                                                        style={{ padding: '5px 12px', background: 'var(--color-surface-secondary)', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', color: 'var(--color-text)' }}
+                                                    >
+                                                        Attach Certificate
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
+                                                    <span style={{ fontSize: '12px', color: '#059669', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <i className="bx bx-check-circle"></i> {trainingCertFile.name} ({(trainingCertFile.size / (1024 * 1024)).toFixed(2)} MB)
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setTrainingCertFile(null);
+                                                            if (trainingCertFileInputRef.current) trainingCertFileInputRef.current.value = '';
+                                                        }}
+                                                        style={{ padding: '3px 8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '4px', fontSize: '11px', color: '#ef4444', cursor: 'pointer' }}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                            <Button
+                                                type="button"
+                                                variant="primary"
+                                                size="sm"
+                                                onClick={handleAddTraining}
+                                                disabled={isSubmittingTraining}
+                                                loading={isSubmittingTraining}
+                                                icon="bx-award"
+                                            >
+                                                Log Training Record
+                                            </Button>
                                         </div>
                                     </div>
                                 )}

@@ -25,6 +25,7 @@ export interface EmployeeDocument {
     employee: string;
     document_type: string;
     document_type_display?: string;
+    file?: string | null;
     document_number?: string;
     issue_date?: string;
     expiry_date?: string;
@@ -42,6 +43,7 @@ export interface EmployeeTraining {
     training_type: string;
     training_date: string;
     institute_or_trainer?: string;
+    certificate?: string | null;
     expiry_date?: string;
     status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'EXPIRED' | 'FAILED';
     notes?: string;
