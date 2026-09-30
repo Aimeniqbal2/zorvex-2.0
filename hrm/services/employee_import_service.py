@@ -526,7 +526,13 @@ class EmployeeImportService:
                         bg_in = str(r.get('background_type')).upper()
                         if 'ARMY' in bg_in or 'MILITARY' in bg_in:
                             emp.background_type = 'EX_ARMY'
+                        elif 'RANGER' in bg_in:
+                            emp.background_type = 'EX_RANGERS'
+                        elif 'MUJAHID' in bg_in:
+                            emp.background_type = 'EX_MUJAHID'
                         elif 'POLICE' in bg_in:
+                            emp.background_type = 'EX_POLICE'
+                        elif 'OTHER' in bg_in:
                             emp.background_type = 'OTHER'
                         else:
                             emp.background_type = 'CIVILIAN'
@@ -562,8 +568,12 @@ class EmployeeImportService:
                     bg_in = str(r.get('background_type') or '').upper()
                     if 'ARMY' in bg_in or 'MILITARY' in bg_in:
                         bg_val = 'EX_ARMY'
+                    elif 'RANGER' in bg_in:
+                        bg_val = 'EX_RANGERS'
+                    elif 'MUJAHID' in bg_in:
+                        bg_val = 'EX_MUJAHID'
                     elif 'POLICE' in bg_in:
-                        bg_val = 'OTHER'
+                        bg_val = 'EX_POLICE'
                     elif 'OTHER' in bg_in:
                         bg_val = 'OTHER'
 

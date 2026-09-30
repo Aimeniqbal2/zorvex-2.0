@@ -305,6 +305,18 @@ class EmployeeViewSet(TenantModelViewSet):
             'expiring_soon_count': expiring_soon_count,
         })
 
+    @action(detail=True, methods=['post'], url_path='remove-photo')
+    def remove_photo(self, request, pk=None):
+        employee = self.get_object()
+        if employee.photograph:
+            try:
+                employee.photograph.delete(save=False)
+            except Exception:
+                pass
+            employee.photograph = None
+            employee.save(update_fields=['photograph'])
+        return Response({'status': 'Photo removed successfully', 'photograph': None})
+
     @action(detail=True, methods=['get'], url_path='deployments')
     def deployments(self, request, pk=None):
         employee = self.get_object()

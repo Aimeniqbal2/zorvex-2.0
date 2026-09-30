@@ -115,8 +115,15 @@ class Employee(BaseModel):
         default='SINGLE'
     )
     background_type = models.CharField(
-        max_length=20,
-        choices=[('CIVILIAN', 'Civilian'), ('EX_ARMY', 'Ex-Army'), ('OTHER', 'Other')],
+        max_length=30,
+        choices=[
+            ('CIVILIAN', 'Civilian'),
+            ('EX_ARMY', 'Ex-Army / Military'),
+            ('EX_RANGERS', 'Rangers'),
+            ('EX_MUJAHID', 'Mujahid Force'),
+            ('EX_POLICE', 'Ex-Police / Law Enforcement'),
+            ('OTHER', 'Other Background'),
+        ],
         default='CIVILIAN'
     )
     employment_status = models.CharField(
@@ -366,6 +373,8 @@ class EmployeeDocumentType(models.TextChoices):
     TERMS_AND_CONDITIONS = 'TERMS_AND_CONDITIONS', 'Terms & Conditions'
     TRAINING_CERTIFICATE = 'TRAINING_CERTIFICATE', 'Training Certificate'
     EX_ARMY_DOCUMENT = 'EX_ARMY_DOCUMENT', 'Ex-Army Discharge/Document'
+    EX_RANGERS_DOCUMENT = 'EX_RANGERS_DOCUMENT', 'Ex-Rangers Discharge/Document'
+    EX_MUJAHID_DOCUMENT = 'EX_MUJAHID_DOCUMENT', 'Ex-Mujahid Force Discharge/Document'
     EDUCATION_DOCUMENT = 'EDUCATION_DOCUMENT', 'Education Document'
     OTHER = 'OTHER', 'Other'
 

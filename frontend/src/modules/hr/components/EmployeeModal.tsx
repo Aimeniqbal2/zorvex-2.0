@@ -6,6 +6,7 @@ import { apiClient } from '../api';
 import type { Employee, Designation, Department, EmployeeNextOfKin, EmployeeDocument, EmployeeTraining, EmployeeReference } from '../types';
 import { EmployeeLifecycleWorkspace } from './EmployeeLifecycleWorkspace';
 import { useIndustry } from '../../../stores/appStore';
+import { useToastStore } from '../../../stores/toastStore';
 
 interface EmployeeModalProps {
     isOpen: boolean;
@@ -17,7 +18,6 @@ interface EmployeeModalProps {
 
 type ModalTabId = 
     | 'GENERAL' 
-    | 'PERSONAL' 
     | 'VERIFICATION' 
     | 'DOCS_TRAINING' 
     | 'STATUTORY' 
@@ -45,6 +45,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
     const [photoError, setPhotoError] = useState(false);
     const [photoFallback, setPhotoFallback] = useState(false);
+    const [photoRemoved, setPhotoRemoved] = useState(false);
+    const photoFileInputRef = useRef<HTMLInputElement>(null);
 
     const getPhotoUrl = (photo: string | null | undefined): string | null => {
         if (!photo || photo === 'null' || photo === 'undefined' || photo === 'None' || photo === '1') return null;
@@ -144,8 +146,15 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     useEffect(() => {
         if (employee) {
             const prefPay = employee.preferred_payment_destination;
+            let bgType = employee?.background_type || 'CIVILIAN';
+            if (bgType === 'MILITARY') bgType = 'EX_ARMY';
+            if (bgType === 'POLICE') bgType = 'EX_POLICE';
+            if (bgType === 'RANGERS') bgType = 'EX_RANGERS';
+            if (bgType === 'MUJAHID' || bgType === 'MUJAHID_FORCE') bgType = 'EX_MUJAHID';
+
             setFormData({
                 ...employee,
+                background_type: bgType,
                 designation: employee?.designation || '',
                 department: employee?.department || '',
                 joining_date: employee?.joining_date || employee?.hire_date || '',
@@ -158,6 +167,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 wallet_provider: prefPay?.wallet_provider || '',
                 wallet_number: prefPay?.wallet_number || ''
             });
+            setPhotoRemoved(false);
+            setPhotoFile(null);
             setPhotoPreview(getPhotoUrl(employee.photograph));
             setPhotoError(false);
             setPhotoFallback(false);
@@ -208,6 +219,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 wallet_provider: '',
                 wallet_number: ''
             });
+            setPhotoRemoved(false);
             setPhotoFile(null);
             setPhotoPreview(null);
             setNextOfKinList([]);
@@ -394,6 +406,30 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             setPhotoPreview(URL.createObjectURL(file));
             setPhotoError(false);
             setPhotoFallback(false);
+            setPhotoRemoved(false);
+        }
+    };
+
+    const handleRemovePhoto = async () => {
+        setPhotoFile(null);
+        setPhotoPreview(null);
+        setPhotoError(false);
+        setPhotoFallback(false);
+        setPhotoRemoved(true);
+        setFormData(prev => ({ ...prev, photograph: null }));
+        if (photoFileInputRef.current) photoFileInputRef.current.value = '';
+
+        if (employee?.id) {
+            try {
+                await apiClient.post(`/api/hrm/employees/${employee.id}/remove-photo/`);
+                useToastStore.getState().success('Profile photo removed');
+                onSave();
+            } catch (e) {
+                console.warn('Direct remove-photo call failed, will clear on form save:', e);
+                useToastStore.getState().success('Photo removed. Save record to persist.');
+            }
+        } else {
+            useToastStore.getState().success('Photo removed');
         }
     };
 
@@ -457,14 +493,17 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         // 1. Guard against duplicate badge/employee code
         if (codeDuplicateError) {
             setError(codeDuplicateError);
+            useToastStore.getState().error(codeDuplicateError);
             setActiveModalTab('GENERAL');
             return;
         }
 
         // 2. Guard against CNIC format and duplicate errors
         if (cnicFormatError || cnicDuplicateError) {
-            setError(cnicDuplicateError || cnicFormatError);
-            setActiveModalTab('PERSONAL');
+            const cnicMsg = cnicDuplicateError || cnicFormatError || 'Invalid CNIC number';
+            setError(cnicMsg);
+            useToastStore.getState().error(cnicMsg);
+            setActiveModalTab('GENERAL');
             return;
         }
         if (formData.cnic_number) {
@@ -473,7 +512,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 const msg = `CNIC must be exactly 13 digits in standard format (XXXXX-XXXXXXX-X). Currently ${cnicDigits.length}/13 digits.`;
                 setCnicFormatError(msg);
                 setError(msg);
-                setActiveModalTab('PERSONAL');
+                useToastStore.getState().error(msg);
+                setActiveModalTab('GENERAL');
                 return;
             }
         }
@@ -481,7 +521,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         // 3. Guard against mobile number format (must be 11 digits)
         if (phoneError) {
             setError(phoneError);
-            setActiveModalTab('PERSONAL');
+            useToastStore.getState().error(phoneError);
+            setActiveModalTab('GENERAL');
             return;
         }
         if (formData.phone) {
@@ -490,7 +531,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 const msg = `Mobile number must be exactly 11 digits (e.g. 03XXXXXXXXX). Currently ${phoneDigits.length}/11 digits.`;
                 setPhoneError(msg);
                 setError(msg);
-                setActiveModalTab('PERSONAL');
+                useToastStore.getState().error(msg);
+                setActiveModalTab('GENERAL');
                 return;
             }
         }
@@ -506,7 +548,11 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             // Clean read-only, nested relation, and calculated fields from payload
             delete payload.full_name;
             delete payload.name;
-            delete payload.photograph;
+            if (photoRemoved && !photoFile) {
+                payload.photograph = null;
+            } else {
+                delete payload.photograph;
+            }
             delete payload.department_name;
             delete payload.designation_name;
             delete payload.age;
@@ -530,6 +576,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             if (!payload.cnic_expiry_date) delete payload.cnic_expiry_date;
             if (!payload.confirmation_date) delete payload.confirmation_date;
 
+            let createdEmpId: string | null = null;
+
             // Handle multipart form if photo is selected
             if (photoFile) {
                 // Compress image down to ~80KB-120KB so Nginx client_max_body_size is never exceeded
@@ -545,16 +593,42 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
                 if (employee?.id) {
                     await apiClient.patch(`/api/hrm/employees/${employee.id}/`, fd);
+                    useToastStore.getState().success('Employee record updated successfully!');
                 } else {
-                    await apiClient.post('/api/hrm/employees/', fd);
+                    const res = await apiClient.post('/api/hrm/employees/', fd);
+                    createdEmpId = res.data?.id;
+                    useToastStore.getState().success('New employee registered successfully!');
                 }
             } else {
                 if (employee?.id) {
                     await apiClient.patch(`/api/hrm/employees/${employee.id}/`, payload);
+                    useToastStore.getState().success('Employee record updated successfully!');
                 } else {
-                    await apiClient.post('/api/hrm/employees/', payload);
+                    const res = await apiClient.post('/api/hrm/employees/', payload);
+                    createdEmpId = res.data?.id;
+                    useToastStore.getState().success('New employee registered successfully!');
                 }
             }
+
+            // Auto-persist Next of Kin for newly registered employee
+            if (createdEmpId && nextOfKinList.length > 0) {
+                for (const kin of nextOfKinList) {
+                    try {
+                        await apiClient.post('/api/hrm/employee-next-of-kin/', {
+                            employee: createdEmpId,
+                            name: kin.name,
+                            relationship: kin.relationship || '',
+                            contact_number: kin.contact_number,
+                            cnic_number: kin.cnic_number || '',
+                            is_primary: !!kin.is_primary,
+                            notes: kin.notes || ''
+                        });
+                    } catch (kinErr) {
+                        console.error('Failed to auto-save next of kin contact:', kinErr);
+                    }
+                }
+            }
+
             onSave();
             onClose();
         } catch (err: any) {
@@ -568,7 +642,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     const cnicMsg = Array.isArray(errData.cnic_number) ? errData.cnic_number[0] : String(errData.cnic_number);
                     setCnicDuplicateError(cnicMsg);
                     msg = cnicMsg;
-                    setActiveModalTab('PERSONAL');
+                    setActiveModalTab('GENERAL');
                 } else if (errData.previous_employee_code) {
                     const codeMsg = Array.isArray(errData.previous_employee_code) ? errData.previous_employee_code[0] : String(errData.previous_employee_code);
                     setCodeDuplicateError(codeMsg);
@@ -578,14 +652,26 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     const phoneMsg = Array.isArray(errData.phone) ? errData.phone[0] : String(errData.phone);
                     setPhoneError(phoneMsg);
                     msg = phoneMsg;
-                    setActiveModalTab('PERSONAL');
+                    setActiveModalTab('GENERAL');
+                } else if (errData.background_type) {
+                    const bgMsg = Array.isArray(errData.background_type) ? errData.background_type[0] : String(errData.background_type);
+                    msg = `Background Type: ${bgMsg}`;
+                    setActiveModalTab('GENERAL');
                 } else {
-                    msg = errData.detail || errData.photograph || JSON.stringify(errData);
+                    const firstKey = Object.keys(errData)[0];
+                    if (firstKey && Array.isArray(errData[firstKey])) {
+                        msg = `${firstKey.replace(/_/g, ' ')}: ${errData[firstKey][0]}`;
+                    } else if (firstKey && typeof errData[firstKey] === 'string') {
+                        msg = `${firstKey.replace(/_/g, ' ')}: ${errData[firstKey]}`;
+                    } else {
+                        msg = errData.detail || errData.photograph || JSON.stringify(errData);
+                    }
                 }
             } else if (err.message) {
                 msg = err.message;
             }
             setError(msg);
+            useToastStore.getState().error(msg || 'Failed to save employee record');
         } finally {
             setLoading(false);
         }
@@ -600,9 +686,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 employee: employee.id
             });
             setNewRef({ name: '', relationship: '', contact_number: '', cnic_number: '', address: '', remarks: '' });
+            useToastStore.getState().success('Reference contact added successfully!');
             fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to add reference person');
+            useToastStore.getState().error('Failed to add reference person');
         }
     };
 
@@ -611,9 +698,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             await apiClient.post(`/api/hrm/employee-references/${refId}/verify/`, {
                 remarks: 'Verified by HR security vetting department'
             });
+            useToastStore.getState().success('Reference verified successfully!');
             if (employee) fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to verify reference person');
+            useToastStore.getState().error('Failed to verify reference person');
         }
     };
 
@@ -640,12 +728,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             setNewDoc({ document_type: 'POLICE_VERIFICATION', document_number: '', notes: '' });
             setDocFile(null);
             if (docFileInputRef.current) docFileInputRef.current.value = '';
+            useToastStore.getState().success('Document uploaded successfully!');
             fetchChildData(employee.id);
         } catch (e: any) {
             console.error('Failed to upload document record:', e);
             const errData = e?.response?.data;
             const msg = errData?.detail || errData?.file || (typeof errData === 'object' ? JSON.stringify(errData) : 'Failed to upload document record');
-            alert(`Document upload error: ${msg}`);
+            useToastStore.getState().error(`Document upload error: ${msg}`);
         } finally {
             setIsSubmittingDoc(false);
         }
@@ -657,33 +746,60 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 verification_status: 'VERIFIED',
                 notes: 'Verified by HR Security Vetting Officer'
             });
+            useToastStore.getState().success('Document verified successfully!');
             if (employee) fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to verify document');
+            useToastStore.getState().error('Failed to verify document');
         }
     };
 
     const handleAddKin = async () => {
-        if (!employee?.id || !newKin.name || !newKin.contact_number) return;
-        try {
-            await apiClient.post('/api/hrm/employee-next-of-kin/', {
-                ...newKin,
-                employee: employee.id
-            });
-            setNewKin({ name: '', relationship: '', contact_number: '', cnic_number: '', is_primary: true });
-            fetchChildData(employee.id);
-        } catch (e) {
-            alert('Failed to add next of kin');
+        if (!newKin.name || !newKin.contact_number) {
+            useToastStore.getState().error('Please enter Full Name and Phone / Contact for Next of Kin.');
+            return;
+        }
+        if (employee?.id) {
+            try {
+                await apiClient.post('/api/hrm/employee-next-of-kin/', {
+                    ...newKin,
+                    employee: employee.id
+                });
+                setNewKin({ name: '', relationship: '', contact_number: '', cnic_number: '', is_primary: nextOfKinList.length === 0 });
+                useToastStore.getState().success('Next of kin added successfully!');
+                fetchChildData(employee.id);
+            } catch (e) {
+                useToastStore.getState().error('Failed to add next of kin');
+            }
+        } else {
+            // Adding Next of Kin during new employee registration (before record is saved)
+            const tempKin = {
+                id: `temp_${Date.now()}`,
+                name: newKin.name,
+                relationship: newKin.relationship || '',
+                contact_number: newKin.contact_number,
+                cnic_number: newKin.cnic_number || '',
+                is_primary: nextOfKinList.length === 0,
+                address: ''
+            };
+            setNextOfKinList(prev => [...prev, tempKin as any]);
+            setNewKin({ name: '', relationship: '', contact_number: '', cnic_number: '', is_primary: false });
+            useToastStore.getState().success('Emergency contact added!');
         }
     };
 
     const handleDeleteKin = async (kinId: string) => {
         if (!confirm('Are you sure you want to remove this emergency contact?')) return;
+        if (String(kinId).startsWith('temp_') || !employee?.id) {
+            setNextOfKinList(prev => prev.filter(k => k.id !== kinId));
+            useToastStore.getState().success('Emergency contact removed');
+            return;
+        }
         try {
             await apiClient.delete(`/api/hrm/employee-next-of-kin/${kinId}/`);
+            useToastStore.getState().success('Emergency contact removed');
             if (employee?.id) fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to delete next of kin contact');
+            useToastStore.getState().error('Failed to delete next of kin contact');
         }
     };
 
@@ -691,9 +807,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         if (!confirm('Are you sure you want to remove this reference person?')) return;
         try {
             await apiClient.delete(`/api/hrm/employee-references/${refId}/`);
+            useToastStore.getState().success('Reference person removed');
             if (employee?.id) fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to delete reference');
+            useToastStore.getState().error('Failed to delete reference');
         }
     };
 
@@ -701,9 +818,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         if (!confirm('Are you sure you want to delete this document?')) return;
         try {
             await apiClient.delete(`/api/hrm/employee-documents/${docId}/`);
+            useToastStore.getState().success('Document deleted');
             if (employee?.id) fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to delete document');
+            useToastStore.getState().error('Failed to delete document');
         }
     };
 
@@ -729,12 +847,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             setNewTraining({ training_type: 'Basic Guard & Fire Safety', training_date: new Date().toISOString().split('T')[0], institute_or_trainer: '', status: 'COMPLETED' });
             setTrainingCertFile(null);
             if (trainingCertFileInputRef.current) trainingCertFileInputRef.current.value = '';
+            useToastStore.getState().success('Training record added successfully!');
             fetchChildData(employee.id);
         } catch (e: any) {
             console.error('Failed to add training record:', e);
             const errData = e?.response?.data;
             const msg = errData?.detail || errData?.certificate || (typeof errData === 'object' ? JSON.stringify(errData) : 'Failed to add training record');
-            alert(`Training record error: ${msg}`);
+            useToastStore.getState().error(`Training record error: ${msg}`);
         } finally {
             setIsSubmittingTraining(false);
         }
@@ -744,15 +863,15 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         if (!confirm('Are you sure you want to delete this training record?')) return;
         try {
             await apiClient.delete(`/api/hrm/employee-trainings/${trainId}/`);
+            useToastStore.getState().success('Training record removed');
             if (employee?.id) fetchChildData(employee.id);
         } catch (e) {
-            alert('Failed to delete training record');
+            useToastStore.getState().error('Failed to delete training record');
         }
     };
 
     const tabsList: { id: ModalTabId; label: string; icon: string; badge?: number | string }[] = [
-        { id: 'GENERAL', label: 'General & Employment', icon: 'bx-briefcase' },
-        { id: 'PERSONAL', label: 'Personal & Identity', icon: 'bx-user' },
+        { id: 'GENERAL', label: 'General & Personal Details', icon: 'bx-user-pin' },
         { id: 'VERIFICATION', label: 'Verification & References', icon: 'bx-shield-quarter', badge: referencesList.length },
         { id: 'DOCS_TRAINING', label: 'Training & Documents', icon: 'bx-file', badge: documentsList.length + trainingsList.length },
         { id: 'STATUTORY', label: 'Statutory & Insurance', icon: 'bx-building' },
@@ -814,212 +933,67 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             }
         >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', boxSizing: 'border-box' }}>
-                {/* 9 Segmented Tabs Navigation */}
-                <div className="modal-tab-strip">
-                    {tabsList.map((t, idx) => (
-                        <button
-                            key={t.id}
-                            type="button"
-                            className={`modal-tab-btn ${activeModalTab === t.id ? 'active' : ''}`}
-                            onClick={() => setActiveModalTab(t.id)}
-                        >
-                            <i className={`bx ${t.icon}`}></i>
-                            <span>{idx + 1}. {t.label}</span>
-                            {t.badge !== undefined && <span className="modal-tab-badge">{t.badge}</span>}
-                        </button>
-                    ))}
+                {/* Segmented Tabs Navigation */}
+                <div style={{
+                    display: 'flex',
+                    gap: '8px',
+                    borderBottom: '1px solid var(--color-border)',
+                    paddingBottom: '10px',
+                    overflowX: 'auto',
+                    scrollbarWidth: 'thin'
+                }}>
+                    {tabsList.map((t, idx) => {
+                        const isActive = activeModalTab === t.id;
+                        return (
+                            <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => setActiveModalTab(t.id)}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '7px',
+                                    padding: '8px 14px',
+                                    borderRadius: '8px',
+                                    border: isActive ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
+                                    cursor: 'pointer',
+                                    fontSize: '12.5px',
+                                    fontWeight: isActive ? 600 : 500,
+                                    background: isActive ? 'var(--color-primary)' : 'var(--color-surface)',
+                                    color: isActive ? '#ffffff' : 'var(--color-text)',
+                                    whiteSpace: 'nowrap',
+                                    transition: 'all 0.15s ease',
+                                    boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.28)' : 'none',
+                                    outline: 'none'
+                                }}
+                            >
+                                <i className={`bx ${t.icon}`} style={{ fontSize: '15px' }}></i>
+                                <span>{idx + 1}. {t.label}</span>
+                                {t.badge !== undefined && (
+                                    <span style={{
+                                        marginLeft: '4px',
+                                        fontSize: '11px',
+                                        padding: '1.5px 7px',
+                                        borderRadius: '10px',
+                                        background: isActive ? 'rgba(255, 255, 255, 0.28)' : 'var(--color-surface-secondary)',
+                                        color: isActive ? '#ffffff' : 'var(--color-primary)',
+                                        fontWeight: 600
+                                    }}>
+                                        {t.badge}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {renderError()}
 
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-                    {/* TAB 1: GENERAL & EMPLOYMENT */}
+                    {/* UNIFIED TAB: GENERAL & PERSONAL DETAILS */}
                     {activeModalTab === 'GENERAL' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-                            {/* Card 1: Codes & Workforce Type */}
-                            <div className="modal-form-card">
-                                <div className="modal-form-card-title">
-                                    <i className="bx bx-barcode"></i> Employee Identification & Category
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-                                    <div className="form-field">
-                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span>System Code (Auto)</span>
-                                            <span style={{ fontSize: '10.5px', color: 'var(--color-primary)', background: 'rgba(37, 99, 235, 0.08)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>System Generated (Read-Only)</span>
-                                        </label>
-                                        <input 
-                                            className="modal-input" 
-                                            value={formData.employee_code || (employee ? employee.employee_code : 'Auto-generated on save (EMP-XXXXXX)')} 
-                                            readOnly 
-                                            disabled 
-                                            style={{ background: 'var(--color-surface-secondary, rgba(0,0,0,0.03))', cursor: 'not-allowed', color: 'var(--color-text-muted)', fontFamily: 'monospace', fontWeight: 600 }} 
-                                        />
-                                    </div>
-                                    <div className="form-field">
-                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span>Legacy / Badge Code</span>
-                                            {isCheckingCode && <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>Checking uniqueness...</span>}
-                                        </label>
-                                        <input
-                                            className="modal-input"
-                                            name="previous_employee_code"
-                                            value={formData.previous_employee_code || ''}
-                                            onChange={handleCodeChange}
-                                            placeholder="e.g. 010404 (Unique per company)"
-                                            style={codeDuplicateError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}
-                                        />
-                                        {codeDuplicateError && (
-                                            <div style={{ color: '#ef4444', fontSize: '11.5px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <i className="bx bx-error-circle"></i> {codeDuplicateError}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="form-field">
-                                        <label className="form-label">{isSecurity ? 'Workforce Classification' : 'Classification'} <span className="required">*</span></label>
-                                        <select 
-                                            className="modal-select"
-                                            name="classification" 
-                                            value={formData.classification || (isSecurity ? 'DIRECT' : 'INDIRECT')} 
-                                            onChange={handleChange}
-                                        >
-                                            <option value="DIRECT">DIRECT (Field Guard / Supervisor / CPO)</option>
-                                            <option value="INDIRECT">INDIRECT (Office Staff / Management)</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Card 2: Personnel Profile */}
-                            <div className="modal-form-card">
-                                <div className="modal-form-card-title">
-                                    <i className="bx bx-user-pin"></i> Personnel Profile
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '16px' }}>
-                                    <Input 
-                                        label="Full Name *" 
-                                        name="first_name" 
-                                        value={formData.first_name || (formData as any).full_name || (formData as any).name || ''} 
-                                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value, last_name: '' })} 
-                                        required 
-                                        placeholder="e.g. Aamir Khan / Saif ur Rehman" 
-                                    />
-                                    <Input 
-                                        label="Father / Husband Name" 
-                                        name="father_name" 
-                                        value={formData.father_name || ''} 
-                                        onChange={handleChange} 
-                                        placeholder="Father or husband name" 
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Card 3: Organization & Placement */}
-                            <div className="modal-form-card">
-                                <div className="modal-form-card-title">
-                                    <i className="bx bx-buildings"></i> Organization & Tenure
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '14px' }}>
-                                    <div className="form-field">
-                                        <label className="form-label">Designation <span className="required">*</span></label>
-                                        <select 
-                                            className="modal-select"
-                                            name="designation" 
-                                            value={formData.designation || ''} 
-                                            onChange={handleChange} 
-                                            required
-                                        >
-                                            <option value="">-- Select Designation --</option>
-                                            {designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div className="form-field">
-                                        <label className="form-label">Department / Client Site</label>
-                                        <select 
-                                            className="modal-select"
-                                            name="department" 
-                                            value={formData.department || ''} 
-                                            onChange={handleChange}
-                                        >
-                                            <option value="">-- Select Department / Site --</option>
-                                            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div className="form-field">
-                                        <label className="form-label">Background Type</label>
-                                        <select 
-                                            className="modal-select"
-                                            name="background_type" 
-                                            value={formData.background_type || 'CIVILIAN'} 
-                                            onChange={handleChange}
-                                        >
-                                            <option value="CIVILIAN">Civilian</option>
-                                            <option value="MILITARY">Ex-Army / Military</option>
-                                            <option value="POLICE">Ex-Police / Law Enforcement</option>
-                                            <option value="OTHER">Other Background</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-                                    <Input label="Enrollment / Joining Date *" type="date" name="joining_date" value={formData.joining_date || ''} onChange={handleChange} required />
-                                    <Input label="Confirmation Date" type="date" name="confirmation_date" value={formData.confirmation_date || ''} onChange={handleChange} />
-                                    <div className="form-field">
-                                        <label className="form-label">Employment Status</label>
-                                        <select 
-                                            className="modal-select"
-                                            name="employment_status" 
-                                            value={formData.employment_status || 'ACTIVE'} 
-                                            onChange={handleChange}
-                                        >
-                                            <option value="ACTIVE">ACTIVE</option>
-                                            <option value="INACTIVE">INACTIVE</option>
-                                            <option value="SUSPENDED">SUSPENDED</option>
-                                            <option value="RESIGNED">RESIGNED</option>
-                                            <option value="TERMINATED">TERMINATED</option>
-                                            {isSecurity && <option value="JUMP">JUMP / MISSING</option>}
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Card 4 (Security Only): Clearances & Deployment Availability */}
-                            {isSecurity && (
-                                <div className="modal-form-card" style={{ background: 'rgba(37, 99, 235, 0.02)' }}>
-                                    <div className="modal-form-card-title">
-                                        <i className="bx bx-check-shield"></i> Security Clearances & Deployment Availability
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '14px' }}>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer' }}>
-                                            <input type="checkbox" name="is_guard_vaccine" checked={!!formData.is_guard_vaccine} onChange={handleChange} style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }} />
-                                            <div>
-                                                <div style={{ fontWeight: 600, fontSize: '13px' }}>COVID / Medical Vaccine</div>
-                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Verified immunization record</div>
-                                            </div>
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer' }}>
-                                            <input type="checkbox" name="is_guard_apsa_verified" checked={!!formData.is_guard_apsa_verified} onChange={handleChange} style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }} />
-                                            <div>
-                                                <div style={{ fontWeight: 600, fontSize: '13px' }}>APSA Guard Verification</div>
-                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Security Association vetted</div>
-                                            </div>
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer' }}>
-                                            <input type="checkbox" name="visible_for_activity" checked={formData.visible_for_activity !== false} onChange={handleChange} style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }} />
-                                            <div>
-                                                <div style={{ fontWeight: 600, fontSize: '13px' }}>Visible For Operations</div>
-                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Eligible for shift & site deployments</div>
-                                            </div>
-                                        </label>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* TAB 2: PERSONAL & IDENTITY */}
-                    {activeModalTab === 'PERSONAL' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-                            {/* Card 1: Photograph Upload & Preview */}
+                            {/* Card 1: Official Photograph & Avatar (Top of Tab) */}
                             <div className="modal-form-card">
                                 <div className="modal-form-card-title">
                                     <i className="bx bx-camera"></i> Official Photograph & Avatar
@@ -1054,58 +1028,119 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                         <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
                                             Upload High-Resolution Profile Photo
                                         </label>
-                                        <input 
-                                            type="file" 
-                                            accept="image/*" 
-                                            onChange={handlePhotoChange} 
-                                            style={{ fontSize: '12.5px', padding: '6px 0' }} 
-                                        />
-                                        <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                            <input 
+                                                ref={photoFileInputRef}
+                                                type="file" 
+                                                accept="image/*" 
+                                                onChange={handlePhotoChange} 
+                                                style={{ fontSize: '12.5px', padding: '6px 0' }} 
+                                            />
+                                            {(photoPreview || photoFile || employee?.photograph) && !photoRemoved && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRemovePhoto}
+                                                    style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        padding: '6px 12px',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                        background: 'rgba(239, 68, 68, 0.08)',
+                                                        color: '#ef4444',
+                                                        fontSize: '12px',
+                                                        fontWeight: 600,
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    <i className="bx bx-trash"></i> Remove Photo
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', marginTop: '6px' }}>
                                             Used across workforce badges, security rosters, attendance records, and printable reports. Formats: JPG, PNG, WEBP.
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Card 2: Demographics */}
+                            {/* Card 2: Employee Identification & Category (Shifted right after photo) */}
                             <div className="modal-form-card">
                                 <div className="modal-form-card-title">
-                                    <i className="bx bx-id-card"></i> Demographics & Family Details
+                                    <i className="bx bx-barcode"></i> Employee Identification & Category
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '14px' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
                                     <div className="form-field">
-                                        <label className="form-label">Gender</label>
-                                        <select className="modal-select" name="gender" value={formData.gender || 'MALE'} onChange={handleChange}>
-                                            <option value="MALE">Male</option>
-                                            <option value="FEMALE">Female</option>
-                                            <option value="OTHER">Other</option>
+                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>System ID (Auto)</span>
+                                            <span style={{ fontSize: '10.5px', color: 'var(--color-primary)', background: 'rgba(37, 99, 235, 0.08)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>System Generated (Read-Only)</span>
+                                        </label>
+                                        <input 
+                                            className="modal-input" 
+                                            value={formData.employee_code || (employee ? employee.employee_code : 'Auto-generated on save (EMP-XXXXXX)')} 
+                                            readOnly 
+                                            disabled 
+                                            style={{ background: 'var(--color-surface-secondary, rgba(0,0,0,0.03))', cursor: 'not-allowed', color: 'var(--color-text-muted)', fontFamily: 'monospace', fontWeight: 600 }} 
+                                        />
+                                    </div>
+                                    <div className="form-field">
+                                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>Employee Code</span>
+                                            {isCheckingCode && <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>Checking uniqueness...</span>}
+                                        </label>
+                                        <input
+                                            className="modal-input"
+                                            name="previous_employee_code"
+                                            value={formData.previous_employee_code || ''}
+                                            onChange={handleCodeChange}
+                                            placeholder="e.g. 10600 (Unique per company)"
+                                            style={codeDuplicateError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}
+                                        />
+                                        {codeDuplicateError && (
+                                            <div style={{ color: '#ef4444', fontSize: '11.5px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <i className="bx bx-error-circle"></i> {codeDuplicateError}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="form-field">
+                                        <label className="form-label">{isSecurity ? 'Workforce Classification' : 'Classification'} <span className="required">*</span></label>
+                                        <select 
+                                            className="modal-select"
+                                            name="classification" 
+                                            value={formData.classification || (isSecurity ? 'DIRECT' : 'INDIRECT')} 
+                                            onChange={handleChange}
+                                        >
+                                            <option value="DIRECT">DIRECT (Field Guard / Supervisor / CPO)</option>
+                                            <option value="INDIRECT">INDIRECT (Office Staff / Management)</option>
                                         </select>
                                     </div>
-                                    <Input label="Date of Birth" type="date" name="date_of_birth" value={formData.date_of_birth || ''} onChange={handleChange} />
-                                    <Input label="Place of Birth" name="place_of_birth" value={formData.place_of_birth || ''} onChange={handleChange} placeholder="e.g. Abbottabad / Karachi" />
-                                    <Input label="Caste / Ethnicity" name="caste" value={formData.caste || ''} onChange={handleChange} placeholder="e.g. Jadoon / Rajput" />
-                                </div>
-
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-                                    <div className="form-field">
-                                        <label className="form-label">Marital Status</label>
-                                        <select className="modal-select" name="marital_status" value={formData.marital_status || 'SINGLE'} onChange={handleChange}>
-                                            <option value="SINGLE">Single</option>
-                                            <option value="MARRIED">Married</option>
-                                            <option value="DIVORCED">Divorced</option>
-                                            <option value="WIDOWED">Widowed</option>
-                                        </select>
-                                    </div>
-                                    <Input label="Children (Male Count)" type="number" name="children_male" value={formData.children_male ?? 0} onChange={handleChange} />
-                                    <Input label="Children (Female Count)" type="number" name="children_female" value={formData.children_female ?? 0} onChange={handleChange} />
                                 </div>
                             </div>
 
-                            {/* Card 3: National Identity (NADRA) */}
+                            {/* Card 3: Personnel Profile & National Identity (NADRA) */}
                             <div className="modal-form-card">
                                 <div className="modal-form-card-title">
-                                    <i className="bx bx-card"></i> National Identity & Verification (NADRA)
+                                    <i className="bx bx-user-pin"></i> Personnel Profile & National Identity (NADRA)
                                 </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '16px', marginBottom: '14px' }}>
+                                    <Input 
+                                        label="Full Name" 
+                                        name="first_name" 
+                                        value={formData.first_name || (formData as any).full_name || (formData as any).name || ''} 
+                                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value, last_name: '' })} 
+                                        required 
+                                        placeholder="e.g. Aamir Khan / Saif ur Rehman" 
+                                    />
+                                    <Input 
+                                        label="Father / Husband Name" 
+                                        name="father_name" 
+                                        value={formData.father_name || ''} 
+                                        onChange={handleChange} 
+                                        placeholder="Father or husband name" 
+                                    />
+                                </div>
+
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                                     <div className="form-field">
                                         <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1156,7 +1191,112 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                 </div>
                             </div>
 
-                            {/* Card 4: Contact & Communication */}
+                            {/* Card 4: Organization & Tenure */}
+                            <div className="modal-form-card">
+                                <div className="modal-form-card-title">
+                                    <i className="bx bx-buildings"></i> Organization & Tenure
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '14px' }}>
+                                    <div className="form-field">
+                                        <label className="form-label">Designation <span className="required">*</span></label>
+                                        <select 
+                                            className="modal-select"
+                                            name="designation" 
+                                            value={formData.designation || ''} 
+                                            onChange={handleChange} 
+                                            required
+                                        >
+                                            <option value="">-- Select Designation --</option>
+                                            {designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-field">
+                                        <label className="form-label">Department / Client Site</label>
+                                        <select 
+                                            className="modal-select"
+                                            name="department" 
+                                            value={formData.department || ''} 
+                                            onChange={handleChange}
+                                        >
+                                            <option value="">-- Select Department / Site --</option>
+                                            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-field">
+                                        <label className="form-label">Background Type</label>
+                                        <select 
+                                            className="modal-select"
+                                            name="background_type" 
+                                            value={formData.background_type || 'CIVILIAN'} 
+                                            onChange={handleChange}
+                                        >
+                                            <option value="CIVILIAN">Civilian</option>
+                                            <option value="EX_ARMY">Ex-Army / Military</option>
+                                            <option value="EX_RANGERS">Rangers</option>
+                                            <option value="EX_MUJAHID">Mujahid Force</option>
+                                            <option value="EX_POLICE">Ex-Police / Law Enforcement</option>
+                                            <option value="OTHER">Other Background</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+                                    <Input label="Enrollment / Joining Date" type="date" name="joining_date" value={formData.joining_date || ''} onChange={handleChange} required />
+                                    <Input label="Confirmation Date" type="date" name="confirmation_date" value={formData.confirmation_date || ''} onChange={handleChange} />
+                                    <div className="form-field">
+                                        <label className="form-label">Employment Status</label>
+                                        <select 
+                                            className="modal-select"
+                                            name="employment_status" 
+                                            value={formData.employment_status || 'ACTIVE'} 
+                                            onChange={handleChange}
+                                        >
+                                            <option value="ACTIVE">ACTIVE</option>
+                                            <option value="INACTIVE">INACTIVE</option>
+                                            <option value="SUSPENDED">SUSPENDED</option>
+                                            <option value="RESIGNED">RESIGNED</option>
+                                            <option value="TERMINATED">TERMINATED</option>
+                                            {isSecurity && <option value="JUMP">JUMP / MISSING</option>}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Card 5: Demographics & Family Details */}
+                            <div className="modal-form-card">
+                                <div className="modal-form-card-title">
+                                    <i className="bx bx-id-card"></i> Demographics & Family Details
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '14px' }}>
+                                    <div className="form-field">
+                                        <label className="form-label">Gender</label>
+                                        <select className="modal-select" name="gender" value={formData.gender || 'MALE'} onChange={handleChange}>
+                                            <option value="MALE">Male</option>
+                                            <option value="FEMALE">Female</option>
+                                            <option value="OTHER">Other</option>
+                                        </select>
+                                    </div>
+                                    <Input label="Date of Birth" type="date" name="date_of_birth" value={formData.date_of_birth || ''} onChange={handleChange} />
+                                    <Input label="Place of Birth" name="place_of_birth" value={formData.place_of_birth || ''} onChange={handleChange} placeholder="e.g. Abbottabad / Karachi" />
+                                    <Input label="Caste / Ethnicity" name="caste" value={formData.caste || ''} onChange={handleChange} placeholder="e.g. Jadoon / Rajput" />
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                                    <div className="form-field">
+                                        <label className="form-label">Marital Status</label>
+                                        <select className="modal-select" name="marital_status" value={formData.marital_status || 'SINGLE'} onChange={handleChange}>
+                                            <option value="SINGLE">Single</option>
+                                            <option value="MARRIED">Married</option>
+                                            <option value="DIVORCED">Divorced</option>
+                                            <option value="WIDOWED">Widowed</option>
+                                        </select>
+                                    </div>
+                                    <Input label="Children (Male Count)" type="number" name="children_male" value={formData.children_male ?? 0} onChange={handleChange} />
+                                    <Input label="Children (Female Count)" type="number" name="children_female" value={formData.children_female ?? 0} onChange={handleChange} />
+                                </div>
+                            </div>
+
+                            {/* Card 6: Contact & Communications */}
                             <div className="modal-form-card">
                                 <div className="modal-form-card-title">
                                     <i className="bx bx-phone-call"></i> Contact & Communications
@@ -1187,7 +1327,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                 </div>
                             </div>
 
-                            {/* Card 5: Residential Addresses */}
+                            {/* Card 7: Residential Addresses */}
                             <div className="modal-form-card">
                                 <div className="modal-form-card-title">
                                     <i className="bx bx-map-pin"></i> Residential Addresses
@@ -1204,17 +1344,19 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                 </div>
                             </div>
 
-                            {/* Card 6: Next of Kin */}
+                            {/* Card 8: Next of Kin / Emergency Contacts (Always Active & Available) */}
                             <div className="modal-form-card">
-                                <div className="modal-form-card-title">
-                                    <i className="bx bx-group"></i> Next of Kin / Emergency Contacts ({nextOfKinList.length})
+                                <div className="modal-form-card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span><i className="bx bx-group"></i> Next of Kin / Emergency Contacts ({nextOfKinList.length})</span>
+                                    <span style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', fontWeight: 400 }}>Immediate Family / Emergency Contact List</span>
                                 </div>
-                                {nextOfKinList.length > 0 && (
+                                
+                                {nextOfKinList.length > 0 ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
                                         {nextOfKinList.map(k => (
                                             <div key={k.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'var(--color-surface-secondary)', border: '1px solid var(--color-border)', borderRadius: '6px', fontSize: '13px' }}>
                                                 <div>
-                                                    <strong>{k.name}</strong> <span style={{ color: 'var(--color-text-muted)' }}>({k.relationship})</span>
+                                                    <strong>{k.name}</strong> <span style={{ color: 'var(--color-text-muted)' }}>({k.relationship || 'Relative'})</span>
                                                     <span style={{ marginLeft: '12px', color: 'var(--color-primary)', fontWeight: 500 }}>📞 {k.contact_number}</span>
                                                     {k.cnic_number && <span style={{ marginLeft: '12px', color: 'var(--color-text-muted)', fontSize: '12px' }}>CNIC: {k.cnic_number}</span>}
                                                 </div>
@@ -1232,19 +1374,56 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             </div>
                                         ))}
                                     </div>
-                                )}
-                                {employee && (
-                                    <div style={{ padding: '14px', background: 'var(--color-surface-secondary)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                                        <div style={{ fontWeight: 600, fontSize: '12.5px', marginBottom: '10px' }}>Add Next of Kin Record</div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr)) auto', gap: '10px' }}>
-                                            <input placeholder="Full Name *" value={newKin.name} onChange={e => setNewKin({ ...newKin, name: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '13px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <input placeholder="Relationship (e.g. Brother, Wife)" value={newKin.relationship} onChange={e => setNewKin({ ...newKin, relationship: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '13px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <input placeholder="Phone / Contact" value={newKin.contact_number} onChange={e => setNewKin({ ...newKin, contact_number: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '13px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-                                            <Button type="button" variant="primary" size="sm" onClick={handleAddKin}>Add Kin</Button>
-                                        </div>
+                                ) : (
+                                    <div style={{ padding: '12px 14px', background: 'var(--color-surface-secondary)', borderRadius: '6px', border: '1px dashed var(--color-border)', marginBottom: '14px', color: 'var(--color-text-muted)', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <i className="bx bx-info-circle" style={{ fontSize: '16px', color: 'var(--color-primary)' }}></i>
+                                        <span>No emergency contacts recorded yet. Add Next of Kin below (at least one contact recommended).</span>
                                     </div>
                                 )}
+
+                                {/* Always Active Add Next of Kin Inline Form */}
+                                <div style={{ padding: '14px', background: 'var(--color-surface-secondary)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
+                                    <div style={{ fontWeight: 600, fontSize: '12.5px', marginBottom: '10px' }}>Add Next of Kin Record</div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr)) auto', gap: '10px' }}>
+                                        <input placeholder="Full Name *" value={newKin.name} onChange={e => setNewKin({ ...newKin, name: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '13px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                        <input placeholder="Relationship (e.g. Brother, Wife)" value={newKin.relationship} onChange={e => setNewKin({ ...newKin, relationship: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '13px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                        <input placeholder="Phone / Contact *" value={newKin.contact_number} onChange={e => setNewKin({ ...newKin, contact_number: e.target.value })} style={{ padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '13px', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+                                        <Button type="button" variant="primary" size="sm" onClick={handleAddKin}>Add Kin</Button>
+                                    </div>
+                                </div>
                             </div>
+
+                            {/* Card 9 (At Last, After All): Security Clearances & Deployment Availability */}
+                            {isSecurity && (
+                                <div className="modal-form-card" style={{ background: 'rgba(37, 99, 235, 0.02)' }}>
+                                    <div className="modal-form-card-title">
+                                        <i className="bx bx-check-shield"></i> Security Clearances & Deployment Availability
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '14px' }}>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer' }}>
+                                            <input type="checkbox" name="is_guard_vaccine" checked={!!formData.is_guard_vaccine} onChange={handleChange} style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '13px' }}>COVID / Medical Vaccine</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Verified immunization record</div>
+                                            </div>
+                                        </label>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer' }}>
+                                            <input type="checkbox" name="is_guard_apsa_verified" checked={!!formData.is_guard_apsa_verified} onChange={handleChange} style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '13px' }}>APSA Guard Verification</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Security Association vetted</div>
+                                            </div>
+                                        </label>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer' }}>
+                                            <input type="checkbox" name="visible_for_activity" checked={formData.visible_for_activity !== false} onChange={handleChange} style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }} />
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '13px' }}>Visible For Operations</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Eligible for shift & site deployments</div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -1471,6 +1650,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                                     <option value="TERMS_AND_CONDITIONS">Terms & Conditions</option>
                                                     <option value="TRAINING_CERTIFICATE">Training Certificate</option>
                                                     <option value="EX_ARMY_DOCUMENT">Ex-Army Discharge Record</option>
+                                                    <option value="EX_RANGERS_DOCUMENT">Ex-Rangers Discharge Record</option>
+                                                    <option value="EX_MUJAHID_DOCUMENT">Ex-Mujahid Force Discharge Record</option>
                                                     <option value="EDUCATION_DOCUMENT">Education Document</option>
                                                     <option value="OTHER_VERIFICATION">Other Verification</option>
                                                     <option value="OTHER">Other Document</option>

@@ -134,7 +134,7 @@ export interface Employee {
     current_address?: string;
     education?: string;
     marital_status?: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED';
-    background_type?: 'CIVILIAN' | 'EX_ARMY' | 'OTHER';
+    background_type?: 'CIVILIAN' | 'EX_ARMY' | 'EX_RANGERS' | 'EX_MUJAHID' | 'EX_POLICE' | 'OTHER' | string;
     employment_status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'TERMINATED' | 'JUMP';
     is_active: boolean;
     training_completed?: boolean;

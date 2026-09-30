@@ -163,11 +163,19 @@ class EmployeeSerializer(BaseTenantSerializer):
         if data.get('joining_date') and not data.get('hire_date'):
             data['hire_date'] = data['joining_date']
 
-        # Safely handle photograph: if string (URL or empty) or None, strip it so FileField does not error
-        if 'photograph' in data:
-            photo_val = data['photograph']
-            if photo_val is None or photo_val == '' or isinstance(photo_val, str):
-                data.pop('photograph', None)
+        # Safely normalize background_type
+        if 'background_type' in data and data['background_type']:
+            bg_raw = str(data['background_type']).strip().upper()
+            if bg_raw in ('MILITARY', 'ARMY', 'EX_ARMY', 'EX-ARMY'):
+                data['background_type'] = 'EX_ARMY'
+            elif bg_raw in ('RANGERS', 'EX_RANGERS', 'EX-RANGERS'):
+                data['background_type'] = 'EX_RANGERS'
+            elif bg_raw in ('MUJAHID', 'MUJAHID_FORCE', 'EX_MUJAHID', 'EX-MUJAHID', 'EX_MUJAHID_FORCE'):
+                data['background_type'] = 'EX_MUJAHID'
+            elif bg_raw in ('POLICE', 'EX_POLICE', 'EX-POLICE'):
+                data['background_type'] = 'EX_POLICE'
+            elif bg_raw in ('CIVILIAN', 'OTHER'):
+                data['background_type'] = bg_raw
 
         return super().to_internal_value(data)
 
