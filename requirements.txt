@@ -17,3 +17,4 @@ celery==5.4.0
 redis==5.0.3
 django-redis==7.0.0
 xhtml2pdf==0.2.16
+openpyxl
