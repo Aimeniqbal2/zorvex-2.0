@@ -1171,21 +1171,66 @@ class ProposalServiceLineViewSet(TenantModelViewSet):
             qs = qs.filter(service_type_id=service_type)
         return qs
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        version = serializer.validated_data.get('proposal_version')
+        location = serializer.validated_data.get('location')
+        service_type = serializer.validated_data.get('service_type')
+
+        if version and version.is_frozen:
+            raise ValidationError({'detail': 'Cannot add service lines to a frozen proposal version.'})
+
+        # Check for existing line to upgrade instead of creating duplicate
+        existing_line = ProposalServiceLine.objects.filter(
+            proposal_version=version,
+            location=location,
+            service_type=service_type
+        ).first()
+
+        if not existing_line and service_type:
+            st_name = (service_type.name or '').lower()
+            if 'guard' in st_name and not ('ex' in st_name or 'arm' in st_name):
+                existing_line = ProposalServiceLine.objects.filter(
+                    proposal_version=version,
+                    location=location,
+                    service_type__name__in=['Security Guard', 'Security Guard (Civil)']
+                ).first()
+
+        if existing_line:
+            # Upgrade existing line
+            for field, val in serializer.validated_data.items():
+                if field not in ['proposal_version', 'location']:
+                    setattr(existing_line, field, val)
+            existing_line.save()
+            return Response(self.get_serializer(existing_line).data, status=status.HTTP_200_OK)
+
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         version = serializer.validated_data.get('proposal_version')
         location = serializer.validated_data.get('location')
         service_type = serializer.validated_data.get('service_type')
 
-        if version and str(version.company_id) != str(self.request.user.company_id):
+        company = getattr(self.request.user, 'company', None)
+        if not company:
+            from erp_core.middleware import get_current_company
+            from companies.models import Company
+            cid = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
+            company = Company.objects.filter(id=cid).first() if cid else Company.objects.first()
+
+        if version and str(version.company_id) != str(company.id):
             raise ValidationError({'proposal_version': 'ProposalVersion company mismatch.'})
         if version and version.is_frozen:
             raise ValidationError({'detail': 'Cannot add service lines to a frozen proposal version.'})
-        if location and str(location.company_id) != str(self.request.user.company_id):
+        if location and str(location.company_id) != str(company.id):
             raise ValidationError({'location': 'Location company mismatch.'})
-        if service_type and str(service_type.company_id) != str(self.request.user.company_id):
+        if service_type and str(service_type.company_id) != str(company.id):
             raise ValidationError({'service_type': 'ServiceType company mismatch.'})
 
-        serializer.save(company=self.request.user.company)
+        serializer.save(company=company)
 
     def perform_update(self, serializer):
         instance = self.get_object()
@@ -1285,4 +1330,623 @@ class ProposalAdditionalChargeViewSet(TenantModelViewSet):
         if instance.proposal_version.is_frozen:
             raise ValidationError({'detail': 'Cannot delete charges from a frozen proposal version.'})
         super().perform_destroy(instance)
+
+
+# ============================================================================
+# FAST COSTING GRID & SHEET 1 EXCEL IMPORTER VIEWS
+# ============================================================================
+
+from rest_framework.views import APIView
+from decimal import Decimal
+from django.db import transaction
+from crm.models import CRMEntity
+import openpyxl
+
+
+class CostingGridView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from erp_core.middleware import get_current_company
+        from companies.models import Company
+
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        company = Company.objects.filter(id=company_id).first() if company_id else getattr(request.user, 'company', None)
+        if not company and request.user.is_superuser:
+            company = Company.objects.first()
+        if not company:
+            return Response([], status=status.HTTP_200_OK)
+
+        versions = ProposalVersion.objects.filter(
+            company=company,
+            proposal__customer__isnull=False
+        ).select_related(
+            'proposal', 'proposal__customer'
+        ).prefetch_related(
+            'service_lines', 'service_lines__location', 'service_lines__service_type'
+        ).order_by('-proposal__created_at', '-version_number')[:1000]
+
+        data = []
+        seen_customer_locations = set()
+        for ver in versions:
+            prop = ver.proposal
+            cust = prop.customer
+            lines = list(ver.service_lines.all())
+            if not lines:
+                continue
+
+            loc_map = {}
+            for line in lines:
+                loc_id = str(line.location_id) if line.location else 'default'
+                loc_name = line.location.name if line.location else cust.name
+                if loc_id not in loc_map:
+                    loc_map[loc_id] = {
+                        "location_id": loc_id if loc_id != 'default' else None,
+                        "location_name": loc_name,
+                        "lines": []
+                    }
+                loc_map[loc_id]["lines"].append(line)
+
+            for loc_id, loc_info in loc_map.items():
+                loc_key = (str(cust.id), loc_info["location_id"] or 'default')
+                if loc_key in seen_customer_locations:
+                    continue
+                seen_customer_locations.add(loc_key)
+
+                row = {
+                    "proposal_version_id": str(ver.id),
+                    "proposal_id": str(prop.id),
+                    "proposal_number": prop.proposal_number or "",
+                    "client_id": str(cust.id),
+                    "client_name": cust.name,
+                    "location_id": loc_info["location_id"],
+                    "location_name": loc_info["location_name"],
+                    "overhead_per_guard": float(ver.overhead_per_guard if ver.overhead_per_guard is not None else 6000),
+                    "service_charges_per_guard": float(ver.service_charges_per_guard if ver.service_charges_per_guard is not None else 3000),
+                    "tax_wht_rate": float(ver.withholding_tax_rate if ver.withholding_tax_rate is not None else 7),
+                    "sales_tax_rate": float(ver.tax_rate if ver.tax_rate is not None else 8),
+                    "sales_tax_override": float(ver.sales_tax_override) if ver.sales_tax_override is not None else None,
+                    "withholding_tax_override": float(ver.withholding_tax_override) if ver.withholding_tax_override is not None else None,
+                    "sessi": float(ver.total_sessi if ver.total_sessi is not None else 0),
+                    "eobi": float(ver.total_eobi if ver.total_eobi is not None else 0),
+
+                    "sup_ex_qty": 0, "sup_ex_rate": 0, "sup_ex_sal": 0,
+                    "sup_civ_qty": 0, "sup_civ_rate": 0, "sup_civ_sal": 0,
+                    "guard_ex_qty": 0, "guard_ex_rate": 0, "guard_ex_sal": 0,
+                    "guard_civ_qty": 0, "guard_civ_rate": 0, "guard_civ_sal": 0,
+                    "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
+                    "cpo_ex_qty": 0, "cpo_ex_rate": 0, "cpo_ex_sal": 0,
+                    "cpo_civ_qty": 0, "cpo_civ_rate": 0, "cpo_civ_sal": 0,
+                }
+
+                for l in loc_info["lines"]:
+                    st_name = (l.service_type.name if l.service_type else "").lower()
+                    st_code = (l.service_type.code if l.service_type else "").upper()
+                    q = l.quantity or 0
+                    r = float(l.client_rate or 0)
+                    s = float(l.guard_salary or 0)
+
+                    is_ex = ('ex' in st_name or 'arm' in st_name or '_EX' in st_code)
+
+                    if st_code in ['SUP_EX', 'SUP_CIV'] or 'sup' in st_name:
+                        if is_ex:
+                            row["sup_ex_qty"] += q; row["sup_ex_rate"] = r; row["sup_ex_sal"] = s
+                        else:
+                            row["sup_civ_qty"] += q; row["sup_civ_rate"] = r; row["sup_civ_sal"] = s
+                    elif st_code in ['CPO_EX', 'CPO_CIV'] or 'cpo' in st_name or 'close protection' in st_name:
+                        if is_ex:
+                            row["cpo_ex_qty"] += q; row["cpo_ex_rate"] = r; row["cpo_ex_sal"] = s
+                        else:
+                            row["cpo_civ_qty"] += q; row["cpo_civ_rate"] = r; row["cpo_civ_sal"] = s
+                    elif st_code == 'LADY_CCTV' or 'lady' in st_name or 'cctv' in st_name or 'searcher' in st_name:
+                        row["lady_cctv_qty"] += q; row["lady_cctv_rate"] = r; row["lady_cctv_sal"] = s
+                    elif is_ex:
+                        row["guard_ex_qty"] += q; row["guard_ex_rate"] = r; row["guard_ex_sal"] = s
+                    else:
+                        row["guard_civ_qty"] += q; row["guard_civ_rate"] = r; row["guard_civ_sal"] = s
+
+                data.append(row)
+
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class CostingGridBatchSyncView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from erp_core.middleware import get_current_company
+        from companies.models import Company
+        from decimal import Decimal
+        from django.db import transaction
+        from crm.models import CRMEntity
+
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        company = Company.objects.filter(id=company_id).first() if company_id else getattr(request.user, 'company', None)
+        if not company and request.user.is_superuser:
+            company = Company.objects.first()
+        if not company:
+            return Response({"error": "No company associated with user"}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = request.data.get('rows', [])
+        if not rows:
+            return Response({"error": "No rows provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+        synced_count = 0
+
+        role_definitions = [
+            ("sup_ex", "Supervisor (Ex-Army)", "SUP_EX", "UNARMED"),
+            ("sup_civ", "Supervisor (Civil)", "SUP_CIV", "UNARMED"),
+            ("guard_ex", "Security Guard (Ex-Army)", "GD_EX", "UNARMED"),
+            ("guard_civ", "Security Guard (Civil)", "GD_CIV", "UNARMED"),
+            ("lady_cctv", "Lady Searcher / CCTV Operator", "LADY_CCTV", "CCTV_OPERATOR"),
+            ("cpo_ex", "Close Protection Officer (Ex-Army)", "CPO_EX", "PISTOL"),
+            ("cpo_civ", "Close Protection Officer (Civil)", "CPO_CIV", "PISTOL"),
+        ]
+
+        try:
+            with transaction.atomic():
+                for row in rows:
+                    client_name = str(row.get('client_name') or '').strip()
+                    if not client_name:
+                        continue
+
+                    client_id = row.get('client_id')
+                    customer = None
+                    if client_id:
+                        try:
+                            customer = CRMEntity.objects.filter(id=client_id, company=company).first()
+                        except Exception:
+                            customer = None
+
+                    if not customer:
+                        customer = CRMEntity.objects.filter(company=company, name__iexact=client_name).first()
+                    if not customer:
+                        customer = CRMEntity.objects.create(
+                            company=company,
+                            name=client_name,
+                            entity_type='CUSTOMER',
+                            active=True
+                        )
+
+                    loc_name = str(row.get('location_name') or '').strip() or client_name
+                    location = ClientLocation.objects.filter(
+                        company=company,
+                        customer=customer,
+                        name__iexact=loc_name
+                    ).first()
+                    if not location:
+                        location = ClientLocation.objects.create(
+                            company=company,
+                            customer=customer,
+                            name=loc_name,
+                            is_active=True
+                        )
+
+                    proposal = SecurityProposal.objects.filter(
+                        company=company,
+                        customer=customer
+                    ).order_by('-created_at').first()
+                    if not proposal:
+                        proposal = SecurityProposal.objects.create(
+                            company=company,
+                            customer=customer,
+                            title=f"{customer.name} - Commercial Proposal",
+                            status='DRAFT'
+                        )
+
+                    def _parse_dec(v, default):
+                        if v is None or str(v).strip() == '':
+                            return Decimal(str(default))
+                        try:
+                            return Decimal(str(v))
+                        except Exception:
+                            return Decimal(str(default))
+
+                    def _parse_opt_dec(v):
+                        if v is None or str(v).strip() == '':
+                            return None
+                        try:
+                            return Decimal(str(v))
+                        except Exception:
+                            return None
+
+                    overhead = _parse_dec(row.get('overhead_per_guard'), 6000)
+                    service_charges = _parse_dec(row.get('service_charges_per_guard'), 3000)
+                    wht = _parse_dec(row.get('tax_wht_rate'), 7)
+                    st_rate = _parse_dec(row.get('sales_tax_rate'), 8)
+                    sales_tax_override = _parse_opt_dec(row.get('sales_tax_override'))
+                    withholding_tax_override = _parse_opt_dec(row.get('withholding_tax_override'))
+                    sessi = _parse_dec(row.get('sessi'), 0)
+                    eobi = _parse_dec(row.get('eobi'), 0)
+
+                    version = ProposalVersion.objects.filter(
+                        company=company,
+                        proposal=proposal,
+                        is_frozen=False
+                    ).order_by('-version_number').first()
+                    if not version:
+                        version = ProposalVersion.objects.create(
+                            company=company,
+                            proposal=proposal,
+                            version_number=1,
+                            version_type='Initial Proposal',
+                            status='DRAFT',
+                            overhead_per_guard=overhead,
+                            service_charges_per_guard=service_charges,
+                            withholding_tax_rate=wht,
+                            tax_rate=st_rate,
+                            sales_tax_override=sales_tax_override,
+                            withholding_tax_override=withholding_tax_override,
+                            total_sessi=sessi,
+                            total_eobi=eobi
+                        )
+                    else:
+                        version.overhead_per_guard = overhead
+                        version.service_charges_per_guard = service_charges
+                        version.withholding_tax_rate = wht
+                        version.tax_rate = st_rate
+                        version.sales_tax_override = sales_tax_override
+                        version.withholding_tax_override = withholding_tax_override
+                        version.total_sessi = sessi
+                        version.total_eobi = eobi
+                        version.save()
+
+                    existing_version_lines = list(ProposalServiceLine.objects.filter(
+                        company=company,
+                        proposal_version=version,
+                        location=location
+                    ).select_related('service_type'))
+
+                    for prefix, role_name, role_code, default_weapon in role_definitions:
+                        qty = int(float(row.get(f"{prefix}_qty") or 0))
+                        rate = Decimal(str(row.get(f"{prefix}_rate") or 0))
+                        sal = Decimal(str(row.get(f"{prefix}_sal") or 0))
+
+                        st = SecurityServiceType.objects.filter(company=company, code=role_code).first()
+                        if not st:
+                            st = SecurityServiceType.objects.filter(company=company, name__iexact=role_name).first()
+                        if not st:
+                            st = SecurityServiceType.objects.create(
+                                company=company,
+                                name=role_name,
+                                code=role_code,
+                                is_active=True
+                            )
+
+                        # Match existing line by canonical role category
+                        target_line = None
+                        for cand in existing_version_lines:
+                            cand_name = (cand.service_type.name or '').lower() if cand.service_type else ''
+                            cand_code = (cand.service_type.code or '').upper() if cand.service_type else ''
+                            is_cand_ex = ('ex' in cand_name or 'arm' in cand_name or '_EX' in cand_code)
+
+                            matched_role = None
+                            if cand_code in ['SUP_EX', 'SUP_CIV'] or 'sup' in cand_name:
+                                matched_role = 'sup_ex' if is_cand_ex else 'sup_civ'
+                            elif cand_code in ['CPO_EX', 'CPO_CIV'] or 'cpo' in cand_name or 'close protection' in cand_name:
+                                matched_role = 'cpo_ex' if is_cand_ex else 'cpo_civ'
+                            elif cand_code == 'LADY_CCTV' or 'lady' in cand_name or 'cctv' in cand_name or 'searcher' in cand_name:
+                                matched_role = 'lady_cctv'
+                            elif is_cand_ex:
+                                matched_role = 'guard_ex'
+                            else:
+                                matched_role = 'guard_civ'
+
+                            if matched_role == prefix:
+                                if not target_line:
+                                    target_line = cand
+                                else:
+                                    cand.delete()
+
+                        if qty > 0:
+                            if target_line:
+                                target_line.service_type = st
+                                target_line.quantity = qty
+                                target_line.client_rate = rate
+                                target_line.guard_salary = sal
+                                target_line.save()
+                            else:
+                                ProposalServiceLine.objects.create(
+                                    company=company,
+                                    proposal_version=version,
+                                    service_type=st,
+                                    location=location,
+                                    quantity=qty,
+                                    client_rate=rate,
+                                    guard_salary=sal,
+                                    weapon_type=default_weapon,
+                                    shift_hours='12_HOURS',
+                                    billing_unit='MONTHLY'
+                                )
+                        else:
+                            if target_line:
+                                target_line.delete()
+
+                    synced_count += 1
+
+            return Response({
+                "success": True,
+                "synced_count": synced_count,
+                "message": f"Successfully synced {synced_count} client location costing sheets into CRM!"
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": f"Failed to sync costing grid: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CostingGridImportExcelView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        import io
+        import re
+        import csv
+        import openpyxl
+        try:
+            import xlrd
+        except ImportError:
+            xlrd = None
+
+        from erp_core.middleware import get_current_company
+        from companies.models import Company
+        from decimal import Decimal
+        from django.db import transaction
+        from crm.models import CRMEntity
+        from security_crm.models import (
+            ClientLocation,
+            SecurityProposal,
+            ProposalVersion,
+            ProposalServiceLine,
+            SecurityServiceType
+        )
+
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        company = Company.objects.filter(id=company_id).first() if company_id else getattr(request.user, 'company', None)
+        if not company and request.user.is_superuser:
+            company = Company.objects.first()
+        if not company:
+            return Response({"error": "No company associated with user"}, status=status.HTTP_400_BAD_REQUEST)
+
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            file_bytes = file_obj.read()
+        except Exception as e:
+            return Response({"error": f"Failed to read uploaded file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not file_bytes:
+            return Response({"error": "Uploaded file is empty"}, status=status.HTTP_400_BAD_REQUEST)
+
+        max_rows = 0
+        get_cell_val = None
+        parse_errors = []
+
+        # 1. Try openpyxl if file looks like a ZIP / OpenXML (.xlsx)
+        if file_bytes.startswith(b'PK'):
+            try:
+                wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+                target_sheet = wb.sheetnames[0]
+                for s in wb.sheetnames:
+                    s_lower = s.lower()
+                    if 'sheet 1' in s_lower or 'sheet1' in s_lower or 'costing' in s_lower:
+                        target_sheet = s
+                        break
+                ws = wb[target_sheet]
+                max_rows = ws.max_row
+                get_cell_val = lambda r, c: ws.cell(row=r, column=c).value
+            except Exception as ex:
+                parse_errors.append(f"openpyxl: {str(ex)}")
+
+        # 2. Try xlrd for legacy binary Excel (.xls / BIFF8) or fallback
+        if get_cell_val is None and xlrd is not None:
+            try:
+                wb_xls = xlrd.open_workbook(file_contents=file_bytes)
+                sheet_names = wb_xls.sheet_names()
+                target_sheet = sheet_names[0]
+                for s in sheet_names:
+                    s_lower = s.lower()
+                    if 'sheet 1' in s_lower or 'sheet1' in s_lower or 'costing' in s_lower:
+                        target_sheet = s
+                        break
+                sheet = wb_xls.sheet_by_name(target_sheet)
+                max_rows = sheet.nrows
+                get_cell_val = lambda r, c: sheet.cell_value(r - 1, c - 1) if (r - 1) < sheet.nrows and (c - 1) < sheet.ncols else None
+            except Exception as ex:
+                parse_errors.append(f"xlrd: {str(ex)}")
+
+        # 3. Fallback: CSV / Delimited text
+        if get_cell_val is None:
+            try:
+                text = file_bytes.decode('utf-8-sig', errors='ignore')
+                sniffer = csv.Sniffer()
+                dialect = sniffer.sniff(text[:2048])
+                csv_rows = list(csv.reader(io.StringIO(text), dialect))
+                max_rows = len(csv_rows)
+                get_cell_val = lambda r, c: csv_rows[r - 1][c - 1] if (r - 1) < len(csv_rows) and (c - 1) < len(csv_rows[r - 1]) else None
+            except Exception as ex:
+                parse_errors.append(f"csv: {str(ex)}")
+
+        if get_cell_val is None:
+            err_msg = "; ".join(parse_errors) if parse_errors else "Unrecognized file format."
+            return Response({"error": f"Failed to parse Excel file: {err_msg}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        role_specs = [
+            ("Supervisor (Ex-Army)", "SUP_EX", 4, 5, 6, "UNARMED"),
+            ("Supervisor (Civil)", "SUP_CIV", 7, 8, 9, "UNARMED"),
+            ("Security Guard (Ex-Army)", "GD_EX", 10, 11, 12, "UNARMED"),
+            ("Security Guard (Civil)", "GD_CIV", 13, 14, 15, "UNARMED"),
+            ("Lady Searcher / CCTV Operator", "LADY_CCTV", 16, 17, 18, "CCTV_OPERATOR"),
+            ("Close Protection Officer (Ex-Army)", "CPO_EX", 19, 20, 21, "PISTOL"),
+            ("Close Protection Officer (Civil)", "CPO_CIV", 22, 23, 24, "PISTOL"),
+        ]
+
+        def parse_client_and_location(raw_name):
+            raw = str(raw_name or '').replace('\xa0', ' ').strip()
+            if not raw:
+                return '', ''
+            # Match pattern: Client Name (Location) or Client Name [Location]
+            match = re.match(r'^(.*?)\s*[\(\[](.*?)[\)\]]\s*$', raw)
+            if match:
+                client = match.group(1).strip().strip(' -:')
+                loc = match.group(2).strip().strip(' -:')
+                if client and loc:
+                    return client, loc
+                elif client:
+                    return client, client
+                elif loc:
+                    return loc, loc
+            return raw, raw
+
+        imported_clients_set = set()
+        imported_locations = 0
+        imported_lines = 0
+
+        try:
+            with transaction.atomic():
+                for r in range(3, max_rows + 1):
+                    loc_raw = get_cell_val(r, 2)
+                    if not loc_raw:
+                        continue
+                    raw_str = str(loc_raw).replace('\xa0', ' ').strip()
+                    if raw_str.lower() in ['total', 'totals', 'average', 'summary', 'location', 'client', '']:
+                        continue
+
+                    client_name, loc_name = parse_client_and_location(raw_str)
+                    if not client_name:
+                        continue
+
+                    customer = CRMEntity.objects.filter(company=company, name__iexact=client_name).first()
+                    if not customer:
+                        customer = CRMEntity.objects.create(
+                            company=company,
+                            name=client_name,
+                            entity_type='CUSTOMER',
+                            active=True
+                        )
+
+                    location = ClientLocation.objects.filter(
+                        company=company,
+                        customer=customer,
+                        name__iexact=loc_name
+                    ).first()
+                    if not location:
+                        location = ClientLocation.objects.create(
+                            company=company,
+                            customer=customer,
+                            name=loc_name,
+                            is_active=True
+                        )
+
+                    proposal = SecurityProposal.objects.filter(company=company, customer=customer).order_by('-created_at').first()
+                    if not proposal:
+                        proposal = SecurityProposal.objects.create(
+                            company=company,
+                            customer=customer,
+                            title=f"{customer.name} - Commercial Proposal",
+                            status='DRAFT'
+                        )
+
+                    sessi_val = get_cell_val(r, 31)
+                    eobi_val = get_cell_val(r, 32)
+                    try:
+                        sessi = Decimal(str(sessi_val or 0)) if sessi_val else Decimal('0.00')
+                    except Exception:
+                        sessi = Decimal('0.00')
+                    try:
+                        eobi = Decimal(str(eobi_val or 0)) if eobi_val else Decimal('0.00')
+                    except Exception:
+                        eobi = Decimal('0.00')
+
+                    version = ProposalVersion.objects.filter(company=company, proposal=proposal, is_frozen=False).order_by('-version_number').first()
+                    if not version:
+                        version = ProposalVersion.objects.create(
+                            company=company,
+                            proposal=proposal,
+                            version_number=1,
+                            version_type='Initial Proposal',
+                            status='DRAFT',
+                            overhead_per_guard=Decimal('6000.00'),
+                            service_charges_per_guard=Decimal('3000.00'),
+                            total_sessi=sessi,
+                            total_eobi=eobi
+                        )
+                    else:
+                        dirty_fields = []
+                        if sessi > 0 and version.total_sessi != sessi:
+                            version.total_sessi = sessi
+                            dirty_fields.append('total_sessi')
+                        if eobi > 0 and version.total_eobi != eobi:
+                            version.total_eobi = eobi
+                            dirty_fields.append('total_eobi')
+                        if dirty_fields:
+                            version.save(update_fields=dirty_fields)
+
+                    # Ensure idempotency by replacing any existing lines for this location in this proposal version
+                    ProposalServiceLine.objects.filter(
+                        company=company,
+                        proposal_version=version,
+                        location=location
+                    ).delete()
+
+                    location_has_lines = False
+                    for role_title, role_code, rate_col, sal_col, qty_col, weapon in role_specs:
+                        try:
+                            qty_val = get_cell_val(r, qty_col)
+                            if not qty_val:
+                                continue
+                            qty = int(float(qty_val))
+                            if qty <= 0:
+                                continue
+
+                            rate_val = get_cell_val(r, rate_col) or 0
+                            sal_val = get_cell_val(r, sal_col) or 0
+                            rate = Decimal(str(rate_val))
+                            salary = Decimal(str(sal_val))
+
+                            st = SecurityServiceType.objects.filter(company=company, code=role_code).first()
+                            if not st:
+                                st = SecurityServiceType.objects.filter(company=company, name__iexact=role_title).first()
+                            if not st:
+                                st = SecurityServiceType.objects.create(
+                                    company=company,
+                                    name=role_title,
+                                    code=role_code,
+                                    is_active=True
+                                )
+
+                            ProposalServiceLine.objects.create(
+                                company=company,
+                                proposal_version=version,
+                                service_type=st,
+                                location=location,
+                                quantity=qty,
+                                client_rate=rate,
+                                guard_salary=salary,
+                                weapon_type=weapon,
+                                shift_hours='12_HOURS',
+                                billing_unit='MONTHLY'
+                            )
+                            imported_lines += 1
+                            location_has_lines = True
+                        except Exception:
+                            continue
+
+                    if location_has_lines:
+                        imported_locations += 1
+                        imported_clients_set.add(customer.id)
+
+            imported_clients = len(imported_clients_set)
+            return Response({
+                "success": True,
+                "imported_clients": imported_clients,
+                "imported_locations": imported_locations,
+                "imported_lines": imported_lines,
+                "message": f"Successfully imported {imported_clients} clients across {imported_locations} locations with {imported_lines} staffing lines from Sheet 1!"
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": f"Failed to import Excel file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
 

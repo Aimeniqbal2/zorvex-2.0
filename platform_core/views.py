@@ -45,11 +45,22 @@ def _get_company_for_user(request):
     """
     user = request.user
     if user.is_superuser:
+        headers = getattr(request, 'headers', {})
+        header_company_id = headers.get('X-Company-ID') if hasattr(headers, 'get') else None
+        query_company_id = None
+        if hasattr(request, 'query_params'):
+            query_company_id = request.query_params.get('company_id')
+        elif hasattr(request, 'GET'):
+            query_company_id = request.GET.get('company_id')
+        data_company_id = None
+        if hasattr(request, 'data') and isinstance(request.data, dict):
+            data_company_id = request.data.get('company_id')
+
         company_id = (
-            request.headers.get('X-Company-ID')
+            header_company_id
             or request.META.get('HTTP_X_COMPANY_ID')
-            or request.query_params.get('company_id')
-            or request.data.get('company_id')
+            or query_company_id
+            or data_company_id
         )
         if company_id:
             try:

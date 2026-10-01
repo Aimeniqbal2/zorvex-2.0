@@ -139,38 +139,62 @@ def resolve_daily_rate_and_attribution(company_id, employee, duty_date, roster=N
     rate_ref = ''
     unresolved_reason = ''
 
-    # Case A: Replacement Duty or Worked Duty with Post-specific rate
-    if is_replacement or (worked_post and worked_post.daily_pay_rate and worked_post.daily_pay_rate > 0):
-        # 1. Post explicit daily pay rate
-        if worked_post and worked_post.daily_pay_rate and worked_post.daily_pay_rate > Decimal('0.00'):
-            daily_rate = worked_post.daily_pay_rate
-            rate_source = DailyPayRateSource.POST_RATE
-            rate_ref = f"Post Rate: {worked_post.post_name} ({worked_post.daily_pay_rate})"
-        # 2. Contract designation pay rate
-        elif worked_contract and worked_post and worked_post.required_designation_id:
+    # Case A: Post, Location Deployment, or Contract Rate Resolution
+    # 1. Post explicit daily pay rate
+    if worked_post and worked_post.daily_pay_rate and worked_post.daily_pay_rate > Decimal('0.00'):
+        daily_rate = worked_post.daily_pay_rate
+        rate_source = DailyPayRateSource.POST_RATE
+        rate_ref = f"Post Rate: {worked_post.post_name} ({worked_post.daily_pay_rate})"
+    # 2. Post explicit monthly base salary
+    elif worked_post and getattr(worked_post, 'monthly_pay_rate', None) and worked_post.monthly_pay_rate > Decimal('0.00'):
+        daily_rate = (worked_post.monthly_pay_rate / divisor).quantize(Decimal('0.01'))
+        rate_source = DailyPayRateSource.POST_RATE
+        rate_ref = f"Post Location Salary: {worked_post.post_name} (PKR {worked_post.monthly_pay_rate}/mo)"
+    # 3. Guard's active deployment location monthly salary
+    elif home_dep and getattr(home_dep, 'location_monthly_salary', None) and home_dep.location_monthly_salary > Decimal('0.00') and not is_replacement:
+        daily_rate = (home_dep.location_monthly_salary / divisor).quantize(Decimal('0.01'))
+        rate_source = DailyPayRateSource.POST_RATE
+        site_label = worked_site.name if worked_site else (home_dep.site.name if home_dep.site else 'Location')
+        rate_ref = f"Location Salary: PKR {home_dep.location_monthly_salary}/mo ({site_label})"
+    # 4. Contract designation pay rate (ContractRate)
+    elif worked_contract:
+        target_desig_id = None
+        if worked_post and worked_post.required_designation_id:
+            target_desig_id = worked_post.required_designation_id
+        elif home_dep and home_dep.designation_id:
+            target_desig_id = home_dep.designation_id
+        elif employee.designation_id:
+            target_desig_id = employee.designation_id
+
+        if target_desig_id:
             cr = ContractRate.objects.filter(
                 company_id=company_id,
                 service_contract=worked_contract,
-                designation_id=worked_post.required_designation_id,
+                designation_id=target_desig_id,
                 effective_date__lte=d_date,
                 is_deleted=False
             ).order_by('-effective_date').first()
             if cr and cr.pay_rate and cr.pay_rate > Decimal('0.00'):
-                daily_rate = cr.pay_rate
+                if cr.pay_rate >= Decimal('5000.00'):
+                    daily_rate = (cr.pay_rate / divisor).quantize(Decimal('0.01'))
+                    rate_ref = f"Contract {worked_contract.contract_code} [{cr.designation.name}] (PKR {cr.pay_rate}/mo)"
+                else:
+                    daily_rate = cr.pay_rate
+                    rate_ref = f"Contract {worked_contract.contract_code} [{cr.designation.name}] (PKR {cr.pay_rate}/day)"
                 rate_source = DailyPayRateSource.CONTRACT_RATE
-                rate_ref = f"Contract {worked_contract.contract_code} [{worked_post.required_designation.name}] ({cr.pay_rate})"
-        # 3. Replaced employee rate (if replacement and post rate was not explicitly defined)
-        elif is_replacement and replaced_emp:
-            rep_comp = EmployeeSalaryAssignment.resolve_compensation(company_id, replaced_emp, on_date=d_date)
-            if rep_comp:
-                if rep_comp.daily_rate and rep_comp.daily_rate > Decimal('0.00'):
-                    daily_rate = rep_comp.daily_rate
-                    rate_source = DailyPayRateSource.REPLACED_EMPLOYEE_RATE
-                    rate_ref = f"Replaced Guard ({replaced_emp.first_name} {replaced_emp.last_name}) Daily Rate: {rep_comp.daily_rate}"
-                elif rep_comp.base_salary and rep_comp.base_salary > Decimal('0.00'):
-                    daily_rate = (rep_comp.base_salary / divisor).quantize(Decimal('0.01'))
-                    rate_source = DailyPayRateSource.REPLACED_EMPLOYEE_RATE
-                    rate_ref = f"Replaced Guard ({replaced_emp.first_name} {replaced_emp.last_name}) Base {rep_comp.base_salary} / {divisor}"
+
+    # Case A.5: Replaced employee rate (if replacement and location rate was not explicitly defined)
+    if daily_rate == Decimal('0.00') and is_replacement and replaced_emp:
+        rep_comp = EmployeeSalaryAssignment.resolve_compensation(company_id, replaced_emp, on_date=d_date)
+        if rep_comp:
+            if rep_comp.daily_rate and rep_comp.daily_rate > Decimal('0.00'):
+                daily_rate = rep_comp.daily_rate
+                rate_source = DailyPayRateSource.REPLACED_EMPLOYEE_RATE
+                rate_ref = f"Replaced Guard ({replaced_emp.first_name} {replaced_emp.last_name}) Daily Rate: {rep_comp.daily_rate}"
+            elif rep_comp.base_salary and rep_comp.base_salary > Decimal('0.00'):
+                daily_rate = (rep_comp.base_salary / divisor).quantize(Decimal('0.01'))
+                rate_source = DailyPayRateSource.REPLACED_EMPLOYEE_RATE
+                rate_ref = f"Replaced Guard ({replaced_emp.first_name} {replaced_emp.last_name}) Base {rep_comp.base_salary} / {divisor}"
 
     # Case B: Working Employee's Standard Compensation (Normal Assignment or Fallback)
     if daily_rate == Decimal('0.00'):

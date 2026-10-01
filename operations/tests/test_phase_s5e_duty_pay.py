@@ -235,6 +235,69 @@ class PhaseS5EDutyPayTests(TestCase):
         self.assertEqual(pay_record.contract, self.contract_mall)
         self.assertEqual(pay_record.client, self.client_mall)
 
+    def test_location_monthly_salary_deployment_resolution(self):
+        """Test that client location guard salary on active deployment overrides base compensation."""
+        today = date(2026, 5, 10)
+        # Set location_monthly_salary on deployment = 30,000 PKR
+        self.dep_b.location_monthly_salary = Decimal("30000.00")
+        self.dep_b.save()
+
+        WorkforceAttendance.objects.create(
+            company=self.company,
+            employee=self.guard_b,
+            date=today,
+            status=AttendanceStatus.PRESENT
+        )
+
+        pay_record, _ = generate_daily_duty_pay(
+            company=self.company,
+            employee=self.guard_b,
+            duty_date=today,
+            user=self.user
+        )
+
+        # 30,000 / 30 = 1,000.00
+        self.assertEqual(pay_record.daily_payable_rate, Decimal("1000.00"))
+        self.assertEqual(pay_record.payable_amount, Decimal("1000.00"))
+        self.assertEqual(pay_record.rate_source, DailyPayRateSource.POST_RATE)
+
+    def test_post_monthly_pay_rate_resolution(self):
+        """Test that SecurityPost monthly_pay_rate overrides deployment and base compensation."""
+        today = date(2026, 5, 11)
+        # Set monthly_pay_rate on post = 36,000 PKR
+        self.post_mall.monthly_pay_rate = Decimal("36000.00")
+        self.post_mall.save()
+
+        # Create roster assigning guard_b to post_mall
+        DutyRoster.objects.create(
+            company=self.company,
+            employee=self.guard_b,
+            site=self.site_mall,
+            post=self.post_mall,
+            shift=self.shift,
+            duty_date=today,
+            status=DutyRosterStatus.SCHEDULED
+        )
+
+        WorkforceAttendance.objects.create(
+            company=self.company,
+            employee=self.guard_b,
+            date=today,
+            status=AttendanceStatus.PRESENT
+        )
+
+        pay_record, _ = generate_daily_duty_pay(
+            company=self.company,
+            employee=self.guard_b,
+            duty_date=today,
+            user=self.user
+        )
+
+        # 36,000 / 30 = 1,200.00
+        self.assertEqual(pay_record.daily_payable_rate, Decimal("1200.00"))
+        self.assertEqual(pay_record.payable_amount, Decimal("1200.00"))
+        self.assertEqual(pay_record.rate_source, DailyPayRateSource.POST_RATE)
+
     def test_absent_attendance_pays_zero(self):
         """Test that ABSENT attendance produces 0% payable percentage and 0.00 payable amount."""
         today = date(2026, 5, 2)

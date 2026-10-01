@@ -258,6 +258,10 @@ class SecurityPost(BaseModel):
         max_digits=10, decimal_places=2, null=True, blank=True, default=None,
         help_text="Post-specific daily payable duty rate (e.g. 500.00). Overrides employee home rate during coverage."
     )
+    monthly_pay_rate = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True, default=None,
+        help_text="Post-specific monthly base salary (e.g. 28000.00). Used to derive daily duty pay rate (monthly / 30)."
+    )
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, default='')
 
@@ -330,6 +334,10 @@ class Deployment(BaseModel):
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=DeploymentStatus.choices, default=DeploymentStatus.DRAFT)
+    location_monthly_salary = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True, default=None,
+        help_text="Location-specific monthly salary for this deployment (e.g. 25000.00, 35000.00). Overrides default employee salary."
+    )
     assigned_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_deployments'

@@ -61,6 +61,13 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         discount_type: 'NONE' | 'FIXED' | 'PERCENTAGE';
         discount_value: number | string;
         tax_rate: number | string;
+        overhead_per_guard: number | string;
+        service_charges_per_guard: number | string;
+        sales_tax_basis: 'SERVICE_CHARGES' | 'TOTAL_SALE';
+        withholding_tax_rate: number | string;
+        withholding_tax_basis: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT';
+        total_sessi: number | string;
+        total_eobi: number | string;
         commercial_notes: string;
         terms_and_conditions: string;
     }>({
@@ -72,7 +79,14 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         security_deposit: 0,
         discount_type: 'NONE',
         discount_value: 0,
-        tax_rate: 0,
+        tax_rate: 8,
+        overhead_per_guard: 6000,
+        service_charges_per_guard: 3000,
+        sales_tax_basis: 'SERVICE_CHARGES',
+        withholding_tax_rate: 7,
+        withholding_tax_basis: 'SERVICE_CHARGES',
+        total_sessi: 0,
+        total_eobi: 0,
         commercial_notes: '',
         terms_and_conditions: ''
     });
@@ -110,7 +124,14 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                 security_deposit: activeVersion.security_deposit || 0,
                 discount_type: activeVersion.discount_type || 'NONE',
                 discount_value: activeVersion.discount_value || 0,
-                tax_rate: activeVersion.tax_rate || 0,
+                tax_rate: activeVersion.tax_rate ?? 8,
+                overhead_per_guard: activeVersion.overhead_per_guard ?? 6000,
+                service_charges_per_guard: activeVersion.service_charges_per_guard ?? 3000,
+                sales_tax_basis: activeVersion.sales_tax_basis || 'SERVICE_CHARGES',
+                withholding_tax_rate: activeVersion.withholding_tax_rate ?? 7,
+                withholding_tax_basis: activeVersion.withholding_tax_basis || 'SERVICE_CHARGES',
+                total_sessi: activeVersion.total_sessi ?? 0,
+                total_eobi: activeVersion.total_eobi ?? 0,
                 commercial_notes: activeVersion.commercial_notes || '',
                 terms_and_conditions: activeVersion.terms_and_conditions || ''
             });
@@ -131,7 +152,12 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                 ...termsState,
                 security_deposit: Number(termsState.security_deposit) || 0,
                 discount_value: Number(termsState.discount_value) || 0,
-                tax_rate: Number(termsState.tax_rate) || 0,
+                tax_rate: (termsState.tax_rate !== '' && termsState.tax_rate !== null && termsState.tax_rate !== undefined) ? Number(termsState.tax_rate) : 0,
+                overhead_per_guard: (termsState.overhead_per_guard !== '' && termsState.overhead_per_guard !== null && termsState.overhead_per_guard !== undefined) ? Number(termsState.overhead_per_guard) : 6000,
+                service_charges_per_guard: (termsState.service_charges_per_guard !== '' && termsState.service_charges_per_guard !== null && termsState.service_charges_per_guard !== undefined) ? Number(termsState.service_charges_per_guard) : 0,
+                withholding_tax_rate: (termsState.withholding_tax_rate !== '' && termsState.withholding_tax_rate !== null && termsState.withholding_tax_rate !== undefined) ? Number(termsState.withholding_tax_rate) : 0,
+                total_sessi: Number(termsState.total_sessi) || 0,
+                total_eobi: Number(termsState.total_eobi) || 0,
                 proposal_validity_days: Number(termsState.proposal_validity_days) || 30,
                 contract_duration_months: Number(termsState.contract_duration_months) || 12,
                 expected_start_date: termsState.expected_start_date || null
@@ -432,72 +458,99 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 <thead>
                                     <tr>
                                         <th>Location</th>
-                                        <th>Service Type</th>
+                                        <th>Role / Category</th>
+                                        <th>Weapon & Shift</th>
                                         <th style={{ textAlign: 'center' }}>Qty</th>
-                                        <th>Billing Unit</th>
-                                        <th style={{ textAlign: 'right' }}>Client Rate</th>
-                                        <th style={{ textAlign: 'right' }}>OT Rates (1.5x / 2.0x)</th>
-                                        <th style={{ textAlign: 'right' }}>Line Total</th>
+                                        <th style={{ textAlign: 'right' }}>Sale Rate</th>
+                                        <th style={{ textAlign: 'right', color: '#fbbf24' }}>Guard Salary</th>
+                                        <th style={{ textAlign: 'right' }}>Monthly Sale</th>
+                                        <th style={{ textAlign: 'right', color: '#fbbf24' }}>Direct Salary</th>
+                                        <th style={{ textAlign: 'right', color: '#38bdf8' }}>Gross Margin</th>
+                                        <th style={{ textAlign: 'right' }}>Diff / Head</th>
                                         {!isFrozen && <th style={{ textAlign: 'center' }}>Actions</th>}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {(!activeVersion?.service_lines || activeVersion.service_lines.length === 0) ? (
                                         <tr>
-                                            <td colSpan={isFrozen ? 7 : 8} className="fp-table-empty">
-                                                No service lines added yet. Click [Import Recommendations] or [+ Add Guard Service].
+                                            <td colSpan={isFrozen ? 10 : 11} className="fp-table-empty">
+                                                No guard requirements added yet. Click [Import Recommendations] or [+ Add Guard Service].
                                             </td>
                                         </tr>
                                     ) : (
-                                        activeVersion.service_lines.map(line => (
-                                            <tr key={line.id}>
-                                                <td style={{ fontWeight: 600 }}>
-                                                    {line.location_name || 'All Locations'}
-                                                </td>
-                                                <td>
-                                                    <div style={{ fontWeight: 600, color: '#38bdf8' }}>{line.service_type_name || 'Guard Service'}</div>
-                                                    {line.notes && <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>{line.notes}</div>}
-                                                </td>
-                                                <td style={{ textAlign: 'center', fontWeight: 700 }}>
-                                                    {line.quantity}
-                                                </td>
-                                                <td style={{ textTransform: 'capitalize', color: 'var(--color-text-muted)' }}>
-                                                    {line.billing_unit?.toLowerCase() || 'monthly'}
-                                                </td>
-                                                <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 500 }}>
-                                                    PKR {Number(line.client_rate || 0).toLocaleString()}
-                                                </td>
-                                                <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: '11.5px', color: 'var(--color-text-muted)' }}>
-                                                    PKR {Number(line.single_ot_rate || 0).toLocaleString()} / {Number(line.double_ot_rate || 0).toLocaleString()}
-                                                </td>
-                                                <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                                                    PKR {(Number(line.quantity || 1) * Number(line.client_rate || 0)).toLocaleString()}
-                                                </td>
-                                                {!isFrozen && (
+                                        activeVersion.service_lines.map(line => {
+                                            const qty = Number(line.quantity || 1);
+                                            const sale = Number(line.client_rate || 0);
+                                            const sal = Number(line.guard_salary || 0);
+                                            const lineSale = qty * sale;
+                                            const lineSalary = qty * sal;
+                                            const lineMargin = lineSale - lineSalary;
+                                            const diffHead = sale - sal;
+
+                                            return (
+                                                <tr key={line.id}>
+                                                    <td style={{ fontWeight: 600 }}>
+                                                        {line.location_name || 'All Locations'}
+                                                    </td>
                                                     <td>
-                                                        <div className="fp-table-actions">
-                                                            <button
-                                                                onClick={() => {
-                                                                    setEditingServiceLine(line);
-                                                                    setShowServiceModal(true);
-                                                                }}
-                                                                className="fp-btn-icon"
-                                                                title="Edit Line"
-                                                            >
-                                                                <i className='bx bx-edit'></i>
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleDeleteServiceLine(line.id)}
-                                                                className="fp-btn-icon delete"
-                                                                title="Delete Line"
-                                                            >
-                                                                <i className='bx bx-trash'></i>
-                                                            </button>
+                                                        <div style={{ fontWeight: 600, color: '#38bdf8' }}>{line.service_type_name || 'Guard Service'}</div>
+                                                        {line.notes && <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>{line.notes}</div>}
+                                                    </td>
+                                                    <td>
+                                                        <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--color-text)' }}>
+                                                            {line.weapon_type ? line.weapon_type.replace(/_/g, ' ') : 'Unarmed'}
+                                                        </div>
+                                                        <div style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>
+                                                            {line.shift_hours ? line.shift_hours.replace(/_/g, ' ') : '12 Hours'}
                                                         </div>
                                                     </td>
-                                                )}
-                                            </tr>
-                                        ))
+                                                    <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                                                        {qty}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 500, color: '#34d399' }}>
+                                                        PKR {sale.toLocaleString()}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#fbbf24' }}>
+                                                        PKR {sal.toLocaleString()}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                                                        PKR {lineSale.toLocaleString()}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#f59e0b' }}>
+                                                        PKR {lineSalary.toLocaleString()}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: lineMargin >= 0 ? '#38bdf8' : '#ef4444' }}>
+                                                        PKR {lineMargin.toLocaleString()}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: '11.5px', color: diffHead >= 0 ? '#a78bfa' : '#ef4444' }}>
+                                                        PKR {diffHead.toLocaleString()}
+                                                    </td>
+                                                    {!isFrozen && (
+                                                        <td>
+                                                            <div className="fp-table-actions">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setEditingServiceLine(line);
+                                                                        setShowServiceModal(true);
+                                                                    }}
+                                                                    className="fp-btn-icon"
+                                                                    title="Edit Line"
+                                                                >
+                                                                    <i className='bx bx-edit'></i>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDeleteServiceLine(line.id)}
+                                                                    className="fp-btn-icon delete"
+                                                                    title="Delete Line"
+                                                                >
+                                                                    <i className='bx bx-trash'></i>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>
@@ -793,6 +846,128 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 </div>
                             </div>
 
+                            {/* One Security Sheet 1 Costing & Tax Compliance Parameters */}
+                            <div className="fp-form-row-3" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        Operations Overhead / Guard (PKR)
+                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AB base)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="100"
+                                        disabled={isFrozen}
+                                        value={termsState.overhead_per_guard}
+                                        onChange={(e) => setTermsState({ ...termsState, overhead_per_guard: e.target.value })}
+                                        className="fp-input"
+                                        style={{ fontFamily: 'monospace' }}
+                                    />
+                                </div>
+
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        Service Charges (PKR) - Flat Monthly
+                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AG)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="100"
+                                        disabled={isFrozen}
+                                        value={termsState.service_charges_per_guard}
+                                        onChange={(e) => setTermsState({ ...termsState, service_charges_per_guard: e.target.value })}
+                                        className="fp-input"
+                                        style={{ fontFamily: 'monospace' }}
+                                    />
+                                </div>
+
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        Sales Tax Basis (Col AH)
+                                    </label>
+                                    <select
+                                        disabled={isFrozen}
+                                        value={termsState.sales_tax_basis}
+                                        onChange={(e) => setTermsState({ ...termsState, sales_tax_basis: e.target.value as any })}
+                                        className="fp-select"
+                                    >
+                                        <option value="SERVICE_CHARGES">On Service Charges (Col AG)</option>
+                                        <option value="TOTAL_SALE">On Total Monthly Sale (Col Y)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="fp-form-row-3">
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        Withholding Tax Rate (%)
+                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AC)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        disabled={isFrozen}
+                                        value={termsState.withholding_tax_rate}
+                                        onChange={(e) => setTermsState({ ...termsState, withholding_tax_rate: e.target.value })}
+                                        className="fp-input"
+                                        style={{ fontFamily: 'monospace' }}
+                                    />
+                                </div>
+
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        WHT Basis (Col AC)
+                                    </label>
+                                    <select
+                                        disabled={isFrozen}
+                                        value={termsState.withholding_tax_basis}
+                                        onChange={(e) => setTermsState({ ...termsState, withholding_tax_basis: e.target.value as any })}
+                                        className="fp-select"
+                                    >
+                                        <option value="SERVICE_CHARGES">On Service Charges (Col AG)</option>
+                                        <option value="INVOICE_AMOUNT">On Invoice Amount (Col AI)</option>
+                                    </select>
+                                </div>
+
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        SESSI Total (PKR)
+                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AE)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        disabled={isFrozen}
+                                        value={termsState.total_sessi}
+                                        onChange={(e) => setTermsState({ ...termsState, total_sessi: e.target.value })}
+                                        className="fp-input"
+                                        style={{ fontFamily: 'monospace' }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="fp-form-row-3">
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
+                                        EOBI Total (PKR)
+                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AF)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        disabled={isFrozen}
+                                        value={termsState.total_eobi}
+                                        onChange={(e) => setTermsState({ ...termsState, total_eobi: e.target.value })}
+                                        className="fp-input"
+                                        style={{ fontFamily: 'monospace' }}
+                                    />
+                                </div>
+                            </div>
+
                             <div className="fp-form-row-2">
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">Commercial Notes</label>
@@ -822,8 +997,158 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                     </div>
                 </div>
 
-                {/* Right Side: Commercial Summary Sticky Sidebar */}
+                {/* Right Side: Commercial Summary & Costing Engine Sticky Sidebar */}
                 <div className="fp-right-sidebar">
+                    {/* One Security Sheet 1 Costing Engine Card */}
+                    <div className="fp-costing-card">
+                        <div className="fp-costing-header">
+                            <div className="fp-costing-title-group">
+                                <i className='bx bx-calculator' style={{ fontSize: '18px', color: '#38bdf8' }}></i>
+                                <h3 className="fp-costing-title">One Security Costing</h3>
+                            </div>
+                            <span className="fp-costing-engine-badge">Sheet 1 Engine</span>
+                        </div>
+
+                        {/* Section: Operational Volume & Salaries */}
+                        <div className="fp-costing-section">
+                            <div className="fp-costing-sec-title">Strength & Direct Pay</div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Contract Strength</span>
+                                    <span className="col-formula">Col AA = Total Con Str</span>
+                                </div>
+                                <span className="val-col" style={{ color: '#38bdf8' }}>
+                                    {activeVersion?.total_guard_strength ?? 0} Guards
+                                </span>
+                            </div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Total Monthly Sale</span>
+                                    <span className="col-formula">Col Y = SUM(Client Rate * Qty)</span>
+                                </div>
+                                <span className="val-col">
+                                    PKR {Number(activeVersion?.total_monthly_sale ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Total Guard Salary</span>
+                                    <span className="col-formula">Col Z = SUM(Guard Salary * Qty)</span>
+                                </div>
+                                <span className="val-col" style={{ color: '#fb923c' }}>
+                                    PKR {Number(activeVersion?.total_monthly_salary ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Section: Operational Charges & Taxes */}
+                        <div className="fp-costing-section" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
+                            <div className="fp-costing-sec-title">Overheads & Tax Compliance</div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Operations Overhead</span>
+                                    <span className="col-formula">Col AB = AA * {activeVersion?.overhead_per_guard ?? 6000}</span>
+                                </div>
+                                <span className="val-col">
+                                    PKR {Number(activeVersion?.total_monthly_expense ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Service Charges</span>
+                                    <span className="col-formula">Col AG = Flat Monthly</span>
+                                </div>
+                                <span className="val-col">
+                                    PKR {Number(activeVersion?.total_service_charges ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Sales Tax ({activeVersion?.tax_rate ?? 8}%)</span>
+                                    <span className="col-formula">Col AH = {activeVersion?.sales_tax_basis === 'TOTAL_SALE' ? 'Sale * 8%' : 'AG * 8%'}</span>
+                                </div>
+                                <span className="val-col" style={{ color: '#f59e0b' }}>
+                                    PKR {Number(activeVersion?.sales_tax_amount ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Total Invoice Amount</span>
+                                    <span className="col-formula">Col AI = Y + AH</span>
+                                </div>
+                                <span className="val-col" style={{ fontWeight: 700, color: 'var(--color-text)' }}>
+                                    PKR {Number(activeVersion?.total_invoice_amount ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="fp-costing-line">
+                                <div className="label-col">
+                                    <span>Tax WHT ({activeVersion?.withholding_tax_rate ?? 7}%)</span>
+                                    <span className="col-formula">Col AC = {activeVersion?.withholding_tax_basis === 'INVOICE_AMOUNT' ? 'AI * 7%' : 'AG * 7%'}</span>
+                                </div>
+                                <span className="val-col" style={{ color: '#ef4444' }}>
+                                    PKR {Number(activeVersion?.withholding_tax_amount ?? 0).toLocaleString()}
+                                </span>
+                            </div>
+                            {(Number(activeVersion?.total_sessi ?? 0) > 0 || Number(activeVersion?.total_eobi ?? 0) > 0) && (
+                                <>
+                                    <div className="fp-costing-line">
+                                        <div className="label-col">
+                                            <span>SESSI (Statutory)</span>
+                                            <span className="col-formula">Col AE</span>
+                                        </div>
+                                        <span className="val-col">
+                                            PKR {Number(activeVersion?.total_sessi ?? 0).toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="fp-costing-line">
+                                        <div className="label-col">
+                                            <span>EOBI (Statutory)</span>
+                                            <span className="col-formula">Col AF</span>
+                                        </div>
+                                        <span className="val-col">
+                                            PKR {Number(activeVersion?.total_eobi ?? 0).toLocaleString()}
+                                        </span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Section: Profitability & Margins */}
+                        <div className="fp-costing-section" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
+                            <div className="fp-costing-sec-title">Bottom Line & Margins</div>
+                            
+                            <div className="fp-costing-box-margin">
+                                <div>
+                                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Total Difference</div>
+                                    <div style={{ fontSize: '10px', opacity: 0.8, fontFamily: 'monospace' }}>Col AJ = Y - Z - AC - AE - AF</div>
+                                </div>
+                                <div style={{ fontSize: '16px', fontWeight: 800, fontFamily: 'monospace' }}>
+                                    PKR {Number(activeVersion?.total_difference ?? 0).toLocaleString()}
+                                </div>
+                            </div>
+
+                            <div className="fp-costing-line" style={{ padding: '0 4px' }}>
+                                <div className="label-col">
+                                    <span>Margin Per Head</span>
+                                    <span className="col-formula">Col AK = AJ / AA</span>
+                                </div>
+                                <span className="val-col" style={{ color: '#818cf8', fontWeight: 700 }}>
+                                    PKR {Number(activeVersion?.difference_per_head ?? 0).toLocaleString()} / guard
+                                </span>
+                            </div>
+
+                            <div className={`fp-costing-box-profit ${Number(activeVersion?.net_profit_loss ?? 0) >= 0 ? 'profit' : 'loss'}`}>
+                                <div>
+                                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Net Profit / Loss</div>
+                                    <div style={{ fontSize: '10px', opacity: 0.8, fontFamily: 'monospace' }}>Col AD = Y - AC - AB - Z</div>
+                                </div>
+                                <div style={{ fontSize: '18px', fontWeight: 800, fontFamily: 'monospace' }}>
+                                    PKR {Number(activeVersion?.net_profit_loss ?? 0).toLocaleString()}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="fp-summary-card">
                         <div className="fp-summary-header">
                             <div className="fp-summary-title-group">

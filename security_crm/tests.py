@@ -1132,6 +1132,103 @@ class SecurityCRMTests(TestCase):
         # Grand Total: 316,000 + 31,600 = 347,600
         self.assertEqual(version.grand_total, Decimal('347600.00'))
 
+    def test_one_security_costing_formulas(self):
+        """Test exact One Security Sheet 1 formulas (AA, Y, Z, AB, AG, AH, AI, AC, AE, AF, AJ, AK, AD)."""
+        loc1 = ClientLocation.objects.create(company=self.company, customer=self.customer, name='Location Alpha')
+        loc2 = ClientLocation.objects.create(company=self.company, customer=self.customer, name='Location Beta')
+        proposal = SecurityProposal.objects.create(company=self.company, customer=self.customer, status='FINAL_PROPOSAL')
+        
+        version = ProposalVersion.objects.create(
+            company=self.company,
+            proposal=proposal,
+            version_number=1,
+            version_type='Final Proposal',
+            status=SecurityProposalStatus.FINAL_PROPOSAL,
+            overhead_per_guard=Decimal('6000.00'),
+            service_charges_per_guard=Decimal('3000.00'),
+            tax_rate=Decimal('8.00'),
+            sales_tax_basis='SERVICE_CHARGES',
+            withholding_tax_rate=Decimal('7.00'),
+            withholding_tax_basis='SERVICE_CHARGES',
+            total_sessi=Decimal('500.00'),
+            total_eobi=Decimal('600.00')
+        )
+
+        # Line 1: 3 Armed Guards at Location Alpha (Sale: 40,000, Salary: 25,000)
+        l1 = ProposalServiceLine.objects.create(
+            company=self.company,
+            proposal_version=version,
+            location=loc1,
+            service_type=self.service_type,
+            quantity=3,
+            client_rate=Decimal('40000.00'),
+            guard_salary=Decimal('25000.00'),
+            weapon_type='ARMED',
+            shift_hours='12_HOURS',
+            billing_unit='MONTHLY'
+        )
+
+        # Line 2: 2 Unarmed Guards at Location Beta (Sale: 35,000, Salary: 22,000)
+        l2 = ProposalServiceLine.objects.create(
+            company=self.company,
+            proposal_version=version,
+            location=loc2,
+            service_type=self.service_type,
+            quantity=2,
+            client_rate=Decimal('35000.00'),
+            guard_salary=Decimal('22000.00'),
+            weapon_type='UNARMED',
+            shift_hours='12_HOURS',
+            billing_unit='MONTHLY'
+        )
+
+        # Test Line-level properties
+        self.assertEqual(l1.line_sale, Decimal('120000.00')) # 3 * 40,000
+        self.assertEqual(l1.line_salary, Decimal('75000.00')) # 3 * 25,000
+        self.assertEqual(l1.line_difference, Decimal('45000.00')) # 120,000 - 75,000
+        self.assertEqual(l1.difference_per_head, Decimal('15000.00')) # 45,000 / 3
+
+        self.assertEqual(l2.line_sale, Decimal('70000.00')) # 2 * 35,000
+        self.assertEqual(l2.line_salary, Decimal('44000.00')) # 2 * 22,000
+        self.assertEqual(l2.line_difference, Decimal('26000.00')) # 70,000 - 44,000
+        self.assertEqual(l2.difference_per_head, Decimal('13000.00')) # 26,000 / 2
+
+        # Test Version-level One Security Sheet 1 properties:
+        # Col AA: Total Con Str = 3 + 2 = 5
+        self.assertEqual(version.total_guard_strength, 5)
+
+        # Col Y: Total Monthly Sale = 120,000 + 70,000 = 190,000
+        self.assertEqual(version.total_monthly_sale, Decimal('190000.00'))
+
+        # Col Z: Total Monthly Salary = 75,000 + 44,000 = 119,000
+        self.assertEqual(version.total_monthly_salary, Decimal('119000.00'))
+
+        # Col AB: Total Expense (Overhead) = 5 * 6,000 = 30,000
+        self.assertEqual(version.total_monthly_expense, Decimal('30000.00'))
+
+        # Col AG: Service Charges = Flat PKR 3,000 (overall, not multiplied by AA)
+        self.assertEqual(version.total_service_charges, Decimal('3000.00'))
+
+        # Col AH: Sales Tax (8% on Service Charges) = 3,000 * 0.08 = 240
+        self.assertEqual(version.sales_tax_amount, Decimal('240.00'))
+
+        # Col AI: Invoice Amount = Y + AH = 190,000 + 240 = 190,240
+        self.assertEqual(version.total_invoice_amount, Decimal('190240.00'))
+
+        # Col AC: Withholding Tax (7% on Service Charges) = 3,000 * 0.07 = 210
+        self.assertEqual(version.withholding_tax_amount, Decimal('210.00'))
+
+        # Col AJ: Total Difference = Y - Z - AC - AE - AF
+        # = 190,000 - 119,000 - 210 - 500 - 600 = 69,690
+        self.assertEqual(version.total_difference, Decimal('69690.00'))
+
+        # Col AK: Difference Per Head = AJ / AA = 69,690 / 5 = 13,938
+        self.assertEqual(version.difference_per_head, Decimal('13938.00'))
+
+        # Col AD: Net Profit / Loss = Y - AC - AB - Z
+        # = 190,000 - 210 - 30,000 - 119,000 = 40,790
+        self.assertEqual(version.net_profit_loss, Decimal('40790.00'))
+
     def test_frozen_version_immutability(self):
         """Test modifying service lines, equipment, or terms on frozen versions is blocked."""
         loc = ClientLocation.objects.create(company=self.company, customer=self.customer, name='HQ')

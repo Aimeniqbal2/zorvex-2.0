@@ -44,10 +44,14 @@ class TenantMiddleware:
             elif request.user.is_superuser:
                 x_company_id = request.META.get('HTTP_X_COMPANY_ID')
                 if x_company_id:
-                    # Optional: validate uuid here, but letting it pass is fine
-                    # Queryset filtering will handle string vs uuid, or throw a 400 later.
                     company_id = x_company_id
                     _thread_locals.company = company_id
+                else:
+                    from platform_core.views import _get_company_for_user
+                    comp, _ = _get_company_for_user(request)
+                    if comp:
+                        company_id = comp.id
+                        _thread_locals.company = company_id
         
         if company_id:
             # SaaS Gatekeeper (Bypass Auth, Webhooks, and Admin panels)

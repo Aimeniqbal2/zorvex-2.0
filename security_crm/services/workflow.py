@@ -848,6 +848,91 @@ class SecurityProposalWorkflowService:
             proposal.contract = service_contract
             proposal.save(update_fields=['contract'])
 
+        # 3b. Sync Location Rates and SecurityPosts from ProposalServiceLines
+        active_ver = proposal.approved_version or proposal.versions.filter(is_deleted=False).order_by('-version_number').first()
+        if active_ver and service_contract:
+            from operations.models import ContractRate, SecurityPost
+            from hrm.models import Designation
+            from decimal import Decimal
+            
+            for line in active_ver.service_lines.filter(is_deleted=False):
+                # Resolve designation matching service type (or fallback to first matching or create)
+                desig = Designation.objects.filter(
+                    company=proposal.company,
+                    name__iexact=line.service_type.name,
+                    is_deleted=False
+                ).first()
+                if not desig:
+                    desig = Designation.objects.filter(
+                        company=proposal.company,
+                        name__icontains=line.service_type.name,
+                        is_deleted=False
+                    ).first()
+                if not desig:
+                    desig = Designation.objects.filter(company=proposal.company, is_deleted=False).first()
+
+                if desig:
+                    # Sync or create ContractRate with billing rate and guard salary
+                    eff_date = service_contract.start_date or timezone.now().date()
+                    cr = ContractRate.objects.filter(
+                        company=proposal.company,
+                        service_contract=service_contract,
+                        designation=desig,
+                        effective_date=eff_date,
+                        is_deleted=False
+                    ).first()
+                    if not cr:
+                        ContractRate.objects.create(
+                            company=proposal.company,
+                            service_contract=service_contract,
+                            designation=desig,
+                            billing_rate=line.client_rate,
+                            pay_rate=getattr(line, 'guard_salary', Decimal('0.00')) or Decimal('0.00'),
+                            effective_date=eff_date
+                        )
+                    else:
+                        cr.billing_rate = line.client_rate
+                        if getattr(line, 'guard_salary', None):
+                            cr.pay_rate = line.guard_salary
+                        cr.save(update_fields=['billing_rate', 'pay_rate'])
+
+                # Sync SecurityPost under corresponding OperationalSite
+                if line.location:
+                    target_site = OperationalSite.objects.filter(
+                        company=proposal.company,
+                        crm_entity=proposal.customer,
+                        name=line.location.name,
+                        is_deleted=False
+                    ).first()
+                    if target_site and desig:
+                        post_name = f"{line.service_type.name} ({line.weapon_type or 'General'})"
+                        sp = SecurityPost.objects.filter(
+                            company=proposal.company,
+                            site=target_site,
+                            post_name=post_name,
+                            is_deleted=False
+                        ).first()
+                        sal = getattr(line, 'guard_salary', None)
+                        daily_pay = (sal / Decimal('30.00')).quantize(Decimal('0.01')) if sal else None
+                        if not sp:
+                            SecurityPost.objects.create(
+                                company=proposal.company,
+                                site=target_site,
+                                service_contract=service_contract,
+                                post_name=post_name,
+                                required_designation=desig,
+                                required_headcount=line.quantity,
+                                daily_pay_rate=daily_pay,
+                                monthly_pay_rate=sal or None,
+                                is_active=True
+                            )
+                        else:
+                            sp.daily_pay_rate = daily_pay
+                            sp.monthly_pay_rate = sal or None
+                            sp.required_headcount = line.quantity
+                            sp.service_contract = service_contract
+                            sp.save(update_fields=['daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract'])
+
         # 4. Ensure customer entity_type is CUSTOMER (active client)
         customer = proposal.customer
         if customer:

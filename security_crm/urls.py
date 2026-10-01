@@ -9,7 +9,8 @@ from .views import (
     AssessmentStaffingRecommendationViewSet,
     AssessmentEquipmentRecommendationViewSet,
     AssessmentAttachmentViewSet, ContractEquipmentRequirementViewSet,
-    ProposalAdditionalChargeViewSet, ProposalSignedDocumentViewSet
+    ProposalAdditionalChargeViewSet, ProposalSignedDocumentViewSet,
+    CostingGridView, CostingGridBatchSyncView, CostingGridImportExcelView
 )
 
 router = DefaultRouter()
@@ -40,6 +41,9 @@ router.register(r'followups', ProposalFollowUpViewSet, basename='security-propos
 app_name = 'security_crm'
 
 urlpatterns = [
+    path('costing-grid/', CostingGridView.as_view(), name='costing-grid'),
+    path('costing-grid/batch-sync/', CostingGridBatchSyncView.as_view(), name='costing-grid-batch-sync'),
+    path('costing-grid/import-excel/', CostingGridImportExcelView.as_view(), name='costing-grid-import-excel'),
     path('', include(router.urls)),
 ]
 

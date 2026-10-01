@@ -21,7 +21,14 @@ class BaseCRMViewSet(TenantModelViewSet):
     allowed_reads = ['admin', 'manager', 'sales', 'hr', 'finance', 'staff', 'cashier']
 
     def perform_create(self, serializer):
-        serializer.save(company_id=self.request.user.company_id)
+        from erp_core.middleware import get_current_company
+        company_id = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
+        if not company_id and getattr(self.request.user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(self.request)
+            if comp:
+                company_id = comp.id
+        serializer.save(company_id=company_id)
 
 
 class CRMEntityViewSet(BaseCRMViewSet):
@@ -55,7 +62,14 @@ class CRMEntityViewSet(BaseCRMViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(company_id=self.request.user.company_id, created_by=self.request.user)
+        from erp_core.middleware import get_current_company
+        company_id = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
+        if not company_id and getattr(self.request.user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(self.request)
+            if comp:
+                company_id = comp.id
+        serializer.save(company_id=company_id, created_by=self.request.user)
 
 
 class CRMContactViewSet(BaseCRMViewSet):

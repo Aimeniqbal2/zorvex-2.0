@@ -65,6 +65,9 @@ export interface ProposalServiceLine {
     location_name?: string;
     quantity: number;
     client_rate: string | number;
+    guard_salary?: string | number;
+    weapon_type?: string;
+    shift_hours?: string;
     billing_unit: string;
     single_ot_rate?: string | number | null;
     double_ot_rate?: string | number | null;
@@ -74,6 +77,10 @@ export interface ProposalServiceLine {
     source_recommendation?: string | null;
     total?: number;
     line_total?: number;
+    line_sale?: number | string;
+    line_salary?: number | string;
+    line_difference?: number | string;
+    difference_per_head?: number | string;
 }
 
 export interface ProposalVersion {
@@ -95,6 +102,13 @@ export interface ProposalVersion {
     discount_type?: 'NONE' | 'FIXED' | 'PERCENTAGE';
     discount_value?: string | number;
     tax_rate?: string | number;
+    overhead_per_guard?: string | number;
+    service_charges_per_guard?: string | number;
+    sales_tax_basis?: 'SERVICE_CHARGES' | 'TOTAL_SALE';
+    withholding_tax_rate?: string | number;
+    withholding_tax_basis?: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT';
+    total_sessi?: string | number;
+    total_eobi?: string | number;
     sent_at?: string | null;
     sent_by?: string | null;
     monthly_services_total?: string | number;
@@ -110,6 +124,20 @@ export interface ProposalVersion {
     taxable_amount?: string | number;
     tax_amount?: string | number;
     grand_total?: string | number;
+
+    // One Security Exact Costing Properties (Sheet 1)
+    total_guard_strength?: number;
+    total_monthly_sale?: string | number;
+    total_monthly_salary?: string | number;
+    total_monthly_expense?: string | number;
+    total_service_charges?: string | number;
+    sales_tax_amount?: string | number;
+    total_invoice_amount?: string | number;
+    withholding_tax_amount?: string | number;
+    total_difference?: string | number;
+    difference_per_head?: string | number;
+    net_profit_loss?: string | number;
+
     service_lines?: ProposalServiceLine[];
     equipment_requirements?: ContractEquipmentRequirement[];
     additional_charges?: ProposalAdditionalCharge[];
@@ -1023,6 +1051,86 @@ export const prepareCrossModuleHandoff = async (proposalId: string, notes?: stri
         message: string;
         handoff_summary: CrossModuleHandoffSummary;
     };
+};
+
+export interface CostingGridRow {
+    id?: string;
+    client_id?: string | null;
+    client_name: string;
+    location_id?: string | null;
+    location_name: string;
+    proposal_id?: string | null;
+    proposal_version_id?: string | null;
+    proposal_number?: string;
+    overhead_per_guard?: number;
+    service_charges_per_guard?: number;
+    tax_wht_rate?: number;
+    sales_tax_rate?: number;
+    sales_tax_override?: number | null;
+    withholding_tax_override?: number | null;
+    sessi?: number;
+    eobi?: number;
+
+    // 7 Role categories matching Sheet 1 horizontal matrix
+    sup_ex_qty?: number;
+    sup_ex_rate?: number;
+    sup_ex_sal?: number;
+
+    sup_civ_qty?: number;
+    sup_civ_rate?: number;
+    sup_civ_sal?: number;
+
+    guard_ex_qty?: number;
+    guard_ex_rate?: number;
+    guard_ex_sal?: number;
+
+    guard_civ_qty?: number;
+    guard_civ_rate?: number;
+    guard_civ_sal?: number;
+
+    lady_cctv_qty?: number;
+    lady_cctv_rate?: number;
+    lady_cctv_sal?: number;
+
+    cpo_ex_qty?: number;
+    cpo_ex_rate?: number;
+    cpo_ex_sal?: number;
+
+    cpo_civ_qty?: number;
+    cpo_civ_rate?: number;
+    cpo_civ_sal?: number;
+
+    // Client/UI Computed properties (Sheet 1 columns Y to AK)
+    total_strength?: number;
+    monthly_sale?: number;
+    monthly_salary?: number;
+    expense?: number;
+    wht?: number;
+    profit_loss?: number;
+    service_charges?: number;
+    sales_tax?: number;
+    invoice_amount?: number;
+    difference?: number;
+    diff_per_head?: number;
+}
+
+export const fetchCostingGrid = async (): Promise<CostingGridRow[]> => {
+    const response = await apiClient.get('/api/security/crm/costing-grid/');
+    return response.data;
+};
+
+export const syncCostingGrid = async (rows: CostingGridRow[]) => {
+    const response = await apiClient.post('/api/security/crm/costing-grid/batch-sync/', { rows });
+    return response.data as { success: boolean; synced_count: number; message: string };
+};
+
+export const importCostingExcel = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post('/api/security/crm/costing-grid/import-excel/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data as { success: boolean; imported_clients: number; imported_lines: number; message: string };
 };
 
 

@@ -102,6 +102,10 @@ export const useAppStore = create<AppState>()(
                         const isSec = (newCompany?.business_type?.toLowerCase() === 'security') || 
                                       (!newCompany?.business_type && newIndustry?.code === 'security');
 
+                        if (newCompany?.id && typeof window !== 'undefined') {
+                            localStorage.setItem('current_company_id', newCompany.id);
+                        }
+
                         set({ 
                             enabledModules: data.engines || {}, 
                             companyModules: data.company_modules || [],

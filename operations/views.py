@@ -73,6 +73,35 @@ class BaseSecurityOpsViewSet(TenantModelViewSet):
     
     site_filter_field = 'site_id'
 
+    def _resolve_company(self, request):
+        from rest_framework.exceptions import ValidationError
+        from erp_core.middleware import get_current_company
+        company_id = (
+            get_current_company()
+            or request.META.get('HTTP_X_COMPANY_ID')
+            or getattr(request.user, 'company_id', None)
+        )
+        if not company_id and getattr(request.user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(request)
+            if comp:
+                company_id = comp.id
+        if not company_id:
+            raise ValidationError({'detail': 'Company context is required.'})
+        return str(company_id)
+
+    def _resolve_company_id(self, request):
+        return self._resolve_company(request)
+
+    def _resolve_company_obj(self, request):
+        from companies.models import Company
+        company_id = self._resolve_company(request)
+        try:
+            return Company.objects.get(id=company_id)
+        except Company.DoesNotExist:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'detail': 'Invalid company context.'})
+
     def get_queryset(self):
         qs = super().get_queryset()
         company_role = getattr(self.request.user, 'company_role', None)
@@ -2414,9 +2443,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['get'], url_path='review-workspace')
     def review_workspace(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         duty_date = request.query_params.get('date')
         start_date = request.query_params.get('start_date')
@@ -2442,9 +2469,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['post'], url_path='generate')
     def generate_single(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = GenerateDailyPayActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2469,9 +2494,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['post'], url_path='bulk-generate')
     def bulk_generate(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = BulkGenerateDailyPayActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2494,9 +2517,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['post'], url_path='recalculate')
     def recalculate(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = RecalculateDailyPayActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2518,9 +2539,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['get'], url_path='unresolved')
     def unresolved_list(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         unresolved_qs = self.get_queryset().filter(
             Q(calculation_status=DailyPayCalculationStatus.UNRESOLVED) |
@@ -2532,9 +2551,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['get'], url_path='replacements')
     def replacements_list(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         qs = self.get_queryset().filter(is_replacement_duty=True)
         serializer = self.get_serializer(qs, many=True)
@@ -2542,9 +2559,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['get'], url_path='by-employee')
     def by_employee(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         emp_id = request.query_params.get('employee')
         if not emp_id:
@@ -2592,7 +2607,7 @@ class PayrollDeductionViewSet(TenantModelViewSet):
     search_fields = ['name', 'employee__first_name', 'employee__last_name', 'employee__employee_code']
 
 
-class EmployeePayrollCalculationViewSet(TenantModelViewSet):
+class EmployeePayrollCalculationViewSet(BaseSecurityOpsViewSet):
     queryset = EmployeePayrollCalculation.objects.select_related('employee', 'employee__designation').prefetch_related('lines').all()
     serializer_class = EmployeePayrollCalculationSerializer
     filterset_fields = ['employee', 'status', 'has_blockers', 'period_start', 'period_end']
@@ -2600,9 +2615,7 @@ class EmployeePayrollCalculationViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='preparation-workspace')
     def preparation_workspace(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         period_start = request.query_params.get('period_start')
         period_end = request.query_params.get('period_end')
@@ -2637,9 +2650,7 @@ class EmployeePayrollCalculationViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='calculate-employee')
     def calculate_employee(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = CalculateEmployeePayrollActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2664,9 +2675,7 @@ class EmployeePayrollCalculationViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='calculate-period')
     def calculate_period(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = CalculatePeriodPayrollActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2689,9 +2698,7 @@ class EmployeePayrollCalculationViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='mark-ready')
     def mark_ready(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = MarkCalculationReadyActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2712,9 +2719,7 @@ class EmployeePayrollCalculationViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='blockers')
     def blockers_list(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         qs = self.get_queryset().filter(status=PayrollCalculationStatus.BLOCKED)
         p_start = request.query_params.get('period_start')
@@ -2736,7 +2741,7 @@ from operations.serializers import (
 from operations.services.payroll_run_service import PayrollRunService
 
 
-class OperationalPayrollRunViewSet(TenantModelViewSet):
+class OperationalPayrollRunViewSet(BaseSecurityOpsViewSet):
     queryset = PayrollRun.objects.select_related(
         'payroll_period', 'prepared_by', 'reviewed_by', 'approved_by', 'finalized_by'
     ).prefetch_related('finance_integrations', 'payslips', 'operational_calculations').all()
@@ -2746,9 +2751,7 @@ class OperationalPayrollRunViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='summary-list')
     def summary_list(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
         status_filter = request.query_params.get('status')
         month_filter = request.query_params.get('payroll_month')
         runs = PayrollRunService.get_runs_list(company, status=status_filter, payroll_month=month_filter)
@@ -2756,9 +2759,7 @@ class OperationalPayrollRunViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='create-from-ready')
     def create_from_ready(self, request):
-        company = get_current_company()
-        if not company:
-            return Response({'error': 'Tenant company context required'}, status=status.HTTP_400_BAD_REQUEST)
+        company = self._resolve_company(request)
 
         serializer = CreatePayrollRunFromReadySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2783,7 +2784,7 @@ class OperationalPayrollRunViewSet(TenantModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='submit-for-review')
     def submit_review(self, request, pk=None):
-        company = get_current_company()
+        company = self._resolve_company(request)
         payroll_run = self.get_object()
         try:
             payroll_run = PayrollRunService.submit_for_review(company, payroll_run, user=request.user)
@@ -2797,7 +2798,7 @@ class OperationalPayrollRunViewSet(TenantModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='approve')
     def approve(self, request, pk=None):
-        company = get_current_company()
+        company = self._resolve_company(request)
         payroll_run = self.get_object()
         try:
             payroll_run = PayrollRunService.approve_payroll_run(company, payroll_run, user=request.user)
@@ -2811,7 +2812,7 @@ class OperationalPayrollRunViewSet(TenantModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='finalize')
     def finalize(self, request, pk=None):
-        company = get_current_company()
+        company = self._resolve_company(request)
         payroll_run = self.get_object()
         try:
             result = PayrollRunService.finalize_payroll_run(company, payroll_run, user=request.user)
@@ -2827,7 +2828,7 @@ class OperationalPayrollRunViewSet(TenantModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel(self, request, pk=None):
-        company = get_current_company()
+        company = self._resolve_company(request)
         payroll_run = self.get_object()
         serializer = CancelPayrollRunActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

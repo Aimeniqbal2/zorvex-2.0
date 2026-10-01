@@ -11,11 +11,12 @@ import { EntityModal } from '../../../modules/crm/components/EntityModal';
 import { SecurityCustomerDetail } from './components/SecurityCustomerDetail';
 import { SecurityProposalsList } from './components/SecurityProposalsList';
 import { SecurityProposalDetail } from './components/SecurityProposalDetail';
+import { FastCostingGridTab } from './components/FastCostingGridTab';
 import '../../../modules/crm/styles/crm.css';
 
 export const SecurityCRMModule: React.FC = () => {
     // Persistent state
-    const [activeTab, setActiveTab] = useState<'customers' | 'proposals'>('customers');
+    const [activeTab, setActiveTab] = useState<'customers' | 'proposals' | 'costing_grid'>('customers');
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(1);
     
@@ -115,6 +116,20 @@ export const SecurityCRMModule: React.FC = () => {
         );
     }
 
+    if (selectedProposalId) {
+        return (
+            <PageContainer>
+                <SecurityProposalDetail 
+                    proposalId={selectedProposalId} 
+                    onBack={() => {
+                        setSelectedProposalId(null);
+                        setRefreshTrigger(prev => prev + 1);
+                    }} 
+                />
+            </PageContainer>
+        );
+    }
+
     if (selectedCustomerId) {
         return (
             <PageContainer>
@@ -125,20 +140,6 @@ export const SecurityCRMModule: React.FC = () => {
                         setRefreshTrigger(prev => prev + 1);
                     }}
                     onOpenProposal={(id) => setSelectedProposalId(id)}
-                />
-            </PageContainer>
-        );
-    }
-
-    if (selectedProposalId) {
-        return (
-            <PageContainer>
-                <SecurityProposalDetail 
-                    proposalId={selectedProposalId} 
-                    onBack={() => {
-                        setSelectedProposalId(null);
-                        setRefreshTrigger(prev => prev + 1);
-                    }} 
                 />
             </PageContainer>
         );
@@ -193,6 +194,26 @@ export const SecurityCRMModule: React.FC = () => {
                 >
                     Proposals
                 </button>
+                <button
+                    style={{
+                        padding: '8px 16px',
+                        background: activeTab === 'costing_grid' ? 'var(--color-primary)' : 'var(--color-background)',
+                        border: `1px solid ${activeTab === 'costing_grid' ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                        borderRadius: '20px',
+                        color: activeTab === 'costing_grid' ? 'white' : 'var(--color-text-muted)',
+                        fontWeight: 600,
+                        fontSize: '13.5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: activeTab === 'costing_grid' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                    }}
+                    onClick={() => setActiveTab('costing_grid')}
+                >
+                    <i className='bx bx-table'></i> Fast Costing Grid (Sheet 1)
+                </button>
             </div>
 
             {activeTab === 'customers' && (
@@ -201,7 +222,7 @@ export const SecurityCRMModule: React.FC = () => {
                         <div style={{ width: '300px' }}>
                             <Input 
                                 placeholder="Search clients..." 
-                                value={search}
+                                value={search} 
                                 onChange={(e) => setSearch(e.target.value)}
                             />
                         </div>
@@ -227,6 +248,10 @@ export const SecurityCRMModule: React.FC = () => {
                 <SecurityProposalsList 
                     onOpenProposal={(id) => setSelectedProposalId(id)} 
                 />
+            )}
+
+            {activeTab === 'costing_grid' && (
+                <FastCostingGridTab />
             )}
 
             <EntityModal

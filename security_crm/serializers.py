@@ -225,11 +225,18 @@ class ProposalServiceLineSerializer(serializers.ModelSerializer):
     location_name = serializers.CharField(source='location.name', read_only=True)
     total = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     line_total = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    line_sale = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    line_salary = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    line_difference = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    difference_per_head = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     
     class Meta:
         model = ProposalServiceLine
         fields = '__all__'
-        read_only_fields = ['company', 'created_at', 'updated_at', 'created_by', 'updated_by', 'total', 'line_total']
+        read_only_fields = [
+            'company', 'created_at', 'updated_at', 'created_by', 'updated_by',
+            'total', 'line_total', 'line_sale', 'line_salary', 'line_difference', 'difference_per_head'
+        ]
 
 
 class ProposalVersionSerializer(serializers.ModelSerializer):
@@ -247,6 +254,19 @@ class ProposalVersionSerializer(serializers.ModelSerializer):
     tax_amount = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     grand_total = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
 
+    # One Security Costing Formulas & Calculations (Sheet 1)
+    total_guard_strength = serializers.IntegerField(read_only=True)
+    total_monthly_sale = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    total_monthly_salary = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    total_monthly_expense = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    total_service_charges = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    sales_tax_amount = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    total_invoice_amount = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    withholding_tax_amount = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    total_difference = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    difference_per_head = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    net_profit_loss = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+
     class Meta:
         model = ProposalVersion
         fields = '__all__'
@@ -256,7 +276,11 @@ class ProposalVersionSerializer(serializers.ModelSerializer):
             'recurring_equipment_total', 'one_time_equipment_total',
             'recurring_charges_total', 'one_time_charges_total',
             'total_monthly_recurring', 'total_one_time', 'subtotal',
-            'discount_amount', 'taxable_amount', 'tax_amount', 'grand_total'
+            'discount_amount', 'taxable_amount', 'tax_amount', 'grand_total',
+            'total_guard_strength', 'total_monthly_sale', 'total_monthly_salary',
+            'total_monthly_expense', 'total_service_charges', 'sales_tax_amount',
+            'total_invoice_amount', 'withholding_tax_amount', 'total_difference',
+            'difference_per_head', 'net_profit_loss'
         ]
 
 

@@ -568,54 +568,176 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
 
             {/* Approved Service Lines & Locations Snapshot Card */}
             {approvedVersion && (
-                <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
+                <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-5">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                         <div className="flex items-center gap-2 text-teal-400 font-bold text-sm">
                             <i className="bx bx-map-pin text-lg"></i>
                             Contracted Operational Locations & Staffing Posts
                         </div>
-                        <span className="text-xs text-slate-400">
-                            Version {approvedVersion.version_number} Frozen Commercial Snapshot
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold uppercase tracking-wider">
+                                One Security Sheet 1 Engine
+                            </span>
+                            <span className="text-xs text-slate-400">
+                                Version {approvedVersion.version_number} Frozen Commercial Snapshot
+                            </span>
+                        </div>
                     </div>
 
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs">
                             <thead>
                                 <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider">
-                                    <th className="py-2 px-3">Location / Post</th>
-                                    <th className="py-2 px-3">Service Role</th>
-                                    <th className="py-2 px-3 text-center">Headcount</th>
-                                    <th className="py-2 px-3 text-right">Client Rate</th>
-                                    <th className="py-2 px-3 text-right">Single OT Rate</th>
-                                    <th className="py-2 px-3 text-right">Double OT Rate</th>
-                                    <th className="py-2 px-3 text-right">Monthly Subtotal</th>
+                                    <th className="py-2.5 px-3">Location / Post</th>
+                                    <th className="py-2.5 px-3">Role & Shift</th>
+                                    <th className="py-2.5 px-3 text-center">Headcount (AA)</th>
+                                    <th className="py-2.5 px-3 text-right">Client Rate (Sale)</th>
+                                    <th className="py-2.5 px-3 text-right text-orange-400">Guard Salary (Pay)</th>
+                                    <th className="py-2.5 px-3 text-right">Monthly Sale (Y)</th>
+                                    <th className="py-2.5 px-3 text-right text-orange-400">Direct Salary (Z)</th>
+                                    <th className="py-2.5 px-3 text-right text-indigo-400">Gross Margin</th>
+                                    <th className="py-2.5 px-3 text-right text-indigo-300">Diff / Head</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60">
-                                {approvedVersion.service_lines?.map(line => (
-                                    <tr key={line.id} className="hover:bg-slate-800/30 text-slate-300">
-                                        <td className="py-2.5 px-3 font-semibold text-white">
-                                            {line.location_name || 'Standard Site'}
-                                        </td>
-                                        <td className="py-2.5 px-3">{line.service_type_name || 'Guard'}</td>
-                                        <td className="py-2.5 px-3 text-center font-bold text-slate-200">{line.quantity}</td>
-                                        <td className="py-2.5 px-3 text-right font-mono text-slate-200">
-                                            PKR {Number(line.client_rate || 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-right font-mono text-slate-400">
-                                            {line.single_ot_billing_rate || line.single_ot_rate ? `PKR ${Number(line.single_ot_billing_rate || line.single_ot_rate).toLocaleString()}/hr` : '—'}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-right font-mono text-slate-400">
-                                            {line.double_ot_billing_rate || line.double_ot_rate ? `PKR ${Number(line.double_ot_billing_rate || line.double_ot_rate).toLocaleString()}/hr` : '—'}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                                            PKR {Number(line.line_total || line.total || (Number(line.client_rate || 0) * line.quantity)).toLocaleString()}
-                                        </td>
-                                    </tr>
-                                ))}
+                                {approvedVersion.service_lines?.map(line => {
+                                    const lineSale = Number(line.line_sale || (Number(line.client_rate || 0) * line.quantity));
+                                    const lineSalary = Number(line.line_salary || (Number(line.guard_salary || 0) * line.quantity));
+                                    const lineDiff = Number(line.line_difference ?? (lineSale - lineSalary));
+                                    const diffPerHead = Number(line.difference_per_head ?? (line.quantity > 0 ? lineDiff / line.quantity : 0));
+
+                                    return (
+                                        <tr key={line.id} className="hover:bg-slate-800/30 text-slate-300">
+                                            <td className="py-2.5 px-3 font-semibold text-white">
+                                                {line.location_name || 'Standard Site'}
+                                            </td>
+                                            <td className="py-2.5 px-3">
+                                                <div className="font-medium text-slate-200">{line.service_type_name || 'Guard'}</div>
+                                                <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                                    {line.weapon_type && line.weapon_type !== 'NONE' && (
+                                                        <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-mono">
+                                                            {line.weapon_type}
+                                                        </span>
+                                                    )}
+                                                    <span>{line.shift_hours || 12}h shift</span>
+                                                </div>
+                                            </td>
+                                            <td className="py-2.5 px-3 text-center font-bold text-cyan-400 font-mono">{line.quantity}</td>
+                                            <td className="py-2.5 px-3 text-right font-mono text-slate-200">
+                                                PKR {Number(line.client_rate || 0).toLocaleString()}
+                                            </td>
+                                            <td className="py-2.5 px-3 text-right font-mono text-orange-400 font-semibold">
+                                                PKR {Number(line.guard_salary || 0).toLocaleString()}
+                                            </td>
+                                            <td className="py-2.5 px-3 text-right font-mono font-bold text-white">
+                                                PKR {lineSale.toLocaleString()}
+                                            </td>
+                                            <td className="py-2.5 px-3 text-right font-mono text-orange-300">
+                                                PKR {lineSalary.toLocaleString()}
+                                            </td>
+                                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-indigo-400">
+                                                PKR {lineDiff.toLocaleString()}
+                                            </td>
+                                            <td className="py-2.5 px-3 text-right font-mono text-indigo-300">
+                                                PKR {diffPerHead.toLocaleString()}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
+                    </div>
+
+                    {/* One Security Sheet 1 Costing Summary Snapshot Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-2">
+                        {/* Box 1: Scale & Direct Salaries */}
+                        <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-cyan-400">
+                                <span>Strength & Direct Pay</span>
+                                <i className="bx bx-user-check text-base"></i>
+                            </div>
+                            <div className="space-y-1 text-xs">
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Contract Strength (AA):</span>
+                                    <span className="font-mono font-bold text-white">{approvedVersion.total_guard_strength ?? 0} Guards</span>
+                                </div>
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Total Sale (Col Y):</span>
+                                    <span className="font-mono font-bold text-white">PKR {Number(approvedVersion.total_monthly_sale ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Total Salary (Col Z):</span>
+                                    <span className="font-mono font-bold text-orange-400">PKR {Number(approvedVersion.total_monthly_salary ?? 0).toLocaleString()}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Box 2: Operations Overhead & Service Charges */}
+                        <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-purple-400">
+                                <span>Operational Overheads</span>
+                                <i className="bx bx-cog text-base"></i>
+                            </div>
+                            <div className="space-y-1 text-xs">
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Operations Exp (AB):</span>
+                                    <span className="font-mono font-bold text-slate-200">PKR {Number(approvedVersion.total_monthly_expense ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Service Charges (AG):</span>
+                                    <span className="font-mono font-bold text-slate-200">PKR {Number(approvedVersion.total_service_charges ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 pt-0.5">
+                                    Overhead: @PKR {approvedVersion.overhead_per_guard ?? 6000} | Service: @PKR {approvedVersion.service_charges_per_guard ?? 3000}/guard
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Box 3: Invoice & Statutory Taxes */}
+                        <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-amber-400">
+                                <span>Invoicing & Taxes</span>
+                                <i className="bx bx-receipt text-base"></i>
+                            </div>
+                            <div className="space-y-1 text-xs">
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Sales Tax (Col AH):</span>
+                                    <span className="font-mono font-bold text-amber-400">PKR {Number(approvedVersion.sales_tax_amount ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Invoice Amount (AI):</span>
+                                    <span className="font-mono font-bold text-white">PKR {Number(approvedVersion.total_invoice_amount ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-400">
+                                    <span>WHT Tax (Col AC):</span>
+                                    <span className="font-mono font-bold text-rose-400">PKR {Number(approvedVersion.withholding_tax_amount ?? 0).toLocaleString()}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Box 4: Margins & Net Profit/Loss */}
+                        <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-emerald-400">
+                                <span>Bottom Line (Sheet 1)</span>
+                                <i className="bx bx-trending-up text-base"></i>
+                            </div>
+                            <div className="space-y-1 text-xs">
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Total Diff (Col AJ):</span>
+                                    <span className="font-mono font-bold text-indigo-400">PKR {Number(approvedVersion.total_difference ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-400">
+                                    <span>Margin/Head (AK):</span>
+                                    <span className="font-mono font-bold text-indigo-300">PKR {Number(approvedVersion.difference_per_head ?? 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between pt-1 border-t border-slate-700/60">
+                                    <span className="font-bold text-slate-300">Net Profit/Loss (AD):</span>
+                                    <span className={`font-mono font-extrabold ${Number(approvedVersion.net_profit_loss ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        PKR {Number(approvedVersion.net_profit_loss ?? 0).toLocaleString()}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

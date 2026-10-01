@@ -196,9 +196,148 @@ class ProposalVersion(BaseModel):
     discount_value = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
+    # One Security Costing & Overhead Parameters (Sheet 1)
+    overhead_per_guard = models.DecimalField(
+        max_digits=12, decimal_places=2, default=6000,
+        help_text="Standard operational expense allocation per guard (default PKR 6,000)"
+    )
+    service_charges_per_guard = models.DecimalField(
+        max_digits=12, decimal_places=2, default=3000,
+        help_text="Monthly service charges per guard (default PKR 3,000)"
+    )
+    sales_tax_basis = models.CharField(
+        max_length=30, default='SERVICE_CHARGES',
+        choices=[('SERVICE_CHARGES', 'Service Charges'), ('TOTAL_SALE', 'Total Sale')],
+        help_text="Sales tax calculation basis (service charges vs total sale)"
+    )
+    withholding_tax_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=7,
+        help_text="Income / Withholding Tax deduction rate % (default 7%)"
+    )
+    withholding_tax_basis = models.CharField(
+        max_length=30, default='SERVICE_CHARGES',
+        choices=[('SERVICE_CHARGES', 'Service Charges'), ('INVOICE_AMOUNT', 'Invoice Amount')],
+        help_text="Withholding tax calculation basis"
+    )
+    sales_tax_override = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Optional manual rupee override for Sales Tax amount (PKR). If set, overrides formula."
+    )
+    withholding_tax_override = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Optional manual rupee override for WHT amount (PKR). If set, overrides formula."
+    )
+    total_sessi = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Total monthly SESSI contribution for institutional contracts"
+    )
+    total_eobi = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Total monthly EOBI contribution for institutional contracts"
+    )
+
     # Sent traceability
     sent_at = models.DateTimeField(null=True, blank=True)
     sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_security_proposal_versions')
+
+    # --------------------------------------------------------------------------
+    # One Security Costing Engine Formulas (Sheet 1 exact parity)
+    # --------------------------------------------------------------------------
+    @property
+    def total_guard_strength(self):
+        """Col AA: Total Contracted Strength = SUM(quantity) across active service lines."""
+        lines = self.service_lines.filter(is_deleted=False)
+        return sum(l.quantity for l in lines)
+
+    @property
+    def total_monthly_sale(self):
+        """Col Y: Total Sale / Monthly Invoiced Base = SUM(client_rate * quantity)."""
+        return self.monthly_services_total
+
+    @property
+    def total_monthly_salary(self):
+        """Col Z: Total Guard Direct Salaries = SUM(guard_salary * quantity)."""
+        lines = self.service_lines.filter(is_deleted=False)
+        from decimal import Decimal
+        return sum(
+            (Decimal(str(l.quantity)) * Decimal(str(getattr(l, 'guard_salary', 0) or 0)))
+            for l in lines
+            if str(l.billing_unit).upper() in ['MONTHLY', 'MONTH']
+        )
+
+    @property
+    def total_monthly_expense(self):
+        """Col AB: Total Operational Expense = total_guard_strength * overhead_per_guard."""
+        from decimal import Decimal
+        return Decimal(str(self.total_guard_strength)) * Decimal(str(self.overhead_per_guard or 0))
+
+    @property
+    def total_service_charges(self):
+        """Col AG: Total Service Charges = Flat monthly service charges (overall, not multiplied by guard count)."""
+        from decimal import Decimal
+        return Decimal(str(self.service_charges_per_guard or 0))
+
+    @property
+    def sales_tax_amount(self):
+        """Col AH: Sales Tax (8%) computed on Service Charges or Total Sale, or manual override."""
+        from decimal import Decimal
+        if self.sales_tax_override is not None:
+            return Decimal(str(self.sales_tax_override)).quantize(Decimal('0.01'))
+        rate = Decimal(str(self.tax_rate if self.tax_rate is not None else 0)) / Decimal('100.00')
+        if getattr(self, 'sales_tax_basis', 'SERVICE_CHARGES') == 'TOTAL_SALE':
+            return (self.total_monthly_sale * rate).quantize(Decimal('0.01'))
+        return (self.total_service_charges * rate).quantize(Decimal('0.01'))
+
+    @property
+    def total_invoice_amount(self):
+        """Col AI: Total Gross Invoiced Amount = Total Monthly Sale + Sales Tax."""
+        return self.total_monthly_sale + self.sales_tax_amount
+
+    @property
+    def withholding_tax_amount(self):
+        """Col AC: WHT / Income Tax (7%) on Service Charges or Invoice Amount, or manual override."""
+        from decimal import Decimal
+        if self.withholding_tax_override is not None:
+            return Decimal(str(self.withholding_tax_override)).quantize(Decimal('0.01'))
+        rate = Decimal(str(self.withholding_tax_rate if self.withholding_tax_rate is not None else 0)) / Decimal('100.00')
+        if getattr(self, 'withholding_tax_basis', 'SERVICE_CHARGES') == 'INVOICE_AMOUNT':
+            return (self.total_invoice_amount * rate).quantize(Decimal('0.01'))
+        return (self.total_service_charges * rate).quantize(Decimal('0.01'))
+
+    @property
+    def total_difference(self):
+        """Col AJ: Total Difference / Gross Margin = Y - Z - AC - AE - AF."""
+        from decimal import Decimal
+        sessi = Decimal(str(self.total_sessi or 0))
+        eobi = Decimal(str(self.total_eobi or 0))
+        return (
+            Decimal(str(self.total_monthly_sale))
+            - Decimal(str(self.total_monthly_salary))
+            - Decimal(str(self.withholding_tax_amount))
+            - sessi
+            - eobi
+        ).quantize(Decimal('0.01'))
+
+    @property
+    def difference_per_head(self):
+        """Col AK: Difference Per Head = AJ / AA."""
+        from decimal import Decimal
+        strength = self.total_guard_strength
+        if strength > 0:
+            return (self.total_difference / Decimal(str(strength))).quantize(Decimal('0.01'))
+        return Decimal('0.00')
+
+    @property
+    def net_profit_loss(self):
+        """Col AD: Profit / Loss = Y - AC - AB - Z (or Total Difference - Operational Overheads)."""
+        from decimal import Decimal
+        return (
+            Decimal(str(self.total_monthly_sale))
+            - Decimal(str(self.withholding_tax_amount))
+            - Decimal(str(self.total_monthly_expense))
+            - Decimal(str(self.total_monthly_salary))
+        ).quantize(Decimal('0.01'))
+
 
     @property
     def monthly_services_total(self):
@@ -376,8 +515,11 @@ class ProposalServiceLine(BaseModel):
     service_type = models.ForeignKey(SecurityServiceType, on_delete=models.RESTRICT)
     quantity = models.PositiveIntegerField(default=1)
     
-    # Client commercial rates (NOT employee pay rates)
-    client_rate = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    # Client commercial rates & Location Guard Base Salary
+    client_rate = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="Monthly client billing rate per head (PKR)")
+    guard_salary = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="Monthly base salary paid to guard deployed at this client location (PKR)")
+    weapon_type = models.CharField(max_length=50, blank=True, default='UNARMED', help_text="Weapon or guard specialization category")
+    shift_hours = models.CharField(max_length=50, blank=True, default='12_HOURS', help_text="Shift duration / coverage (e.g. 12_HOURS, 24_HOURS, 8_HOURS)")
     single_ot_rate = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     double_ot_rate = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     
@@ -394,6 +536,28 @@ class ProposalServiceLine(BaseModel):
     @property
     def line_total(self):
         return self.quantity * self.client_rate
+
+    @property
+    def line_sale(self):
+        """Total billing for this line item = quantity * client_rate."""
+        return self.quantity * self.client_rate
+
+    @property
+    def line_salary(self):
+        """Total direct salary for this line item = quantity * guard_salary."""
+        from decimal import Decimal
+        return self.quantity * Decimal(str(self.guard_salary or 0))
+
+    @property
+    def line_difference(self):
+        """Gross margin for this line item = line_sale - line_salary."""
+        return self.line_sale - self.line_salary
+
+    @property
+    def difference_per_head(self):
+        """Per-head margin for this line item = client_rate - guard_salary."""
+        from decimal import Decimal
+        return self.client_rate - Decimal(str(self.guard_salary or 0))
 
     def clean(self):
         super().clean()

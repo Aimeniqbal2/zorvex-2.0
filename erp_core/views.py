@@ -14,6 +14,11 @@ class TenantModelViewSet(viewsets.ModelViewSet):
         from erp_core.middleware import get_current_company
         from rest_framework.exceptions import ValidationError
         company_id = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
+        if not company_id and getattr(self.request.user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(self.request)
+            if comp:
+                company_id = comp.id
         if not company_id:
             raise ValidationError({"detail": "Company context is required for this operation."})
         serializer.save(company_id=company_id)
@@ -22,7 +27,7 @@ class TenantModelViewSet(viewsets.ModelViewSet):
         """
         Forces all queries to be scoped to the authenticated user's company.
         is_deleted=False is handled automatically by TenantManager.
-        Superadmins must provide X-Company-ID to establish context.
+        Superadmins must provide X-Company-ID or fallback to active context.
         """
         qs = super().get_queryset()
         user = self.request.user
@@ -32,6 +37,11 @@ class TenantModelViewSet(viewsets.ModelViewSet):
         from erp_core.middleware import get_current_company
         from rest_framework.exceptions import ValidationError
         company_id = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
+        if not company_id and getattr(user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(self.request)
+            if comp:
+                company_id = comp.id
         if not company_id:
             raise ValidationError({"detail": "Company context is required for this operation."})
 

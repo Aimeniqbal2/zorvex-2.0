@@ -3,11 +3,14 @@ import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../auth/authStore';
 import { SettingsModal } from './SettingsModal';
 import { InstallButton } from '../../pwa';
+import { NotificationDropdown } from './NotificationDropdown';
 
 export const DesktopHeader: React.FC = () => {
     const { theme, toggleTheme } = useAppStore();
     const { user, clearAuth } = useAuthStore();
     const [menuOpen, setMenuOpen] = useState(false);
+    const [notificationsOpen, setNotificationsOpen] = useState(false);
+    const [unreadCount, setUnreadCount] = useState<number>(2);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState<'profile'|'company'|'settings'>('profile');
 
@@ -39,10 +42,22 @@ export const DesktopHeader: React.FC = () => {
                 <button className="header-action-btn" title="Toggle Theme" onClick={toggleTheme}>
                     <i className={`bx ${theme === 'light' ? 'bx-moon' : 'bx-sun'}`}></i>
                 </button>
-                <button className="header-action-btn" title="Notifications">
-                    <i className='bx bx-bell'></i>
-                    <span className="notification-badge"></span>
-                </button>
+                <div style={{ position: 'relative' }}>
+                    <button 
+                        className={`header-action-btn ${notificationsOpen ? 'active' : ''}`} 
+                        title="Notifications"
+                        onClick={() => setNotificationsOpen(prev => !prev)}
+                        style={notificationsOpen ? { color: 'var(--color-primary)', background: 'var(--color-surface-secondary)' } : {}}
+                    >
+                        <i className='bx bx-bell'></i>
+                        {unreadCount > 0 && <span className="notification-badge"></span>}
+                    </button>
+                    <NotificationDropdown 
+                        isOpen={notificationsOpen}
+                        onClose={() => setNotificationsOpen(false)}
+                        onUnreadCountChange={(count) => setUnreadCount(count)}
+                    />
+                </div>
                 
                 <div style={{ position: 'relative' }}>
                     <button className="user-menu-btn" onClick={() => setMenuOpen(!menuOpen)}>
