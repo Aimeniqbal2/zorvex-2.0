@@ -536,6 +536,11 @@ export const updateSecurityProposal = async (id: string, payload: Partial<Securi
     return response.data as SecurityProposal;
 };
 
+export const deleteSecurityProposal = async (id: string) => {
+    const response = await apiClient.delete(`/api/security/crm/securityproposal/${id}/`);
+    return response.data;
+};
+
 export const getProposalVersions = async (proposalId: string) => {
     const response = await apiClient.get(`/api/security/crm/securityproposal/${proposalId}/versions/`);
     return (response.data.results || response.data) as ProposalVersion[];
@@ -576,6 +581,16 @@ export const getClientLocations = async (customerId?: string) => {
 export const createClientLocation = async (payload: Partial<ClientLocation>) => {
     const response = await apiClient.post('/api/security/crm/clientlocation/', payload);
     return response.data as ClientLocation;
+};
+
+export const updateClientLocation = async (id: string, payload: Partial<ClientLocation>) => {
+    const response = await apiClient.patch(`/api/security/crm/clientlocation/${id}/`, payload);
+    return response.data as ClientLocation;
+};
+
+export const deleteClientLocation = async (id: string) => {
+    const response = await apiClient.delete(`/api/security/crm/clientlocation/${id}/`);
+    return response.data;
 };
 
 export const getSecurityServiceTypes = async () => {

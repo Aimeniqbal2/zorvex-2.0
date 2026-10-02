@@ -576,7 +576,7 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                         </div>
                         <div className="flex items-center gap-2">
                             <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-bold uppercase tracking-wider">
-                                One Security Sheet 1 Engine
+                                Security Costing Engine
                             </span>
                             <span className="text-xs text-slate-400">
                                 Version {approvedVersion.version_number} Frozen Commercial Snapshot
@@ -590,11 +590,11 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                                 <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider">
                                     <th className="py-2.5 px-3">Location / Post</th>
                                     <th className="py-2.5 px-3">Role & Shift</th>
-                                    <th className="py-2.5 px-3 text-center">Headcount (AA)</th>
+                                    <th className="py-2.5 px-3 text-center">Headcount</th>
                                     <th className="py-2.5 px-3 text-right">Client Rate (Sale)</th>
                                     <th className="py-2.5 px-3 text-right text-orange-400">Guard Salary (Pay)</th>
-                                    <th className="py-2.5 px-3 text-right">Monthly Sale (Y)</th>
-                                    <th className="py-2.5 px-3 text-right text-orange-400">Direct Salary (Z)</th>
+                                    <th className="py-2.5 px-3 text-right">Monthly Sale</th>
+                                    <th className="py-2.5 px-3 text-right text-orange-400">Direct Salary</th>
                                     <th className="py-2.5 px-3 text-right text-indigo-400">Gross Margin</th>
                                     <th className="py-2.5 px-3 text-right text-indigo-300">Diff / Head</th>
                                 </tr>
@@ -616,7 +616,7 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                                                 <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
                                                     {line.weapon_type && line.weapon_type !== 'NONE' && (
                                                         <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-mono">
-                                                            {line.weapon_type}
+                                                             {line.weapon_type}
                                                         </span>
                                                     )}
                                                     <span>{line.shift_hours || 12}h shift</span>
@@ -648,7 +648,7 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                         </table>
                     </div>
 
-                    {/* One Security Sheet 1 Costing Summary Snapshot Cards */}
+                    {/* Costing Summary Snapshot Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-2">
                         {/* Box 1: Scale & Direct Salaries */}
                         <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
@@ -658,15 +658,15 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                             </div>
                             <div className="space-y-1 text-xs">
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Contract Strength (AA):</span>
+                                    <span>Contract Strength:</span>
                                     <span className="font-mono font-bold text-white">{approvedVersion.total_guard_strength ?? 0} Guards</span>
                                 </div>
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Total Sale (Col Y):</span>
+                                    <span>Total Monthly Sale:</span>
                                     <span className="font-mono font-bold text-white">PKR {Number(approvedVersion.total_monthly_sale ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Total Salary (Col Z):</span>
+                                    <span>Direct Guard Salary:</span>
                                     <span className="font-mono font-bold text-orange-400">PKR {Number(approvedVersion.total_monthly_salary ?? 0).toLocaleString()}</span>
                                 </div>
                             </div>
@@ -680,11 +680,11 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                             </div>
                             <div className="space-y-1 text-xs">
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Operations Exp (AB):</span>
+                                    <span>Operations Exp:</span>
                                     <span className="font-mono font-bold text-slate-200">PKR {Number(approvedVersion.total_monthly_expense ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Service Charges (AG):</span>
+                                    <span>Service Charges:</span>
                                     <span className="font-mono font-bold text-slate-200">PKR {Number(approvedVersion.total_service_charges ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="text-[10px] text-slate-500 pt-0.5">
@@ -701,15 +701,15 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                             </div>
                             <div className="space-y-1 text-xs">
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Sales Tax (Col AH):</span>
+                                    <span>Sales Tax:</span>
                                     <span className="font-mono font-bold text-amber-400">PKR {Number(approvedVersion.sales_tax_amount ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Invoice Amount (AI):</span>
+                                    <span>Invoice Amount:</span>
                                     <span className="font-mono font-bold text-white">PKR {Number(approvedVersion.total_invoice_amount ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between text-slate-400">
-                                    <span>WHT Tax (Col AC):</span>
+                                    <span>WHT Tax:</span>
                                     <span className="font-mono font-bold text-rose-400">PKR {Number(approvedVersion.withholding_tax_amount ?? 0).toLocaleString()}</span>
                                 </div>
                             </div>
@@ -718,20 +718,20 @@ export const SigningAndActiveWorkspaceTab: React.FC<Props> = ({
                         {/* Box 4: Margins & Net Profit/Loss */}
                         <div className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
                             <div className="flex items-center justify-between text-xs font-bold text-emerald-400">
-                                <span>Bottom Line (Sheet 1)</span>
+                                <span>Bottom Line & Margin</span>
                                 <i className="bx bx-trending-up text-base"></i>
                             </div>
                             <div className="space-y-1 text-xs">
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Total Diff (Col AJ):</span>
+                                    <span>Gross Margin:</span>
                                     <span className="font-mono font-bold text-indigo-400">PKR {Number(approvedVersion.total_difference ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between text-slate-400">
-                                    <span>Margin/Head (AK):</span>
+                                    <span>Margin / Head:</span>
                                     <span className="font-mono font-bold text-indigo-300">PKR {Number(approvedVersion.difference_per_head ?? 0).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between pt-1 border-t border-slate-700/60">
-                                    <span className="font-bold text-slate-300">Net Profit/Loss (AD):</span>
+                                    <span className="font-bold text-slate-300">Net Profit / Loss:</span>
                                     <span className={`font-mono font-extrabold ${Number(approvedVersion.net_profit_loss ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                         PKR {Number(approvedVersion.net_profit_loss ?? 0).toLocaleString()}
                                     </span>

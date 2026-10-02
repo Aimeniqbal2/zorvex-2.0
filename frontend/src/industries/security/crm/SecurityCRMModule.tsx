@@ -212,7 +212,7 @@ export const SecurityCRMModule: React.FC = () => {
                     }}
                     onClick={() => setActiveTab('costing_grid')}
                 >
-                    <i className='bx bx-table'></i> Fast Costing Grid (Sheet 1)
+                    <i className='bx bx-table'></i> Fast Costing Grid
                 </button>
             </div>
 

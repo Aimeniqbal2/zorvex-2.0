@@ -846,12 +846,11 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 </div>
                             </div>
 
-                            {/* One Security Sheet 1 Costing & Tax Compliance Parameters */}
+                            {/* Costing & Tax Compliance Parameters */}
                             <div className="fp-form-row-3" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
                                         Operations Overhead / Guard (PKR)
-                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AB base)</span>
                                     </label>
                                     <input
                                         type="number"
@@ -868,7 +867,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
                                         Service Charges (PKR) - Flat Monthly
-                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AG)</span>
                                     </label>
                                     <input
                                         type="number"
@@ -884,7 +882,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
 
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
-                                        Sales Tax Basis (Col AH)
+                                        Sales Tax Basis
                                     </label>
                                     <select
                                         disabled={isFrozen}
@@ -892,8 +890,8 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         onChange={(e) => setTermsState({ ...termsState, sales_tax_basis: e.target.value as any })}
                                         className="fp-select"
                                     >
-                                        <option value="SERVICE_CHARGES">On Service Charges (Col AG)</option>
-                                        <option value="TOTAL_SALE">On Total Monthly Sale (Col Y)</option>
+                                        <option value="SERVICE_CHARGES">On Service Charges</option>
+                                        <option value="TOTAL_SALE">On Total Monthly Sale</option>
                                     </select>
                                 </div>
                             </div>
@@ -902,7 +900,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
                                         Withholding Tax Rate (%)
-                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AC)</span>
                                     </label>
                                     <input
                                         type="number"
@@ -918,7 +915,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
 
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
-                                        WHT Basis (Col AC)
+                                        WHT Basis
                                     </label>
                                     <select
                                         disabled={isFrozen}
@@ -926,15 +923,14 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         onChange={(e) => setTermsState({ ...termsState, withholding_tax_basis: e.target.value as any })}
                                         className="fp-select"
                                     >
-                                        <option value="SERVICE_CHARGES">On Service Charges (Col AG)</option>
-                                        <option value="INVOICE_AMOUNT">On Invoice Amount (Col AI)</option>
+                                        <option value="SERVICE_CHARGES">On Service Charges</option>
+                                        <option value="INVOICE_AMOUNT">On Invoice Amount</option>
                                     </select>
                                 </div>
 
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
                                         SESSI Total (PKR)
-                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AE)</span>
                                     </label>
                                     <input
                                         type="number"
@@ -953,7 +949,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
                                         EOBI Total (PKR)
-                                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>(Col AF)</span>
                                     </label>
                                     <input
                                         type="number"
@@ -999,14 +994,14 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
 
                 {/* Right Side: Commercial Summary & Costing Engine Sticky Sidebar */}
                 <div className="fp-right-sidebar">
-                    {/* One Security Sheet 1 Costing Engine Card */}
+                    {/* Costing Engine Card */}
                     <div className="fp-costing-card">
                         <div className="fp-costing-header">
                             <div className="fp-costing-title-group">
                                 <i className='bx bx-calculator' style={{ fontSize: '18px', color: '#38bdf8' }}></i>
-                                <h3 className="fp-costing-title">One Security Costing</h3>
+                                <h3 className="fp-costing-title">Security Costing</h3>
                             </div>
-                            <span className="fp-costing-engine-badge">Sheet 1 Engine</span>
+                            <span className="fp-costing-engine-badge">Standard Costing</span>
                         </div>
 
                         {/* Section: Operational Volume & Salaries */}
@@ -1015,7 +1010,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Contract Strength</span>
-                                    <span className="col-formula">Col AA = Total Con Str</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#38bdf8' }}>
                                     {activeVersion?.total_guard_strength ?? 0} Guards
@@ -1024,7 +1018,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Total Monthly Sale</span>
-                                    <span className="col-formula">Col Y = SUM(Client Rate * Qty)</span>
                                 </div>
                                 <span className="val-col">
                                     PKR {Number(activeVersion?.total_monthly_sale ?? 0).toLocaleString()}
@@ -1033,7 +1026,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Total Guard Salary</span>
-                                    <span className="col-formula">Col Z = SUM(Guard Salary * Qty)</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#fb923c' }}>
                                     PKR {Number(activeVersion?.total_monthly_salary ?? 0).toLocaleString()}
@@ -1047,7 +1039,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Operations Overhead</span>
-                                    <span className="col-formula">Col AB = AA * {activeVersion?.overhead_per_guard ?? 6000}</span>
                                 </div>
                                 <span className="val-col">
                                     PKR {Number(activeVersion?.total_monthly_expense ?? 0).toLocaleString()}
@@ -1056,7 +1047,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Service Charges</span>
-                                    <span className="col-formula">Col AG = Flat Monthly</span>
                                 </div>
                                 <span className="val-col">
                                     PKR {Number(activeVersion?.total_service_charges ?? 0).toLocaleString()}
@@ -1065,7 +1055,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Sales Tax ({activeVersion?.tax_rate ?? 8}%)</span>
-                                    <span className="col-formula">Col AH = {activeVersion?.sales_tax_basis === 'TOTAL_SALE' ? 'Sale * 8%' : 'AG * 8%'}</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#f59e0b' }}>
                                     PKR {Number(activeVersion?.sales_tax_amount ?? 0).toLocaleString()}
@@ -1074,7 +1063,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Total Invoice Amount</span>
-                                    <span className="col-formula">Col AI = Y + AH</span>
                                 </div>
                                 <span className="val-col" style={{ fontWeight: 700, color: 'var(--color-text)' }}>
                                     PKR {Number(activeVersion?.total_invoice_amount ?? 0).toLocaleString()}
@@ -1083,7 +1071,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line">
                                 <div className="label-col">
                                     <span>Tax WHT ({activeVersion?.withholding_tax_rate ?? 7}%)</span>
-                                    <span className="col-formula">Col AC = {activeVersion?.withholding_tax_basis === 'INVOICE_AMOUNT' ? 'AI * 7%' : 'AG * 7%'}</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#ef4444' }}>
                                     PKR {Number(activeVersion?.withholding_tax_amount ?? 0).toLocaleString()}
@@ -1094,7 +1081,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <div className="fp-costing-line">
                                         <div className="label-col">
                                             <span>SESSI (Statutory)</span>
-                                            <span className="col-formula">Col AE</span>
                                         </div>
                                         <span className="val-col">
                                             PKR {Number(activeVersion?.total_sessi ?? 0).toLocaleString()}
@@ -1103,7 +1089,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <div className="fp-costing-line">
                                         <div className="label-col">
                                             <span>EOBI (Statutory)</span>
-                                            <span className="col-formula">Col AF</span>
                                         </div>
                                         <span className="val-col">
                                             PKR {Number(activeVersion?.total_eobi ?? 0).toLocaleString()}
@@ -1119,8 +1104,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             
                             <div className="fp-costing-box-margin">
                                 <div>
-                                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Total Difference</div>
-                                    <div style={{ fontSize: '10px', opacity: 0.8, fontFamily: 'monospace' }}>Col AJ = Y - Z - AC - AE - AF</div>
+                                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Gross Margin</div>
                                 </div>
                                 <div style={{ fontSize: '16px', fontWeight: 800, fontFamily: 'monospace' }}>
                                     PKR {Number(activeVersion?.total_difference ?? 0).toLocaleString()}
@@ -1130,7 +1114,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className="fp-costing-line" style={{ padding: '0 4px' }}>
                                 <div className="label-col">
                                     <span>Margin Per Head</span>
-                                    <span className="col-formula">Col AK = AJ / AA</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#818cf8', fontWeight: 700 }}>
                                     PKR {Number(activeVersion?.difference_per_head ?? 0).toLocaleString()} / guard
@@ -1140,7 +1123,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             <div className={`fp-costing-box-profit ${Number(activeVersion?.net_profit_loss ?? 0) >= 0 ? 'profit' : 'loss'}`}>
                                 <div>
                                     <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Net Profit / Loss</div>
-                                    <div style={{ fontSize: '10px', opacity: 0.8, fontFamily: 'monospace' }}>Col AD = Y - AC - AB - Z</div>
                                 </div>
                                 <div style={{ fontSize: '18px', fontWeight: 800, fontFamily: 'monospace' }}>
                                     PKR {Number(activeVersion?.net_profit_loss ?? 0).toLocaleString()}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { getServiceContracts } from '../api';
+import { getServiceContracts, deleteServiceContract } from '../api';
 import type { ServiceContract, PaginatedResponse } from '../types';
 import { DataTable } from '../../../components/tables/DataTable';
 import type { Column } from '../../../components/tables/DataTable';
@@ -8,6 +8,7 @@ import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { Button } from '../../../components/ui/Button';
 import { ContractModal } from './ContractModal';
+import { useToastStore } from '../../../stores/toastStore';
 
 export const ContractsView: React.FC = () => {
     const [page, setPage] = useState(1);
@@ -20,6 +21,17 @@ export const ContractsView: React.FC = () => {
     
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedContract, setSelectedContract] = useState<ServiceContract | null>(null);
+
+    const handleDeleteContract = async (id: string, code: string) => {
+        if (!window.confirm(`Are you sure you want to delete contract "${code}"?`)) return;
+        try {
+            await deleteServiceContract(id);
+            useToastStore.getState().success('Contract deleted successfully');
+            fetchContracts();
+        } catch (err: any) {
+            useToastStore.getState().error('Failed to delete contract');
+        }
+    };
 
     useEffect(() => {
         const handler = setTimeout(() => {
@@ -67,12 +79,22 @@ export const ContractsView: React.FC = () => {
             key: 'actions',
             header: 'Actions',
             render: (row: ServiceContract) => (
-                <button 
-                    onClick={() => { setSelectedContract(row); setIsModalOpen(true); }}
-                    className="text-blue-600 hover:text-blue-800"
-                >
-                    Edit
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button 
+                        onClick={() => { setSelectedContract(row); setIsModalOpen(true); }}
+                        className="text-blue-600 hover:text-blue-800"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', fontWeight: 600 }}
+                    >
+                        Edit
+                    </button>
+                    <button 
+                        onClick={() => handleDeleteContract(row.id, row.contract_code)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-danger, #ef4444)', padding: '4px 6px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}
+                        title="Delete Contract"
+                    >
+                        <i className='bx bx-trash'></i> Delete
+                    </button>
+                </div>
             )
         }
     ];

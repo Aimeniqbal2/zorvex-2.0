@@ -77,64 +77,6 @@ export const FastCostingGridTab: React.FC = () => {
     const [search, setSearch] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
-    const topScrollRef = useRef<HTMLDivElement>(null);
-    const isSyncingRef = useRef<boolean>(false);
-    const [scrollLeft, setScrollLeft] = useState<number>(0);
-    const [isFitScreen, setIsFitScreen] = useState<boolean>(true);
-
-    const SECTIONS = [
-        { label: 'Client & Site', icon: 'bx-buildings', offset: 0, min: 0, max: 250 },
-        { label: 'Supervisors', icon: 'bx-shield', offset: 480, min: 250, max: 900 },
-        { label: 'Security Guards', icon: 'bx-user-check', offset: 1020, min: 900, max: 1450 },
-        { label: 'Lady CCTV & CPO', icon: 'bx-video', offset: 1560, min: 1450, max: 2000 },
-        { label: 'Revenue & Payroll (Y & Z)', icon: 'bx-line-chart', offset: 2150, min: 2000, max: 2500 },
-        { label: 'Tax & Statutory', icon: 'bx-receipt', offset: 2550, min: 2500, max: 2850 },
-        { label: 'Margins & Profit (AJ, AD)', icon: 'bx-dollar-circle', offset: 2950, min: 2850, max: 4000 },
-    ];
-
-    const handleTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
-        if (isSyncingRef.current) return;
-        isSyncingRef.current = true;
-        const currentLeft = e.currentTarget.scrollLeft;
-        setScrollLeft(currentLeft);
-        if (topScrollRef.current) {
-            topScrollRef.current.scrollLeft = currentLeft;
-        }
-        requestAnimationFrame(() => {
-            isSyncingRef.current = false;
-        });
-    };
-
-    const handleTopScroll = (e: React.UIEvent<HTMLDivElement>) => {
-        if (isSyncingRef.current) return;
-        isSyncingRef.current = true;
-        const currentLeft = e.currentTarget.scrollLeft;
-        setScrollLeft(currentLeft);
-        if (tableContainerRef.current) {
-            tableContainerRef.current.scrollLeft = currentLeft;
-        }
-        requestAnimationFrame(() => {
-            isSyncingRef.current = false;
-        });
-    };
-
-    const scrollToOffset = (left: number) => {
-        if (tableContainerRef.current) {
-            tableContainerRef.current.scrollTo({ left, behavior: 'smooth' });
-        }
-        if (topScrollRef.current) {
-            topScrollRef.current.scrollTo({ left, behavior: 'smooth' });
-        }
-    };
-
-    const scrollByDelta = (delta: number) => {
-        if (tableContainerRef.current) {
-            tableContainerRef.current.scrollBy({ left: delta, behavior: 'smooth' });
-        }
-        if (topScrollRef.current) {
-            topScrollRef.current.scrollBy({ left: delta, behavior: 'smooth' });
-        }
-    };
 
     const loadGrid = async () => {
         setIsLoading(true);
@@ -268,17 +210,17 @@ export const FastCostingGridTab: React.FC = () => {
             id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             client_id: null,
             client_name: '',
-            location_name: 'Head Office',
-            overhead_per_guard: 6000,
-            service_charges_per_guard: 3000,
-            tax_wht_rate: 7,
-            sales_tax_rate: 8,
+            location_name: '',
+            overhead_per_guard: 0,
+            service_charges_per_guard: 0,
+            tax_wht_rate: 0,
+            sales_tax_rate: 0,
             sessi: 0,
             eobi: 0,
             sup_ex_qty: 0, sup_ex_rate: 0, sup_ex_sal: 0,
             sup_civ_qty: 0, sup_civ_rate: 0, sup_civ_sal: 0,
             guard_ex_qty: 0, guard_ex_rate: 0, guard_ex_sal: 0,
-            guard_civ_qty: 1, guard_civ_rate: 45000, guard_civ_sal: 32000,
+            guard_civ_qty: 0, guard_civ_rate: 0, guard_civ_sal: 0,
             lady_cctv_qty: 0, lady_cctv_rate: 0, lady_cctv_sal: 0,
             cpo_ex_qty: 0, cpo_ex_rate: 0, cpo_ex_sal: 0,
             cpo_civ_qty: 0, cpo_civ_rate: 0, cpo_civ_sal: 0,
@@ -360,7 +302,7 @@ export const FastCostingGridTab: React.FC = () => {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Sheet 1 Summary KPI Cards Bar */}
+            {/* Costing Summary KPI Cards Bar */}
             <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
@@ -380,7 +322,7 @@ export const FastCostingGridTab: React.FC = () => {
                         {summary.totalClients} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-muted)' }}>({summary.totalLocations} Sites)</span>
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Active Sheet 1 Portfolio
+                        Active Client Portfolio
                     </div>
                 </div>
 
@@ -392,7 +334,7 @@ export const FastCostingGridTab: React.FC = () => {
                     boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
                 }}>
                     <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Total Force (Col AA)
+                        Total Force
                     </div>
                     <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '4px' }}>
                         {summary.totalGuards} <span style={{ fontSize: '13px', fontWeight: 600 }}>Guards</span>
@@ -410,7 +352,7 @@ export const FastCostingGridTab: React.FC = () => {
                     boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
                 }}>
                     <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Total Sale (Col Y)
+                        Total Monthly Sale
                     </div>
                     <div style={{ fontSize: '20px', fontWeight: 800, color: '#3b82f6', marginTop: '4px' }}>
                         PKR {summary.totalSale.toLocaleString()}
@@ -428,7 +370,7 @@ export const FastCostingGridTab: React.FC = () => {
                     boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
                 }}>
                     <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Direct Salary (Col Z)
+                        Direct Guard Salary
                     </div>
                     <div style={{ fontSize: '20px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
                         PKR {summary.totalSalary.toLocaleString()}
@@ -446,7 +388,7 @@ export const FastCostingGridTab: React.FC = () => {
                     boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
                 }}>
                     <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Gross Margin (Col AJ)
+                        Gross Margin
                     </div>
                     <div style={{ fontSize: '20px', fontWeight: 800, color: summary.totalDifference >= 0 ? '#10b981' : '#ef4444', marginTop: '4px' }}>
                         PKR {summary.totalDifference.toLocaleString()}
@@ -464,7 +406,7 @@ export const FastCostingGridTab: React.FC = () => {
                     boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
                 }}>
                     <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Net Profit (Col AD)
+                        Net Profit
                     </div>
                     <div style={{ fontSize: '20px', fontWeight: 800, color: summary.totalProfit >= 0 ? '#10b981' : '#ef4444', marginTop: '4px' }}>
                         PKR {summary.totalProfit.toLocaleString()}
@@ -507,7 +449,7 @@ export const FastCostingGridTab: React.FC = () => {
                         style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     >
                         <i className='bx bx-upload' style={{ fontSize: '18px' }}></i> 
-                        {isImporting ? 'Importing Sheet 1...' : 'Import Excel Sheet (.xlsx)'}
+                        {isImporting ? 'Importing Excel...' : 'Import Excel Sheet (.xlsx)'}
                     </Button>
 
                     <Button 
@@ -555,183 +497,15 @@ export const FastCostingGridTab: React.FC = () => {
                 ))}
             </datalist>
 
-            {/* Top Horizontal Scroll & Quick Navigation Center (Sticky & Synced) */}
-            <div style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px',
-                position: 'sticky',
-                top: 0,
-                zIndex: 20
-            }}>
-                <style>{`
-                    .custom-sheet-scrollbar::-webkit-scrollbar {
-                        height: 12px;
-                        width: 10px;
-                    }
-                    .custom-sheet-scrollbar::-webkit-scrollbar-track {
-                        background: var(--color-surface-secondary, #f1f5f9);
-                        border-radius: 6px;
-                    }
-                    .custom-sheet-scrollbar::-webkit-scrollbar-thumb {
-                        background: var(--color-primary, #3b82f6);
-                        border-radius: 6px;
-                        border: 2px solid var(--color-surface, #ffffff);
-                    }
-                    .custom-sheet-scrollbar::-webkit-scrollbar-thumb:hover {
-                        background: #2563eb;
-                    }
-                    .quick-jump-chip {
-                        padding: 5px 11px;
-                        border-radius: 6px;
-                        border: 1px solid var(--color-border);
-                        background: var(--color-surface);
-                        color: var(--color-text);
-                        font-size: 11px;
-                        font-weight: 600;
-                        cursor: pointer;
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 5px;
-                        transition: all 0.15s ease;
-                        white-space: nowrap;
-                    }
-                    .quick-jump-chip:hover {
-                        background: var(--color-surface-secondary);
-                        border-color: var(--color-primary);
-                        color: var(--color-primary);
-                    }
-                    .quick-jump-chip.active {
-                        background: var(--color-primary);
-                        color: #ffffff;
-                        border-color: var(--color-primary);
-                        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.25);
-                    }
-                    .scroll-nav-btn {
-                        padding: 6px 12px;
-                        border-radius: 6px;
-                        border: 1px solid var(--color-border);
-                        background: var(--color-surface);
-                        color: var(--color-text);
-                        font-size: 12px;
-                        font-weight: 600;
-                        cursor: pointer;
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 6px;
-                        transition: all 0.15s ease;
-                    }
-                    .scroll-nav-btn:hover {
-                        background: var(--color-surface-secondary);
-                        border-color: var(--color-primary);
-                        color: var(--color-primary);
-                    }
-                `}</style>
-
-                {/* Top Row: Quick Jump Sections & Stepper Buttons & Height Toggle */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', marginRight: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            <i className='bx bx-compass' style={{ color: 'var(--color-primary)', fontSize: '14px' }}></i> Jump To:
-                        </span>
-                        {SECTIONS.map(s => {
-                            const isActive = scrollLeft >= s.min && scrollLeft < s.max;
-                            return (
-                                <button
-                                    key={s.label}
-                                    type="button"
-                                    onClick={() => scrollToOffset(s.offset)}
-                                    className={`quick-jump-chip ${isActive ? 'active' : ''}`}
-                                    title={`Scroll to ${s.label}`}
-                                >
-                                    <i className={`bx ${s.icon}`}></i>
-                                    {s.label}
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {/* Stepper Buttons */}
-                        <button
-                            type="button"
-                            onClick={() => scrollByDelta(-350)}
-                            className="scroll-nav-btn"
-                            title="Scroll Left (350px)"
-                        >
-                            <i className='bx bx-chevron-left' style={{ fontSize: '16px' }}></i>
-                            Left
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => scrollByDelta(350)}
-                            className="scroll-nav-btn"
-                            title="Scroll Right (350px)"
-                        >
-                            Right
-                            <i className='bx bx-chevron-right' style={{ fontSize: '16px' }}></i>
-                        </button>
-
-                        {/* Viewport Height Toggle */}
-                        <button
-                            type="button"
-                            onClick={() => setIsFitScreen(!isFitScreen)}
-                            className="scroll-nav-btn"
-                            style={isFitScreen ? { borderColor: 'var(--color-primary)', color: 'var(--color-primary)' } : {}}
-                            title={isFitScreen ? "Click to expand sheet to full unbounded page height" : "Click to constrain sheet to viewport height with internal scroll"}
-                        >
-                            <i className={`bx ${isFitScreen ? 'bx-collapse-vertical' : 'bx-expand-vertical'}`}></i>
-                            {isFitScreen ? 'Fit Screen' : 'Full Height'}
-                        </button>
-                    </div>
-                </div>
-
-                {/* Bottom Row: Synchronized Top Horizontal Scrollbar */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                        <i className='bx bx-slider-alt' style={{ color: 'var(--color-primary)', fontSize: '14px' }}></i>
-                        <span>Scroll Bar:</span>
-                    </div>
-
-                    <div
-                        ref={topScrollRef}
-                        onScroll={handleTopScroll}
-                        className="custom-sheet-scrollbar"
-                        style={{
-                            flex: 1,
-                            overflowX: 'auto',
-                            overflowY: 'hidden',
-                            height: '16px',
-                            background: 'var(--color-surface-secondary, #f8fafc)',
-                            borderRadius: '8px',
-                            border: '1px solid var(--color-border)',
-                            padding: '2px 0'
-                        }}
-                        title="Drag or scroll horizontally here to pan across the entire costing sheet"
-                    >
-                        {/* Dummy wide spacer tracking table minWidth */}
-                        <div style={{ width: '3450px', height: '1px' }} />
-                    </div>
-                </div>
-            </div>
-
-            {/* Interactive Wide Matrix Sheet 1 Table with Freeze Panes */}
+            {/* Interactive Wide Matrix Costing Table with Sticky Header & Freeze Panes */}
             <div 
                 ref={tableContainerRef}
-                onScroll={handleTableScroll}
-                className="custom-sheet-scrollbar"
                 style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
                     borderRadius: '12px',
-                    overflowX: 'auto',
-                    overflowY: isFitScreen ? 'auto' : 'visible',
-                    maxHeight: isFitScreen ? 'calc(100vh - 290px)' : 'none',
+                    overflow: 'auto',
+                    maxHeight: 'calc(100vh - 220px)',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
                     WebkitOverflowScrolling: 'touch',
                     position: 'relative'
@@ -740,24 +514,25 @@ export const FastCostingGridTab: React.FC = () => {
                 <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontSize: '13px', minWidth: '3450px' }}>
                     <thead>
                         {/* Level 1 Group Header Row */}
-                        <tr style={{ position: 'sticky', top: 0, zIndex: 12, background: 'var(--color-surface-secondary)', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+                        <tr>
                             <th 
                                 colSpan={3} 
                                 style={{ 
                                     padding: '12px 16px', 
                                     borderRight: '2px solid var(--color-border)', 
+                                    borderBottom: '1px solid var(--color-border)',
                                     fontWeight: 700, 
                                     width: '480px',
                                     minWidth: '480px',
                                     position: 'sticky',
                                     left: 0,
                                     top: 0,
-                                    zIndex: 14,
-                                    background: 'var(--color-surface-secondary)',
+                                    zIndex: 25,
+                                    background: 'var(--color-surface, #ffffff)',
                                     boxShadow: '4px 0 8px rgba(0,0,0,0.06)'
                                 }}
                             >
-                                Client & Deployment Location (Cols B & C)
+                                Client & Deployment Location
                             </th>
                             {ROLE_COLUMNS.map((col, cIdx) => (
                                 <th 
@@ -767,61 +542,62 @@ export const FastCostingGridTab: React.FC = () => {
                                         padding: '12px 10px', 
                                         textAlign: 'center', 
                                         borderRight: '2px solid var(--color-border)',
-                                        background: cIdx % 2 === 0 ? 'rgba(59, 130, 246, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+                                        borderBottom: '1px solid var(--color-border)',
+                                        background: cIdx % 2 === 0 ? '#f0fdf4' : '#eff6ff',
                                         fontWeight: 700,
                                         fontSize: '13px',
                                         width: '270px',
                                         minWidth: '270px',
                                         position: 'sticky',
                                         top: 0,
-                                        zIndex: 12
+                                        zIndex: 20
                                     }}
                                 >
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={12} style={{ padding: '12px 16px', textAlign: 'center', background: 'rgba(245, 158, 11, 0.12)', fontWeight: 700, minWidth: '1260px', position: 'sticky', top: 0, zIndex: 12 }}>
-                                Live Costing, Tax & Margins (Sheet 1 Cols Y – AK)
+                            <th colSpan={12} style={{ padding: '12px 16px', textAlign: 'center', background: '#fefce8', borderBottom: '1px solid var(--color-border)', fontWeight: 700, minWidth: '1260px', position: 'sticky', top: 0, zIndex: 20 }}>
+                                Live Costing, Tax & Margins
                             </th>
-                            <th style={{ padding: '12px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 12, background: 'var(--color-surface-secondary)' }}></th>
+                            <th style={{ padding: '12px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '1px solid var(--color-border)' }}></th>
                         </tr>
 
                         {/* Level 2 Sub-Column Header Row */}
-                        <tr style={{ position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)', borderBottom: '2px solid var(--color-border)', color: 'var(--color-text-muted)', fontSize: '12px' }}>
-                            <th style={{ padding: '10px 8px', width: '45px', minWidth: '45px', textAlign: 'center', position: 'sticky', left: 0, top: '42px', zIndex: 14, background: 'var(--color-surface)' }}>#</th>
-                            <th style={{ padding: '10px 10px', width: '235px', minWidth: '235px', position: 'sticky', left: '45px', top: '42px', zIndex: 14, background: 'var(--color-surface)' }}>Client / Company Name *</th>
-                            <th style={{ padding: '10px 10px', width: '200px', minWidth: '200px', borderRight: '2px solid var(--color-border)', position: 'sticky', left: '280px', top: '42px', zIndex: 14, background: 'var(--color-surface)', boxShadow: '4px 0 8px rgba(0,0,0,0.06)' }}>Location / Site *</th>
+                        <tr>
+                            <th style={{ padding: '10px 8px', width: '45px', minWidth: '45px', textAlign: 'center', position: 'sticky', left: 0, top: '41px', zIndex: 25, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>#</th>
+                            <th style={{ padding: '10px 10px', width: '235px', minWidth: '235px', position: 'sticky', left: '45px', top: '41px', zIndex: 25, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Client / Company Name *</th>
+                            <th style={{ padding: '10px 10px', width: '200px', minWidth: '200px', borderRight: '2px solid var(--color-border)', position: 'sticky', left: '280px', top: '41px', zIndex: 25, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxShadow: '4px 0 8px rgba(0,0,0,0.06)' }}>Location / Site *</th>
 
                             {/* Under each role: Rate, Sal, Qty with ample width */}
                             {ROLE_COLUMNS.map(col => (
                                 <React.Fragment key={`${col.key}-sub`}>
-                                    <th style={{ padding: '10px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Rate (PKR)</th>
-                                    <th style={{ padding: '10px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Salary (PKR)</th>
-                                    <th style={{ padding: '10px 6px', width: '60px', minWidth: '60px', textAlign: 'center', borderRight: '2px solid var(--color-border)', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Qty</th>
+                                    <th style={{ padding: '10px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Rate (PKR)</th>
+                                    <th style={{ padding: '10px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Salary (PKR)</th>
+                                    <th style={{ padding: '10px 6px', width: '60px', minWidth: '60px', textAlign: 'center', borderRight: '2px solid var(--color-border)', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Qty</th>
                                 </React.Fragment>
                             ))}
 
-                            {/* Summary Columns Y through AK with generous space */}
-                            <th style={{ padding: '10px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#3b82f6', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Monthly Sale (Y)</th>
-                            <th style={{ padding: '10px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Direct Salary (Z)</th>
-                            <th style={{ padding: '10px 6px', width: '65px', minWidth: '65px', textAlign: 'center', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Str (AA)</th>
-                            <th style={{ padding: '10px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Expense (AB)</th>
-                            <th style={{ padding: '10px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Service Chg (AG)</th>
-                            <th style={{ padding: '10px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Sales Tax (AH)</th>
-                            <th style={{ padding: '10px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>WHT 7% (AC)</th>
-                            <th style={{ padding: '10px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>SESSI (AE)</th>
-                            <th style={{ padding: '10px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>EOBI (AF)</th>
-                            <th style={{ padding: '10px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Margin (AJ)</th>
-                            <th style={{ padding: '10px 8px', width: '100px', minWidth: '100px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Diff / Hd (AK)</th>
-                            <th style={{ padding: '10px 10px', width: '110px', minWidth: '110px', textAlign: 'right', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}>Profit (AD)</th>
-                            <th style={{ padding: '10px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '42px', zIndex: 12, background: 'var(--color-surface)' }}></th>
+                            {/* Summary Columns with generous space */}
+                            <th style={{ padding: '10px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#3b82f6', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Monthly Sale</th>
+                            <th style={{ padding: '10px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Direct Salary</th>
+                            <th style={{ padding: '10px 6px', width: '65px', minWidth: '65px', textAlign: 'center', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Strength</th>
+                            <th style={{ padding: '10px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Overhead Exp</th>
+                            <th style={{ padding: '10px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Service Charges</th>
+                            <th style={{ padding: '10px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Sales Tax</th>
+                            <th style={{ padding: '10px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>WHT Tax</th>
+                            <th style={{ padding: '10px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>SESSI</th>
+                            <th style={{ padding: '10px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>EOBI</th>
+                            <th style={{ padding: '10px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Gross Margin</th>
+                            <th style={{ padding: '10px 8px', width: '100px', minWidth: '100px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Diff / Head</th>
+                            <th style={{ padding: '10px 10px', width: '110px', minWidth: '110px', textAlign: 'right', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Net Profit</th>
+                            <th style={{ padding: '10px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}></th>
                         </tr>
                     </thead>
                     <tbody>
                         {filteredRows.length === 0 ? (
                             <tr>
                                 <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 13} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                                    {isLoading ? 'Loading Sheet 1 costing matrix...' : 'No client locations found. Click "+ Add Client / Location Row" or "Import Excel Sheet" to begin.'}
+                                    {isLoading ? 'Loading costing matrix...' : 'No client locations found. Click "+ Add Client / Location Row" or "Import Excel Sheet" to begin.'}
                                 </td>
                             </tr>
                         ) : (

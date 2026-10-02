@@ -93,6 +93,15 @@ export const getServiceContracts = async (params?: { page?: number, search?: str
     return response.data;
 };
 
+export const updateServiceContract = async (id: string, payload: Partial<ServiceContract>): Promise<ServiceContract> => {
+    const response = await apiClient.patch(`/api/operations/contracts/${id}/`, payload);
+    return response.data;
+};
+
+export const deleteServiceContract = async (id: string): Promise<void> => {
+    await apiClient.delete(`/api/operations/contracts/${id}/`);
+};
+
 // Deployments
 export const getDeployments = async (params?: { page?: number, search?: string, status?: string, site?: string, employee?: string }): Promise<PaginatedResponse<Deployment>> => {
     const response = await apiClient.get('/api/operations/deployments/', { params });

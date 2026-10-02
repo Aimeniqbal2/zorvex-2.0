@@ -9,7 +9,15 @@ import { useToastStore } from '../../../../stores/toastStore';
 import { getEntity, getContacts, deleteContact } from '../../../../modules/crm/api';
 import { ContactModal } from '../../../../modules/crm/components/ContactModal';
 import type { CRMEntity, CRMContact } from '../../../../modules/crm/types';
-import { getSecurityProposals, getClientLocations, createSecurityProposal, createClientLocation } from '../api';
+import { 
+    getSecurityProposals, 
+    getClientLocations, 
+    createSecurityProposal, 
+    createClientLocation, 
+    updateClientLocation, 
+    deleteClientLocation, 
+    deleteSecurityProposal 
+} from '../api';
 import type { SecurityProposal, ClientLocation } from '../api';
 
 interface Props {
@@ -33,6 +41,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
 
     // Location Modal State
     const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+    const [editingLocation, setEditingLocation] = useState<ClientLocation | null>(null);
     const [locationName, setLocationName] = useState('');
     const [locationAddress, setLocationAddress] = useState('');
     const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
@@ -87,6 +96,19 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         }
     };
 
+    const handleDeleteProposal = async (proposalId: string, proposalNumber: string) => {
+        if (!window.confirm(`Are you sure you want to delete proposal "${proposalNumber}"?`)) {
+            return;
+        }
+        try {
+            await deleteSecurityProposal(proposalId);
+            useToastStore.getState().success('Proposal deleted successfully');
+            loadData();
+        } catch (error) {
+            useToastStore.getState().error('Failed to delete proposal');
+        }
+    };
+
     const handleOpenAddContact = () => {
         setEditingContact(null);
         setIsContactModalOpen(true);
@@ -111,9 +133,30 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     };
 
     const handleOpenAddLocation = () => {
+        setEditingLocation(null);
         setLocationName('');
         setLocationAddress('');
         setIsLocationModalOpen(true);
+    };
+
+    const handleOpenEditLocation = (loc: ClientLocation) => {
+        setEditingLocation(loc);
+        setLocationName(loc.name);
+        setLocationAddress(loc.address || '');
+        setIsLocationModalOpen(true);
+    };
+
+    const handleDeleteLocation = async (locId: string, name: string) => {
+        if (!window.confirm(`Are you sure you want to delete location "${name}"?`)) {
+            return;
+        }
+        try {
+            await deleteClientLocation(locId);
+            useToastStore.getState().success('Location deleted successfully');
+            loadData();
+        } catch (error) {
+            useToastStore.getState().error('Failed to delete location');
+        }
     };
 
     const handleSaveLocation = async (e: React.FormEvent) => {
@@ -124,17 +167,26 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         }
         setIsSubmittingLocation(true);
         try {
-            await createClientLocation({
-                customer: customerId,
-                name: locationName.trim(),
-                address: locationAddress.trim() || null,
-                is_active: true
-            });
-            useToastStore.getState().success('Location added successfully');
+            if (editingLocation) {
+                await updateClientLocation(editingLocation.id, {
+                    name: locationName.trim(),
+                    address: locationAddress.trim() || null
+                });
+                useToastStore.getState().success('Location updated successfully');
+            } else {
+                await createClientLocation({
+                    customer: customerId,
+                    name: locationName.trim(),
+                    address: locationAddress.trim() || null,
+                    is_active: true
+                });
+                useToastStore.getState().success('Location added successfully');
+            }
             setIsLocationModalOpen(false);
+            setEditingLocation(null);
             loadData();
         } catch (error) {
-            useToastStore.getState().error('Failed to add location');
+            useToastStore.getState().error(editingLocation ? 'Failed to update location' : 'Failed to add location');
         } finally {
             setIsSubmittingLocation(false);
         }
@@ -146,7 +198,32 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     const locColumns: Column<ClientLocation>[] = [
         { key: 'name', header: 'Location Name', render: (loc) => <strong>{loc.name}</strong> },
         { key: 'address', header: 'Address', render: (loc) => loc.address || <span style={{color: 'var(--color-text-muted)'}}>No address</span> },
-        { key: 'is_active', header: 'Status', render: (loc) => loc.is_active ? <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 600 }}>Active</span> : <span style={{ color: 'var(--color-text-muted)' }}>Inactive</span> }
+        { key: 'is_active', header: 'Status', render: (loc) => loc.is_active ? <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 600 }}>Active</span> : <span style={{ color: 'var(--color-text-muted)' }}>Inactive</span> },
+        {
+            key: 'actions',
+            header: 'Actions',
+            render: (loc) => (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        title="Edit Location"
+                        onClick={() => handleOpenEditLocation(loc)}
+                    >
+                        <i className='bx bx-edit'></i> Edit
+                    </Button>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        title="Delete Location"
+                        style={{ color: 'var(--color-danger, #ef4444)' }}
+                        onClick={() => handleDeleteLocation(loc.id, loc.name)}
+                    >
+                        <i className='bx bx-trash'></i>
+                    </Button>
+                </div>
+            )
+        }
     ];
 
     const propColumns: Column<SecurityProposal>[] = [
@@ -157,9 +234,20 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
             key: 'actions', 
             header: 'Actions', 
             render: (p) => (
-                <Button variant="ghost" onClick={() => onOpenProposal(p.id)}>
-                    Open
-                </Button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <Button variant="ghost" size="sm" onClick={() => onOpenProposal(p.id)}>
+                        Open
+                    </Button>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        title="Delete Proposal"
+                        style={{ color: 'var(--color-danger, #ef4444)' }}
+                        onClick={() => handleDeleteProposal(p.id, p.proposal_number)}
+                    >
+                        <i className='bx bx-trash'></i>
+                    </Button>
+                </div>
             )
         }
     ];
@@ -332,14 +420,14 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                 contact={editingContact}
             />
 
-            {/* Clean Add Location Modal */}
+            {/* Clean Add / Edit Location Modal */}
             <Modal
                 isOpen={isLocationModalOpen}
-                onClose={() => setIsLocationModalOpen(false)}
-                title="Add Client Location / Site"
+                onClose={() => { setIsLocationModalOpen(false); setEditingLocation(null); }}
+                title={editingLocation ? "Edit Client Location / Site" : "Add Client Location / Site"}
                 footer={
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                        <Button variant="ghost" onClick={() => setIsLocationModalOpen(false)}>
+                        <Button variant="ghost" onClick={() => { setIsLocationModalOpen(false); setEditingLocation(null); }}>
                             Cancel
                         </Button>
                         <Button 
@@ -347,7 +435,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                             disabled={isSubmittingLocation || !locationName.trim()}
                             onClick={handleSaveLocation}
                         >
-                            {isSubmittingLocation ? 'Saving...' : 'Save Location'}
+                            {isSubmittingLocation ? 'Saving...' : editingLocation ? 'Update Location' : 'Save Location'}
                         </Button>
                     </div>
                 }

@@ -5,7 +5,7 @@ import type { Column } from '../../../../components/tables/DataTable';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { ErrorState } from '../../../../components/ui/ErrorState';
-import { getSecurityProposals } from '../api';
+import { getSecurityProposals, deleteSecurityProposal } from '../api';
 import type { SecurityProposal } from '../api';
 
 interface Props {
@@ -36,6 +36,18 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
         }
     }, [page, search]);
 
+    const handleDelete = async (p: SecurityProposal) => {
+        if (!window.confirm(`Are you sure you want to delete proposal "${p.proposal_number}"? This action cannot be undone.`)) {
+            return;
+        }
+        try {
+            await deleteSecurityProposal(p.id);
+            loadData();
+        } catch (err: any) {
+            alert(err.message || 'Failed to delete proposal');
+        }
+    };
+
     useEffect(() => {
         loadData();
     }, [loadData]);
@@ -65,9 +77,14 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
             key: 'actions',
             header: 'Actions',
             render: (p) => (
-                <Button variant="ghost" onClick={() => onOpenProposal(p.id)}>
-                    Open
-                </Button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <Button variant="ghost" onClick={() => onOpenProposal(p.id)}>
+                        Open
+                    </Button>
+                    <Button variant="danger" onClick={() => handleDelete(p)}>
+                        Delete
+                    </Button>
+                </div>
             )
         }
     ];
