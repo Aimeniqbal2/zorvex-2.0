@@ -75,6 +75,7 @@ export const FastCostingGridTab: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [search, setSearch] = useState('');
+    const [showSummary, setShowSummary] = useState(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
 
@@ -301,121 +302,123 @@ export const FastCostingGridTab: React.FC = () => {
     }, [rows, search]);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', flex: 1, minHeight: 0 }}>
             {/* Costing Summary KPI Cards Bar */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: '14px'
-            }}>
+            {showSummary && (
                 <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: '12px'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Clients & Locations
+                    <div style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            Clients & Locations
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-text)', marginTop: '2px' }}>
+                            {summary.totalClients} <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-muted)' }}>({summary.totalLocations} Sites)</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                            Active Client Portfolio
+                        </div>
                     </div>
-                    <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--color-text)', marginTop: '4px' }}>
-                        {summary.totalClients} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-muted)' }}>({summary.totalLocations} Sites)</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Active Client Portfolio
-                    </div>
-                </div>
 
-                <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
-                }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Total Force
+                    <div style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            Total Force
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '2px' }}>
+                            {summary.totalGuards} <span style={{ fontSize: '12px', fontWeight: 600 }}>Guards</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                            Total Deployed Strength
+                        </div>
                     </div>
-                    <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '4px' }}>
-                        {summary.totalGuards} <span style={{ fontSize: '13px', fontWeight: 600 }}>Guards</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Total Deployed Strength
-                    </div>
-                </div>
 
-                <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
-                }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Total Monthly Sale
+                    <div style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            Total Monthly Sale
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: '#3b82f6', marginTop: '2px' }}>
+                            PKR {summary.totalSale.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                            Monthly Client Revenue
+                        </div>
                     </div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#3b82f6', marginTop: '4px' }}>
-                        PKR {summary.totalSale.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Monthly Client Revenue
-                    </div>
-                </div>
 
-                <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
-                }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Direct Guard Salary
+                    <div style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            Direct Guard Salary
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>
+                            PKR {summary.totalSalary.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                            Monthly Guard Payroll
+                        </div>
                     </div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
-                        PKR {summary.totalSalary.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Monthly Guard Payroll
-                    </div>
-                </div>
 
-                <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
-                }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Gross Margin
+                    <div style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            Gross Margin
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: summary.totalDifference >= 0 ? '#10b981' : '#ef4444', marginTop: '2px' }}>
+                            PKR {summary.totalDifference.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                            Sale - Salary - WHT - SESSI
+                        </div>
                     </div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: summary.totalDifference >= 0 ? '#10b981' : '#ef4444', marginTop: '4px' }}>
-                        PKR {summary.totalDifference.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Sale - Salary - WHT - SESSI
-                    </div>
-                </div>
 
-                <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
-                }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                        Net Profit
-                    </div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: summary.totalProfit >= 0 ? '#10b981' : '#ef4444', marginTop: '4px' }}>
-                        PKR {summary.totalProfit.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        After Operations Overhead
+                    <div style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            Net Profit
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: summary.totalProfit >= 0 ? '#10b981' : '#ef4444', marginTop: '2px' }}>
+                            PKR {summary.totalProfit.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                            After Operations Overhead
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* Action Toolbar */}
             <div style={{
@@ -460,6 +463,16 @@ export const FastCostingGridTab: React.FC = () => {
                     >
                         <i className={`bx bx-refresh ${isLoading ? 'bx-spin' : ''}`} style={{ fontSize: '18px' }}></i> Refresh
                     </Button>
+
+                    <Button 
+                        variant="ghost" 
+                        onClick={() => setShowSummary(!showSummary)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        title={showSummary ? 'Collapse summary cards to expand sheet area' : 'Show summary cards'}
+                    >
+                        <i className={`bx ${showSummary ? 'bx-chevron-up' : 'bx-chevron-down'}`} style={{ fontSize: '18px' }}></i> 
+                        {showSummary ? 'Hide Summary' : 'Show Summary'}
+                    </Button>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -501,24 +514,25 @@ export const FastCostingGridTab: React.FC = () => {
             <div 
                 ref={tableContainerRef}
                 style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: 'auto',
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
                     borderRadius: '12px',
-                    overflow: 'auto',
-                    maxHeight: 'calc(100vh - 220px)',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
                     WebkitOverflowScrolling: 'touch',
                     position: 'relative'
                 }}
             >
                 <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontSize: '13px', minWidth: '3450px' }}>
-                    <thead>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 30 }}>
                         {/* Level 1 Group Header Row */}
-                        <tr>
+                        <tr style={{ background: 'var(--color-surface, #ffffff)' }}>
                             <th 
                                 colSpan={3} 
                                 style={{ 
-                                    padding: '12px 16px', 
+                                    padding: '10px 16px', 
                                     borderRight: '2px solid var(--color-border)', 
                                     borderBottom: '1px solid var(--color-border)',
                                     fontWeight: 700, 
@@ -527,7 +541,7 @@ export const FastCostingGridTab: React.FC = () => {
                                     position: 'sticky',
                                     left: 0,
                                     top: 0,
-                                    zIndex: 25,
+                                    zIndex: 45,
                                     background: 'var(--color-surface, #ffffff)',
                                     boxShadow: '4px 0 8px rgba(0,0,0,0.06)'
                                 }}
@@ -539,7 +553,7 @@ export const FastCostingGridTab: React.FC = () => {
                                     key={col.key} 
                                     colSpan={3} 
                                     style={{ 
-                                        padding: '12px 10px', 
+                                        padding: '10px 10px', 
                                         textAlign: 'center', 
                                         borderRight: '2px solid var(--color-border)',
                                         borderBottom: '1px solid var(--color-border)',
@@ -550,47 +564,47 @@ export const FastCostingGridTab: React.FC = () => {
                                         minWidth: '270px',
                                         position: 'sticky',
                                         top: 0,
-                                        zIndex: 20
+                                        zIndex: 35
                                     }}
                                 >
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={12} style={{ padding: '12px 16px', textAlign: 'center', background: '#fefce8', borderBottom: '1px solid var(--color-border)', fontWeight: 700, minWidth: '1260px', position: 'sticky', top: 0, zIndex: 20 }}>
+                            <th colSpan={12} style={{ padding: '10px 16px', textAlign: 'center', background: '#fefce8', borderBottom: '1px solid var(--color-border)', fontWeight: 700, minWidth: '1260px', position: 'sticky', top: 0, zIndex: 35 }}>
                                 Live Costing, Tax & Margins
                             </th>
-                            <th style={{ padding: '12px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '1px solid var(--color-border)' }}></th>
+                            <th style={{ padding: '10px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '1px solid var(--color-border)' }}></th>
                         </tr>
 
                         {/* Level 2 Sub-Column Header Row */}
-                        <tr>
-                            <th style={{ padding: '10px 8px', width: '45px', minWidth: '45px', textAlign: 'center', position: 'sticky', left: 0, top: '41px', zIndex: 25, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>#</th>
-                            <th style={{ padding: '10px 10px', width: '235px', minWidth: '235px', position: 'sticky', left: '45px', top: '41px', zIndex: 25, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Client / Company Name *</th>
-                            <th style={{ padding: '10px 10px', width: '200px', minWidth: '200px', borderRight: '2px solid var(--color-border)', position: 'sticky', left: '280px', top: '41px', zIndex: 25, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxShadow: '4px 0 8px rgba(0,0,0,0.06)' }}>Location / Site *</th>
+                        <tr style={{ background: 'var(--color-surface, #ffffff)' }}>
+                            <th style={{ padding: '9px 8px', width: '45px', minWidth: '45px', textAlign: 'center', position: 'sticky', left: 0, top: '39px', zIndex: 40, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>#</th>
+                            <th style={{ padding: '9px 10px', width: '235px', minWidth: '235px', position: 'sticky', left: '45px', top: '39px', zIndex: 40, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Client / Company Name *</th>
+                            <th style={{ padding: '9px 10px', width: '200px', minWidth: '200px', borderRight: '2px solid var(--color-border)', position: 'sticky', left: '280px', top: '39px', zIndex: 40, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxShadow: '4px 0 8px rgba(0,0,0,0.06)' }}>Location / Site *</th>
 
                             {/* Under each role: Rate, Sal, Qty with ample width */}
                             {ROLE_COLUMNS.map(col => (
                                 <React.Fragment key={`${col.key}-sub`}>
-                                    <th style={{ padding: '10px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Rate (PKR)</th>
-                                    <th style={{ padding: '10px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Salary (PKR)</th>
-                                    <th style={{ padding: '10px 6px', width: '60px', minWidth: '60px', textAlign: 'center', borderRight: '2px solid var(--color-border)', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Qty</th>
+                                    <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Rate (PKR)</th>
+                                    <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Salary (PKR)</th>
+                                    <th style={{ padding: '9px 6px', width: '60px', minWidth: '60px', textAlign: 'center', borderRight: '2px solid var(--color-border)', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Qty</th>
                                 </React.Fragment>
                             ))}
 
                             {/* Summary Columns with generous space */}
-                            <th style={{ padding: '10px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#3b82f6', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Monthly Sale</th>
-                            <th style={{ padding: '10px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Direct Salary</th>
-                            <th style={{ padding: '10px 6px', width: '65px', minWidth: '65px', textAlign: 'center', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Strength</th>
-                            <th style={{ padding: '10px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Overhead Exp</th>
-                            <th style={{ padding: '10px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Service Charges</th>
-                            <th style={{ padding: '10px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Sales Tax</th>
-                            <th style={{ padding: '10px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>WHT Tax</th>
-                            <th style={{ padding: '10px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>SESSI</th>
-                            <th style={{ padding: '10px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>EOBI</th>
-                            <th style={{ padding: '10px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Gross Margin</th>
-                            <th style={{ padding: '10px 8px', width: '100px', minWidth: '100px', textAlign: 'right', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Diff / Head</th>
-                            <th style={{ padding: '10px 10px', width: '110px', minWidth: '110px', textAlign: 'right', fontWeight: 700, position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Net Profit</th>
-                            <th style={{ padding: '10px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '41px', zIndex: 20, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}></th>
+                            <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#3b82f6', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Monthly Sale</th>
+                            <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Direct Salary</th>
+                            <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Strength</th>
+                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Overhead Exp</th>
+                            <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Service Charges</th>
+                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Sales Tax</th>
+                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>WHT Tax</th>
+                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>SESSI</th>
+                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>EOBI</th>
+                            <th style={{ padding: '9px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Gross Margin</th>
+                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Diff / Head</th>
+                            <th style={{ padding: '9px 10px', width: '110px', minWidth: '110px', textAlign: 'right', fontWeight: 700, position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}>Net Profit</th>
+                            <th style={{ padding: '9px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '39px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)' }}></th>
                         </tr>
                     </thead>
                     <tbody>

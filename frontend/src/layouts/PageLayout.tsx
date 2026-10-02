@@ -1,7 +1,7 @@
 import React from 'react';
 
-export const PageContainer: React.FC<{ children: React.ReactNode, className?: string }> = ({ children, className = '' }) => (
-    <div className={`page-container ${className}`} style={{ padding: 'var(--spacing-5)', height: '100%', overflowY: 'auto' }}>
+export const PageContainer: React.FC<{ children: React.ReactNode, className?: string, style?: React.CSSProperties }> = ({ children, className = '', style }) => (
+    <div className={`page-container ${className}`} style={{ padding: 'var(--spacing-5)', height: '100%', overflowY: 'auto', ...style }}>
         {children}
     </div>
 );

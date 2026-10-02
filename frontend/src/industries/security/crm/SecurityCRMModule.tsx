@@ -5,13 +5,14 @@ import type { Column } from '../../../components/tables/DataTable';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
-import { getEntities } from '../../../modules/crm/api';
+import { getEntities, deleteEntity } from '../../../modules/crm/api';
 import type { CRMEntity, PaginatedResponse } from '../../../modules/crm/types';
 import { EntityModal } from '../../../modules/crm/components/EntityModal';
 import { SecurityCustomerDetail } from './components/SecurityCustomerDetail';
 import { SecurityProposalsList } from './components/SecurityProposalsList';
 import { SecurityProposalDetail } from './components/SecurityProposalDetail';
 import { FastCostingGridTab } from './components/FastCostingGridTab';
+import { useToastStore } from '../../../stores/toastStore';
 import '../../../modules/crm/styles/crm.css';
 
 export const SecurityCRMModule: React.FC = () => {
@@ -50,6 +51,19 @@ export const SecurityCRMModule: React.FC = () => {
             setIsLoading(false);
         }
     }, [page, search, refreshTrigger]);
+
+    const handleDeleteCustomer = async (entity: CRMEntity) => {
+        if (!window.confirm(`Are you sure you want to delete client "${entity.name}"? This action will permanently remove the client and all associated proposals and records.`)) {
+            return;
+        }
+        try {
+            await deleteEntity(entity.id);
+            useToastStore.getState().success(`Client "${entity.name}" deleted successfully.`);
+            setRefreshTrigger(prev => prev + 1);
+        } catch (err: any) {
+            useToastStore.getState().error(err?.response?.data?.error || err?.response?.data?.detail || err?.message || 'Failed to delete client.');
+        }
+    };
 
     useEffect(() => {
         if (activeTab === 'customers' && !selectedCustomerId && !selectedProposalId) {
@@ -95,9 +109,25 @@ export const SecurityCRMModule: React.FC = () => {
             key: 'actions',
             header: 'Actions',
             render: (entity) => (
-                <div style={{ display: 'flex', gap: '4px' }}>
-                    <Button variant="ghost" onClick={() => setSelectedCustomerId(entity.id)} aria-label="Open">
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setSelectedCustomerId(entity.id)} 
+                        aria-label="Open"
+                        title="Open Client Details"
+                    >
                         <i className='bx bx-folder-open'></i> Open
+                    </Button>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        style={{ color: 'var(--color-danger, #ef4444)' }}
+                        onClick={() => handleDeleteCustomer(entity)} 
+                        aria-label="Delete"
+                        title="Delete Client"
+                    >
+                        <i className='bx bx-trash'></i> Delete
                     </Button>
                 </div>
             )
@@ -146,7 +176,7 @@ export const SecurityCRMModule: React.FC = () => {
     }
 
     return (
-        <PageContainer>
+        <PageContainer style={activeTab === 'costing_grid' ? { height: '100%', maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '16px 20px 8px' } : undefined}>
             <PageHeader 
                 title="Clients & Contracts" 
                 subtitle="Manage security clients, locations, and proposals"
