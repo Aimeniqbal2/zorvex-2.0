@@ -176,7 +176,7 @@ export const SecurityCRMModule: React.FC = () => {
     }
 
     return (
-        <PageContainer style={activeTab === 'costing_grid' ? { height: '100%', maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '16px 20px 8px' } : undefined}>
+        <PageContainer>
             <PageHeader 
                 title="Clients & Contracts" 
                 subtitle="Manage security clients, locations, and proposals"
