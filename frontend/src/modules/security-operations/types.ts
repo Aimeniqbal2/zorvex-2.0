@@ -73,6 +73,8 @@ export interface SecurityPost {
     deployed_count?: number;
     vacant_count?: number;
     overstaffed_count?: number;
+    daily_pay_rate?: number | string | null;
+    monthly_pay_rate?: number | string | null;
     is_active: boolean;
     notes?: string;
     created_at?: string;
@@ -156,9 +158,25 @@ export interface Deployment {
     relieved_by_name?: string | null;
     relieved_date?: string | null;
     relief_reason?: string;
+    location_monthly_salary?: number | string | null;
     notes: string;
     created_at: string;
     updated_at: string;
+}
+
+export interface UndeployedGuard {
+    id: string;
+    full_name: string;
+    employee_code: string;
+    cnic_number?: string;
+    designation_id?: string | null;
+    designation_name: string;
+    background_type: string;
+    background_type_display: string;
+    gender: string;
+    phone_number?: string;
+    hire_date?: string | null;
+    status: string;
 }
 
 // Staffing summary from /deployments/staffing-summary/
@@ -872,6 +890,9 @@ export interface AttendanceTotals {
     jump_missing: number;
     finalized: number;
     unfinalized: number;
+    days_in_month?: number;
+    total_payroll_earned_today?: number;
+    total_payroll_month_earned?: number;
 }
 
 export interface ReplacementCoverageInfo {
@@ -904,6 +925,7 @@ export interface DailyAttendanceRow {
     // DIRECT staff duty & roster links
     has_planned_duty?: boolean;
     roster_id: string | null;
+    deployment_id?: string | null;
     site_id: string | null;
     site_name: string | null;
     post_id: string | null;
@@ -916,10 +938,20 @@ export interface DailyAttendanceRow {
     has_replacement_coverage?: boolean;
     replacement_guard_name?: string | null;
     replacement_coverage?: ReplacementCoverageInfo;
+    // Location-wise dynamic salary fields
+    location_monthly_salary?: number;
+    days_in_month?: number;
+    daily_salary_rate?: number;
+    today_earned_salary?: number;
+    month_present_days?: number;
+    month_absent_days?: number;
+    month_earned_salary?: number;
+    month_cut_salary?: number;
 }
 
 export interface DailyAttendanceWorkspace {
     date: string;
+    days_in_month?: number;
     classification?: string;
     site_id?: string | null;
     totals: AttendanceTotals;

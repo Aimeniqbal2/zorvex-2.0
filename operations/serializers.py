@@ -118,6 +118,7 @@ class SecurityPostSerializer(BaseModelValidatorMixin, serializers.ModelSerialize
             'id', 'site', 'site_name', 'service_contract', 'service_contract_code',
             'post_name', 'post_code', 'required_designation', 'required_designation_name',
             'required_headcount', 'deployed_count', 'vacant_count', 'overstaffed_count',
+            'daily_pay_rate', 'monthly_pay_rate',
             'is_active', 'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ('id', 'company', 'created_at', 'updated_at', 'is_deleted')

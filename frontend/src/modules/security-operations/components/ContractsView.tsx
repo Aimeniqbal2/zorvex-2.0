@@ -6,7 +6,6 @@ import type { Column } from '../../../components/tables/DataTable';
 import { Badge } from '../../../components/ui/Badge';
 import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
-import { Button } from '../../../components/ui/Button';
 import { ContractModal } from './ContractModal';
 import { useToastStore } from '../../../stores/toastStore';
 
@@ -112,9 +111,10 @@ export const ContractsView: React.FC = () => {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     style={{ width: '300px' }}
                 />
-                <Button variant="primary" onClick={() => { setSelectedContract(null); setIsModalOpen(true); }}>
-                    New Contract
-                </Button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
+                    <i className="bx bx-info-circle" style={{ color: 'var(--color-primary)' }}></i>
+                    <span>Contracts originate automatically from CRM Client Proposals</span>
+                </div>
             </div>
 
             <div className="view-table-container">

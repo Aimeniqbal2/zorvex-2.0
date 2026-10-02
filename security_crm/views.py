@@ -65,6 +65,35 @@ class ClientLocationViewSet(TenantModelViewSet):
                 qs = qs.filter(is_active=False)
         return qs
 
+    def perform_create(self, serializer):
+        loc = serializer.save()
+        try:
+            from operations.models import OperationalSite
+            OperationalSite.objects.get_or_create(
+                company=loc.company,
+                crm_entity=loc.customer,
+                name=loc.name,
+                defaults={
+                    'address': getattr(loc.crm_address, 'street_address', '') if loc.crm_address else (loc.notes or loc.name),
+                    'is_active': loc.is_active
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Could not auto-create OperationalSite for location {loc.name}: {e}")
+
+    def perform_update(self, serializer):
+        loc = serializer.save()
+        try:
+            from operations.models import OperationalSite
+            OperationalSite.objects.filter(
+                company=loc.company,
+                crm_entity=loc.customer,
+                name=loc.name
+            ).update(is_active=loc.is_active)
+        except Exception as e:
+            logger.warning(f"Could not auto-update OperationalSite for location {loc.name}: {e}")
+
+
 
 class SecurityProposalViewSet(TenantModelViewSet):
     queryset = SecurityProposal.objects.all()
@@ -1483,6 +1512,7 @@ class CostingGridBatchSyncView(APIView):
             ("cpo_civ", "Close Protection Officer (Civil)", "CPO_CIV", "PISTOL"),
         ]
 
+        proposals_to_sync = set()
         try:
             with transaction.atomic():
                 for row in rows:
@@ -1662,12 +1692,20 @@ class CostingGridBatchSyncView(APIView):
                             if target_line:
                                 target_line.delete()
 
+                    proposals_to_sync.add(proposal)
                     synced_count += 1
+
+                for prop in proposals_to_sync:
+                    try:
+                        from security_crm.services.workflow import SecurityProposalWorkflow
+                        SecurityProposalWorkflow.sync_proposal_and_locations_to_operations(prop)
+                    except Exception as sync_err:
+                        logger.warning(f"Error syncing proposal {prop.id} to operations: {sync_err}")
 
             return Response({
                 "success": True,
                 "synced_count": synced_count,
-                "message": f"Successfully synced {synced_count} client location costing sheets into CRM!"
+                "message": f"Successfully synced {synced_count} client location costing sheets into CRM and Operations!"
             }, status=status.HTTP_200_OK)
 
         except Exception as e:

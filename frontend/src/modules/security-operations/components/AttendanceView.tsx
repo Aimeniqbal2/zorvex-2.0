@@ -426,6 +426,56 @@ export const AttendanceView: React.FC = () => {
                 </div>
             </div>
 
+            {/* Location Dynamic Payroll & Days in Month Strip */}
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '16px',
+                padding: '14px 18px',
+                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%)',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
+                borderRadius: '8px',
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div style={{
+                        padding: '6px 14px',
+                        borderRadius: '6px',
+                        backgroundColor: 'var(--color-surface, #1e293b)',
+                        border: '1px solid var(--color-border, #334155)',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: 'var(--color-primary, #3b82f6)'
+                    }}>
+                        📅 Current Month Divisor: <span style={{ color: '#22c55e', fontSize: '15px' }}>{workspace?.days_in_month || 31} Days</span>
+                    </div>
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                        Dynamic Rate Rule: <code>Location Base Salary ÷ {workspace?.days_in_month || 31} Days</code> = Daily Attendance Pay (+ if Present, 0 / Deducted if Absent).
+                    </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
+                    <div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
+                            Today's Location Earned Pay
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#22c55e' }}>
+                            +PKR {Number(workspace?.totals?.total_payroll_earned_today || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                    </div>
+                    <div style={{ width: '1px', height: '32px', backgroundColor: 'var(--color-border, #334155)' }} />
+                    <div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
+                            Month-to-Date Earned Payroll
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text, #f8fafc)' }}>
+                            PKR {Number(workspace?.totals?.total_payroll_month_earned || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Uncovered Absences Warning Banner */}
             {uncoveredCount > 0 && (
                 <div style={{
@@ -639,9 +689,11 @@ export const AttendanceView: React.FC = () => {
                                 </th>
                                 <th style={{ padding: '12px 14px', fontWeight: 600 }}>Employee</th>
                                 <th style={{ padding: '12px 14px', fontWeight: 600 }}>Site & Post</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Shift & Planned Duty</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Location Base & Daily Rate</th>
                                 <th style={{ padding: '12px 14px', fontWeight: 600 }}>Today's Status</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Replacement Coverage</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Today's Earned Pay</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Month-to-Date Pay</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Shift / Planned Duty</th>
                                 <th style={{ padding: '12px 14px', fontWeight: 600 }}>Absence Streak / JUMP</th>
                                 <th style={{ padding: '12px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
                             </tr>
@@ -703,10 +755,10 @@ export const AttendanceView: React.FC = () => {
                                         <td style={{ padding: '12px 14px' }}>
                                             {row.site_name ? (
                                                 <div>
-                                                    <div style={{ fontWeight: 500, color: 'var(--color-text, #f8fafc)' }}>
+                                                    <div style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)' }}>
                                                         {row.site_name}
                                                     </div>
-                                                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                                                    <div style={{ fontSize: '11px', color: 'var(--color-primary, #3b82f6)' }}>
                                                         {row.post_name || 'General Deployment'}
                                                     </div>
                                                 </div>
@@ -717,23 +769,21 @@ export const AttendanceView: React.FC = () => {
                                             )}
                                         </td>
 
-                                        {/* Shift & Planned Duty */}
+                                        {/* Location Base & Daily Rate */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            {row.has_planned_duty || row.shift_name ? (
+                                            {row.location_monthly_salary ? (
                                                 <div>
-                                                    <div style={{ fontWeight: 500, color: 'var(--color-text, #f8fafc)' }}>
-                                                        {row.shift_name}
+                                                    <div style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)' }}>
+                                                        PKR {Number(row.location_monthly_salary).toLocaleString()}
+                                                        <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--color-text-muted, #94a3b8)' }}>/mo</span>
                                                     </div>
-                                                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)' }}>
-                                                        {row.planned_duty || 'Rostered Duty'}
-                                                        {row.is_replacement_duty && (
-                                                            <span style={{ color: '#f59e0b', marginLeft: '4px' }}>(Relief)</span>
-                                                        )}
+                                                    <div style={{ fontSize: '11px', color: 'var(--color-primary, #3b82f6)', fontWeight: 500 }}>
+                                                        PKR {Number(row.daily_salary_rate || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/day
                                                     </div>
                                                 </div>
                                             ) : (
                                                 <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
-                                                    {isDirect ? 'No Shift Rostered' : 'Standard Office'}
+                                                    Base not set
                                                 </span>
                                             )}
                                         </td>
@@ -777,49 +827,97 @@ export const AttendanceView: React.FC = () => {
                                                     <option value="HALF_DAY">HALF DAY</option>
                                                 </select>
                                                 <div style={{ fontSize: '10px', color: 'var(--color-text-muted, #64748b)' }}>
-                                                    {row.is_materialized ? '● Finalized' : '○ Persistent Default'}
+                                                    {row.is_materialized ? '● Finalized' : '○ Default State'}
                                                 </div>
                                             </div>
                                         </td>
 
-                                        {/* Replacement Coverage (DIRECT only) */}
+                                        {/* Today's Earned Pay */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            {isDirect ? (
-                                                isAbsent ? (
-                                                    hasReplacement ? (
+                                            {row.effective_status === 'PRESENT' || row.effective_status === 'PAID_LEAVE' || row.effective_status === 'HOLIDAY' ? (
+                                                <div>
+                                                    <div style={{ fontWeight: 700, color: '#22c55e', fontSize: '13px' }}>
+                                                        +PKR {Number(row.today_earned_salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </div>
+                                                    <div style={{ fontSize: '10px', color: '#22c55e' }}>Earned today (+)</div>
+                                                </div>
+                                            ) : row.effective_status === 'HALF_DAY' ? (
+                                                <div>
+                                                    <div style={{ fontWeight: 700, color: '#14b8a6', fontSize: '13px' }}>
+                                                        +PKR {Number(row.today_earned_salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </div>
+                                                    <div style={{ fontSize: '10px', color: '#14b8a6' }}>Half-day pay (50%)</div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <div style={{ fontWeight: 600, color: '#ef4444', fontSize: '13px' }}>
+                                                        PKR 0.00
+                                                    </div>
+                                                    <div style={{ fontSize: '10px', color: '#ef4444' }}>Deducted / Cut (-)</div>
+                                                </div>
+                                            )}
+                                        </td>
+
+                                        {/* Month-to-Date Pay */}
+                                        <td style={{ padding: '12px 14px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                <div style={{ fontWeight: 700, color: 'var(--color-text, #f8fafc)', fontSize: '13px' }}>
+                                                    PKR {Number(row.month_earned_salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                                <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', marginTop: '2px' }}>
+                                                    <span style={{ color: '#22c55e', fontWeight: 600 }}>{row.month_present_days || 0}d Present</span>
+                                                    {Number(row.month_absent_days || 0) > 0 && (
+                                                        <span style={{ color: '#ef4444', marginLeft: '6px' }}>({row.month_absent_days}d cut)</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </td>
+
+                                        {/* Shift & Planned Duty */}
+                                        <td style={{ padding: '12px 14px' }}>
+                                            {row.has_planned_duty || row.shift_name ? (
+                                                <div>
+                                                    <div style={{ fontWeight: 500, color: 'var(--color-text, #f8fafc)' }}>
+                                                        {row.shift_name}
+                                                    </div>
+                                                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                                                        {row.planned_duty || 'Rostered Duty'}
+                                                        {row.is_replacement_duty && (
+                                                            <span style={{ color: '#f59e0b', marginLeft: '4px' }}>(Relief)</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
+                                                    {isDirect ? 'Standard Roster' : 'Standard Office'}
+                                                </span>
+                                            )}
+                                            {isDirect && isAbsent && (
+                                                <div style={{ marginTop: '4px' }}>
+                                                    {hasReplacement ? (
                                                         <span style={{
-                                                            fontSize: '11px',
+                                                            fontSize: '10px',
                                                             color: '#22c55e',
                                                             background: 'rgba(34, 197, 94, 0.1)',
-                                                            padding: '3px 8px',
-                                                            borderRadius: '4px',
-                                                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                                                            padding: '2px 6px',
+                                                            borderRadius: '3px',
                                                             fontWeight: 600
                                                         }}>
-                                                            ✓ Covered by {reliefName || 'Relief'}
+                                                            ✓ Covered: {reliefName || 'Relief'}
                                                         </span>
                                                     ) : (
                                                         <span style={{
-                                                            fontSize: '11px',
+                                                            fontSize: '10px',
                                                             color: '#ef4444',
                                                             background: 'rgba(239, 68, 68, 0.1)',
-                                                            padding: '3px 8px',
-                                                            borderRadius: '4px',
-                                                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                            padding: '2px 6px',
+                                                            borderRadius: '3px',
                                                             fontWeight: 600
                                                         }}>
                                                             ⚠️ Uncovered
                                                         </span>
-                                                    )
-                                                ) : (
-                                                    <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
-                                                        —
-                                                    </span>
-                                                )
-                                            ) : (
-                                                <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
-                                                    N/A (Indirect)
-                                                </span>
+                                                    )}
+                                                </div>
                                             )}
                                         </td>
 

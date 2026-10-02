@@ -6,7 +6,6 @@ import type { Column } from '../../../components/tables/DataTable';
 import { Badge } from '../../../components/ui/Badge';
 import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
-import { Button } from '../../../components/ui/Button';
 import { SiteModal } from './SiteModal';
 import { SiteManpowerModal } from './SiteManpowerModal';
 
@@ -108,9 +107,10 @@ export const SitesView: React.FC = () => {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     style={{ width: '300px' }}
                 />
-                <Button variant="primary" onClick={() => { setSelectedSite(null); setIsModalOpen(true); }}>
-                    New Site
-                </Button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
+                    <i className="bx bx-info-circle" style={{ color: 'var(--color-primary)' }}></i>
+                    <span>Sites originate automatically from CRM Client Locations</span>
+                </div>
             </div>
 
             <div className="view-table-container">
@@ -119,7 +119,7 @@ export const SitesView: React.FC = () => {
                     columns={columns}
                     isLoading={isLoading}
                     keyExtractor={(row) => row.id}
-                    emptyMessage={searchQuery ? "No sites match your search." : "No operational sites yet. Create your first site to begin managing deployments."}
+                    emptyMessage={searchQuery ? "No sites match your search." : "No operational sites yet. Operational sites are created automatically from CRM client locations."}
                     pagination={data ? {
                         page: page,
                         pageSize: 10,

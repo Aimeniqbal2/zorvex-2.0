@@ -518,6 +518,47 @@ def get_daily_attendance_workspace(
         ).select_related('site', 'post', 'shift', 'replacement_for__employee')
     }
 
+    # 3b. Pre-fetch active deployments for workforce
+    from operations.models import Deployment
+    from decimal import Decimal
+    import calendar
+    from django.db.models import Count
+
+    deployments = {
+        str(dep.employee_id): dep
+        for dep in Deployment.objects.filter(
+            company_id=company_id,
+            status='ACTIVE',
+            is_deleted=False
+        ).select_related('site', 'post', 'service_contract')
+    }
+
+    # Month bounds for attendance accumulation
+    days_in_month = calendar.monthrange(d.year, d.month)[1]
+    m_start = datetime.date(d.year, d.month, 1)
+    m_end = datetime.date(d.year, d.month, days_in_month)
+
+    # Pre-fetch monthly attendance counts for present and absent
+    month_present_counts = {}
+    month_absent_counts = {}
+    month_att_rows = WorkforceAttendance.objects.filter(
+        company_id=company_id,
+        date__gte=m_start,
+        date__lte=m_end,
+        is_deleted=False
+    ).values('employee_id', 'status').annotate(cnt=Count('id'))
+
+    for item in month_att_rows:
+        emp_key = str(item['employee_id'])
+        s_val = item['status']
+        c_val = item['cnt']
+        if s_val in [AttendanceStatus.PRESENT, AttendanceStatus.PAID_LEAVE]:
+            month_present_counts[emp_key] = month_present_counts.get(emp_key, Decimal('0.00')) + Decimal(str(c_val))
+        elif s_val == AttendanceStatus.HALF_DAY:
+            month_present_counts[emp_key] = month_present_counts.get(emp_key, Decimal('0.00')) + (Decimal(str(c_val)) * Decimal('0.50'))
+        elif s_val in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]:
+            month_absent_counts[emp_key] = month_absent_counts.get(emp_key, Decimal('0.00')) + Decimal(str(c_val))
+
     # 4. Pre-fetch replacements covering duties on target_date
     replacements_by_original = {}
     for rep in DutyReplacement.objects.filter(
@@ -576,17 +617,21 @@ def get_daily_attendance_workspace(
         'jump_active': 0,
         'materialized': 0,
         'unfinalized': 0,
-        'uncovered_absences': 0
+        'uncovered_absences': 0,
+        'days_in_month': days_in_month,
+        'total_payroll_earned_today': 0.0,
+        'total_payroll_month_earned': 0.0
     }
 
     for emp in emp_qs:
         emp_id = str(emp.id)
         att = attendances.get(emp_id)
         roster = rosters.get(emp_id)
+        dep = deployments.get(emp_id)
 
-        # Site filtering applies to rostered site
+        # Site filtering matches rostered site, attended site, or actively deployed site
         if site_id:
-            emp_site_id = str(roster.site_id) if roster else (str(att.site_id) if att and att.site_id else None)
+            emp_site_id = str(roster.site_id) if roster else (str(att.site_id) if att and att.site_id else (str(dep.site_id) if dep else None))
             if emp_site_id != str(site_id):
                 continue
 
@@ -644,6 +689,39 @@ def get_daily_attendance_workspace(
         if eff_status == AttendanceStatus.ABSENT:
             absent_streak, _ = calculate_consecutive_absent_days(emp, d)
 
+        # Location-wise Salary Calculation based on exact days in month
+        loc_monthly_salary = Decimal('0.00')
+        if dep and dep.location_monthly_salary:
+            loc_monthly_salary = dep.location_monthly_salary
+        elif dep and dep.post and dep.post.monthly_pay_rate:
+            loc_monthly_salary = dep.post.monthly_pay_rate
+        elif roster and roster.post and roster.post.monthly_pay_rate:
+            loc_monthly_salary = roster.post.monthly_pay_rate
+        elif getattr(emp, 'basic_salary', None):
+            loc_monthly_salary = emp.basic_salary
+
+        daily_rate = (loc_monthly_salary / Decimal(str(days_in_month))).quantize(Decimal('0.01')) if loc_monthly_salary > Decimal('0.00') else Decimal('0.00')
+
+        if eff_status in [AttendanceStatus.PRESENT, AttendanceStatus.PAID_LEAVE]:
+            today_earned = daily_rate
+        elif eff_status == AttendanceStatus.HALF_DAY:
+            today_earned = (daily_rate / Decimal('2.00')).quantize(Decimal('0.01'))
+        else:
+            today_earned = Decimal('0.00')
+
+        present_days_mtd = month_present_counts.get(emp_id, Decimal('0.00'))
+        if not att and eff_status in [AttendanceStatus.PRESENT, AttendanceStatus.PAID_LEAVE]:
+            present_days_mtd += Decimal('1.00')
+        elif not att and eff_status == AttendanceStatus.HALF_DAY:
+            present_days_mtd += Decimal('0.50')
+
+        absent_days_mtd = month_absent_counts.get(emp_id, Decimal('0.00'))
+        if not att and eff_status in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]:
+            absent_days_mtd += Decimal('1.00')
+
+        month_earned = (daily_rate * present_days_mtd).quantize(Decimal('0.01'))
+        month_cut = (daily_rate * absent_days_mtd).quantize(Decimal('0.01'))
+
         # Update summary counts
         totals['total_workforce'] += 1
         if eff_status == AttendanceStatus.PRESENT:
@@ -671,6 +749,15 @@ def get_daily_attendance_workspace(
         else:
             totals['unfinalized'] += 1
 
+        totals['total_payroll_earned_today'] += float(today_earned)
+        totals['total_payroll_month_earned'] += float(month_earned)
+
+        # Determine effective site and post
+        effective_site_id = str(roster.site_id) if roster else (str(att.site_id) if att and att.site_id else (str(dep.site_id) if dep else None))
+        effective_site_name = roster.site.name if roster else (att.site.name if att and att.site else (dep.site.name if dep and dep.site else None))
+        effective_post_id = str(roster.post_id) if roster and roster.post else (str(att.post_id) if att and att.post else (str(dep.post_id) if dep and dep.post else None))
+        effective_post_name = roster.post.post_name if roster and roster.post else (att.post.post_name if att and att.post else (dep.post.post_name if dep and dep.post else None))
+
         rows.append({
             'employee_id': emp_id,
             'employee_name': emp.full_name,
@@ -687,22 +774,33 @@ def get_daily_attendance_workspace(
             'recorded_by_name': recorded_by_name,
             'finalized_at': finalized_at,
             'consecutive_absent_days': absent_streak,
-            # DIRECT Roster Information
-            'has_planned_duty': bool(roster),
+            # Operational Site & Post
+            'has_planned_duty': bool(roster or dep),
             'roster_id': str(roster.id) if roster else None,
-            'site_id': str(roster.site_id) if roster else (str(att.site_id) if att and att.site_id else None),
-            'site_name': roster.site.name if roster else (att.site.name if att and att.site else None),
-            'post_id': str(roster.post_id) if roster and roster.post else (str(att.post_id) if att and att.post else None),
-            'post_name': roster.post.post_name if roster and roster.post else (att.post.post_name if att and att.post else None),
+            'deployment_id': str(dep.id) if dep else None,
+            'site_id': effective_site_id,
+            'site_name': effective_site_name,
+            'post_id': effective_post_id,
+            'post_name': effective_post_name,
             'shift_id': str(roster.shift_id) if roster else (str(att.shift_id) if att and att.shift else None),
             'shift_name': roster.shift.name if roster else (att.shift.name if att and att.shift else None),
             'is_replacement_duty': roster.is_replacement if roster else False,
             'has_replacement_coverage': has_replacement,
-            'replacement_guard_name': replacement_guard_name
+            'replacement_guard_name': replacement_guard_name,
+            # Location-wise Salary Calculation based on dynamic days in month
+            'location_monthly_salary': float(loc_monthly_salary),
+            'days_in_month': days_in_month,
+            'daily_salary_rate': float(daily_rate),
+            'today_earned_salary': float(today_earned),
+            'month_present_days': float(present_days_mtd),
+            'month_absent_days': float(absent_days_mtd),
+            'month_earned_salary': float(month_earned),
+            'month_cut_salary': float(month_cut),
         })
 
     return {
         'date': str(d),
+        'days_in_month': days_in_month,
         'totals': totals,
         'workforce': rows
     }

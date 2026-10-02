@@ -783,19 +783,38 @@ class SecurityProposalWorkflowService:
             # Already active and linked
             return proposal
 
-        from operations.models import ServiceContract, ServiceContractStatus, OperationalSite
+        cls.sync_proposal_and_locations_to_operations(proposal)
 
-        approved_version = proposal.approved_version
-        if not approved_version:
-            # Fallback to latest frozen or highest version
-            approved_version = proposal.versions.filter(company=proposal.company, is_frozen=True).order_by('-version_number').first()
-            if not approved_version:
-                approved_version = proposal.versions.filter(company=proposal.company).order_by('-version_number').first()
+        # Ensure customer entity_type is CUSTOMER (active client)
+        customer = proposal.customer
+        if customer:
+            if customer.entity_type != 'CUSTOMER':
+                customer.entity_type = 'CUSTOMER'
+                customer.save(update_fields=['entity_type'])
 
-        # 1. Collect all distinct approved ClientLocations from service lines
-        client_locations = []
-        if approved_version:
-            for line in approved_version.service_lines.select_related('location').all():
+        # Transition to ACTIVE
+        if proposal.status != SecurityProposalStatus.ACTIVE:
+            cls.transition_status(proposal, SecurityProposalStatus.ACTIVE, user=user)
+
+        return proposal
+
+    @classmethod
+    def sync_proposal_and_locations_to_operations(cls, proposal):
+        """
+        Synchronizes a CRM proposal, its ClientLocations, and service requirements
+        into Operations (OperationalSites, ServiceContracts, ContractRates, and SecurityPosts).
+        """
+        from operations.models import ServiceContract, ServiceContractStatus, OperationalSite, ContractRate, SecurityPost
+        from hrm.models import Designation
+        from decimal import Decimal
+        from django.utils import timezone
+
+        active_ver = proposal.approved_version or proposal.versions.filter(company=proposal.company).order_by('-version_number').first()
+
+        # 1. Collect all distinct ClientLocations
+        client_locations = list(proposal.customer.security_locations.filter(company=proposal.company, is_active=True, is_deleted=False))
+        if active_ver:
+            for line in active_ver.service_lines.select_related('location').all():
                 if line.location and line.location not in client_locations:
                     client_locations.append(line.location)
 
@@ -817,8 +836,6 @@ class SecurityProposalWorkflowService:
         service_contract = proposal.contract
         if not service_contract:
             contract_code = proposal.contract_reference or f"SC-{proposal.proposal_number}"
-            
-            # Check if matching contract already exists for this company
             existing_contract = ServiceContract.objects.filter(
                 company=proposal.company,
                 contract_code=contract_code,
@@ -830,7 +847,6 @@ class SecurityProposalWorkflowService:
             else:
                 start_date = proposal.contract_start_date or timezone.now().date()
                 end_date = proposal.contract_end_date
-                
                 service_contract = ServiceContract.objects.create(
                     company=proposal.company,
                     crm_entity=proposal.customer,
@@ -841,62 +857,59 @@ class SecurityProposalWorkflowService:
                     notes=f"Created automatically from Security Proposal {proposal.proposal_number}."
                 )
 
-            # Link sites
-            if operational_sites:
-                service_contract.sites.add(*operational_sites)
+        if operational_sites:
+            service_contract.sites.add(*operational_sites)
 
+        if not proposal.contract:
             proposal.contract = service_contract
             proposal.save(update_fields=['contract'])
 
-        # 3b. Sync Location Rates and SecurityPosts from ProposalServiceLines
-        active_ver = proposal.approved_version or proposal.versions.filter(is_deleted=False).order_by('-version_number').first()
+        # 4. Sync Location Rates and SecurityPosts from ProposalServiceLines
         if active_ver and service_contract:
-            from operations.models import ContractRate, SecurityPost
-            from hrm.models import Designation
-            from decimal import Decimal
-            
             for line in active_ver.service_lines.filter(is_deleted=False):
-                # Resolve designation matching service type (or fallback to first matching or create)
+                st_name = line.service_type.name if line.service_type else 'Security Guard'
                 desig = Designation.objects.filter(
                     company=proposal.company,
-                    name__iexact=line.service_type.name,
+                    name__iexact=st_name,
                     is_deleted=False
                 ).first()
                 if not desig:
                     desig = Designation.objects.filter(
                         company=proposal.company,
-                        name__icontains=line.service_type.name,
+                        name__icontains=st_name,
                         is_deleted=False
                     ).first()
                 if not desig:
-                    desig = Designation.objects.filter(company=proposal.company, is_deleted=False).first()
+                    desig = Designation.objects.create(
+                        company=proposal.company,
+                        name=st_name,
+                        is_active=True
+                    )
 
-                if desig:
-                    # Sync or create ContractRate with billing rate and guard salary
-                    eff_date = service_contract.start_date or timezone.now().date()
-                    cr = ContractRate.objects.filter(
+                eff_date = service_contract.start_date or timezone.now().date()
+                sal = getattr(line, 'guard_salary', Decimal('0.00')) or Decimal('0.00')
+                cr = ContractRate.objects.filter(
+                    company=proposal.company,
+                    service_contract=service_contract,
+                    designation=desig,
+                    effective_date=eff_date,
+                    is_deleted=False
+                ).first()
+                if not cr:
+                    ContractRate.objects.create(
                         company=proposal.company,
                         service_contract=service_contract,
                         designation=desig,
-                        effective_date=eff_date,
-                        is_deleted=False
-                    ).first()
-                    if not cr:
-                        ContractRate.objects.create(
-                            company=proposal.company,
-                            service_contract=service_contract,
-                            designation=desig,
-                            billing_rate=line.client_rate,
-                            pay_rate=getattr(line, 'guard_salary', Decimal('0.00')) or Decimal('0.00'),
-                            effective_date=eff_date
-                        )
-                    else:
-                        cr.billing_rate = line.client_rate
-                        if getattr(line, 'guard_salary', None):
-                            cr.pay_rate = line.guard_salary
-                        cr.save(update_fields=['billing_rate', 'pay_rate'])
+                        billing_rate=line.client_rate,
+                        pay_rate=sal,
+                        effective_date=eff_date
+                    )
+                else:
+                    cr.billing_rate = line.client_rate
+                    if sal:
+                        cr.pay_rate = sal
+                    cr.save(update_fields=['billing_rate', 'pay_rate'])
 
-                # Sync SecurityPost under corresponding OperationalSite
                 if line.location:
                     target_site = OperationalSite.objects.filter(
                         company=proposal.company,
@@ -905,14 +918,13 @@ class SecurityProposalWorkflowService:
                         is_deleted=False
                     ).first()
                     if target_site and desig:
-                        post_name = f"{line.service_type.name} ({line.weapon_type or 'General'})"
+                        post_name = f"{line.service_type.name}"
                         sp = SecurityPost.objects.filter(
                             company=proposal.company,
                             site=target_site,
                             post_name=post_name,
                             is_deleted=False
                         ).first()
-                        sal = getattr(line, 'guard_salary', None)
                         daily_pay = (sal / Decimal('30.00')).quantize(Decimal('0.01')) if sal else None
                         if not sp:
                             SecurityPost.objects.create(
@@ -931,20 +943,10 @@ class SecurityProposalWorkflowService:
                             sp.monthly_pay_rate = sal or None
                             sp.required_headcount = line.quantity
                             sp.service_contract = service_contract
-                            sp.save(update_fields=['daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract'])
+                            sp.is_active = True
+                            sp.save(update_fields=['daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
 
-        # 4. Ensure customer entity_type is CUSTOMER (active client)
-        customer = proposal.customer
-        if customer:
-            if customer.entity_type != 'CUSTOMER':
-                customer.entity_type = 'CUSTOMER'
-                customer.save(update_fields=['entity_type'])
-
-        # 5. Transition to ACTIVE
-        if proposal.status != SecurityProposalStatus.ACTIVE:
-            cls.transition_status(proposal, SecurityProposalStatus.ACTIVE, user=user)
-
-        return proposal
+        return service_contract
 
 
 

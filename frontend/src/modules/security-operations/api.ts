@@ -34,7 +34,8 @@ import type {
     SecurityStockAvailabilityItem,
     SecurityInventoryOverview,
     EquipmentIncident,
-    SerializedEquipmentHistory
+    SerializedEquipmentHistory,
+    UndeployedGuard
 } from './types';
 
 // Dashboard & Control Center
@@ -115,6 +116,11 @@ export const getEmployeeCurrentDeployment = async (employeeId: string): Promise<
 
 export const getEmployeeDeploymentHistory = async (employeeId: string): Promise<Deployment[]> => {
     const response = await apiClient.get(`/api/operations/deployments/employee-history/?employee=${employeeId}`);
+    return response.data;
+};
+
+export const getUndeployedGuards = async (params?: { post?: string; background_type?: string; designation?: string; search?: string }): Promise<{ count: number; results: UndeployedGuard[] }> => {
+    const response = await apiClient.get('/api/operations/deployments/undeployed-guards/', { params });
     return response.data;
 };
 

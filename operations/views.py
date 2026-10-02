@@ -678,7 +678,13 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
-        dep = serializer.save(assigned_by=user)
+        post = serializer.validated_data.get('post')
+        salary = serializer.validated_data.get('location_monthly_salary')
+        if not salary and post and post.monthly_pay_rate:
+            dep = serializer.save(assigned_by=user, location_monthly_salary=post.monthly_pay_rate)
+        else:
+            dep = serializer.save(assigned_by=user)
+
         if dep.status == DeploymentStatus.ACTIVE:
             try:
                 EmploymentHistory.objects.create(
@@ -691,6 +697,90 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
                 )
             except Exception as e:
                 logger.warning(f"Could not log EmploymentHistory on deployment create: {e}")
+
+    @action(detail=False, methods=['get'], url_path='undeployed-guards')
+    def undeployed_guards(self, request):
+        company_id = self._resolve_company(request)
+        search = request.query_params.get('search')
+        background_type = request.query_params.get('background_type')
+        post_id = request.query_params.get('post')
+        designation_id = request.query_params.get('designation')
+
+        active_deployed_ids = Deployment.objects.filter(
+            company_id=company_id,
+            status=DeploymentStatus.ACTIVE,
+            is_deleted=False
+        ).values_list('employee_id', flat=True)
+
+        from hrm.models import Employee
+        qs = Employee.objects.filter(
+            company_id=company_id,
+            employment_status='ACTIVE',
+            is_deleted=False
+        ).exclude(id__in=active_deployed_ids).select_related('designation', 'department')
+
+        if post_id:
+            try:
+                post = SecurityPost.objects.select_related('required_designation').get(id=post_id, company_id=company_id)
+                post_text = f"{post.post_name} {post.required_designation.name if post.required_designation else ''}".lower()
+
+                is_ex_army = any(kw in post_text for kw in ['ex-army', 'ex_army', 'ex army', 'army', 'military', 'ex_rangers', 'rangers', 'mujahid'])
+                is_civil = ('civil' in post_text or 'civ' in post_text) and not is_ex_army
+                is_female = any(kw in post_text for kw in ['lady', 'female', 'searcher'])
+
+                if is_ex_army:
+                    qs = qs.filter(background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
+                elif is_civil:
+                    qs = qs.filter(background_type='CIVILIAN')
+
+                if is_female:
+                    qs = qs.filter(gender='FEMALE')
+
+                if post.required_designation_id:
+                    desig_name = post.required_designation.name.lower()
+                    if 'supervisor' in desig_name:
+                        qs = qs.filter(designation__name__icontains='supervisor')
+            except SecurityPost.DoesNotExist:
+                pass
+
+        if background_type:
+            if background_type == 'EX_ARMY':
+                qs = qs.filter(background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
+            elif background_type == 'CIVILIAN':
+                qs = qs.filter(background_type='CIVILIAN')
+            else:
+                qs = qs.filter(background_type=background_type)
+
+        if designation_id:
+            qs = qs.filter(designation_id=designation_id)
+
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(employee_code__icontains=search) |
+                Q(cnic_number__icontains=search)
+            )
+
+        data = [
+            {
+                'id': str(emp.id),
+                'full_name': f"{emp.first_name} {emp.last_name}".strip(),
+                'employee_code': emp.employee_code,
+                'cnic_number': emp.cnic_number,
+                'designation_id': str(emp.designation_id) if emp.designation_id else None,
+                'designation_name': emp.designation.name if emp.designation else 'Guard',
+                'background_type': emp.background_type,
+                'background_type_display': emp.get_background_type_display() if hasattr(emp, 'get_background_type_display') else emp.background_type,
+                'gender': emp.gender,
+                'phone_number': getattr(emp, 'mobile_number', '') or getattr(emp, 'phone_number', '') or '',
+                'hire_date': str(emp.hire_date) if emp.hire_date else None,
+                'status': emp.employment_status,
+            }
+            for emp in qs[:200]
+        ]
+        return Response({'count': len(data), 'results': data})
 
     @action(detail=False, methods=['post'], url_path='assign')
     def assign(self, request):

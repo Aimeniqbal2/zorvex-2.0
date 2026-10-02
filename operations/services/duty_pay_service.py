@@ -139,23 +139,26 @@ def resolve_daily_rate_and_attribution(company_id, employee, duty_date, roster=N
     rate_ref = ''
     unresolved_reason = ''
 
+    import calendar
+    days_in_month = Decimal(str(calendar.monthrange(d_date.year, d_date.month)[1]))
+
     # Case A: Post, Location Deployment, or Contract Rate Resolution
     # 1. Post explicit daily pay rate
     if worked_post and worked_post.daily_pay_rate and worked_post.daily_pay_rate > Decimal('0.00'):
         daily_rate = worked_post.daily_pay_rate
         rate_source = DailyPayRateSource.POST_RATE
         rate_ref = f"Post Rate: {worked_post.post_name} ({worked_post.daily_pay_rate})"
-    # 2. Post explicit monthly base salary
+    # 2. Post explicit monthly base salary divided by month's exact days (28/29/30/31)
     elif worked_post and getattr(worked_post, 'monthly_pay_rate', None) and worked_post.monthly_pay_rate > Decimal('0.00'):
-        daily_rate = (worked_post.monthly_pay_rate / divisor).quantize(Decimal('0.01'))
+        daily_rate = (worked_post.monthly_pay_rate / days_in_month).quantize(Decimal('0.01'))
         rate_source = DailyPayRateSource.POST_RATE
-        rate_ref = f"Post Location Salary: {worked_post.post_name} (PKR {worked_post.monthly_pay_rate}/mo)"
-    # 3. Guard's active deployment location monthly salary
+        rate_ref = f"Post Location Salary: {worked_post.post_name} (PKR {worked_post.monthly_pay_rate}/mo, {days_in_month} days)"
+    # 3. Guard's active deployment location monthly salary divided by month's exact days (28/29/30/31)
     elif home_dep and getattr(home_dep, 'location_monthly_salary', None) and home_dep.location_monthly_salary > Decimal('0.00') and not is_replacement:
-        daily_rate = (home_dep.location_monthly_salary / divisor).quantize(Decimal('0.01'))
+        daily_rate = (home_dep.location_monthly_salary / days_in_month).quantize(Decimal('0.01'))
         rate_source = DailyPayRateSource.POST_RATE
         site_label = worked_site.name if worked_site else (home_dep.site.name if home_dep.site else 'Location')
-        rate_ref = f"Location Salary: PKR {home_dep.location_monthly_salary}/mo ({site_label})"
+        rate_ref = f"Location Salary: PKR {home_dep.location_monthly_salary}/mo ({site_label}, {days_in_month} days)"
     # 4. Contract designation pay rate (ContractRate)
     elif worked_contract:
         target_desig_id = None
