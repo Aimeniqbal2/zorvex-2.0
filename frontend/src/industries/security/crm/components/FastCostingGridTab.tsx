@@ -305,114 +305,108 @@ export const FastCostingGridTab: React.FC = () => {
             {/* Costing Summary KPI Cards Bar */}
             <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: '12px'
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: '8px'
             }}>
                 <div style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: '10px 14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                         Clients & Locations
                     </div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-text)', marginTop: '2px' }}>
-                        {summary.totalClients} <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-muted)' }}>({summary.totalLocations} Sites)</span>
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Active Client Portfolio
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--color-text)' }}>
+                        {summary.totalClients} <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-muted)' }}>({summary.totalLocations} Sites)</span>
                     </div>
                 </div>
 
                 <div style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: '10px 14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                         Total Force
                     </div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '2px' }}>
-                        {summary.totalGuards} <span style={{ fontSize: '12px', fontWeight: 600 }}>Guards</span>
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Total Deployed Strength
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--color-primary)' }}>
+                        {summary.totalGuards} <span style={{ fontSize: '11px', fontWeight: 600 }}>Guards</span>
                     </div>
                 </div>
 
                 <div style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: '10px 14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                         Total Monthly Sale
                     </div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#3b82f6', marginTop: '2px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: '#3b82f6' }}>
                         PKR {summary.totalSale.toLocaleString()}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Monthly Client Revenue
-                    </div>
                 </div>
 
                 <div style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: '10px 14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                         Direct Guard Salary
                     </div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b' }}>
                         PKR {summary.totalSalary.toLocaleString()}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Monthly Guard Payroll
-                    </div>
                 </div>
 
                 <div style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: '10px 14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                         Gross Margin
                     </div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: summary.totalDifference >= 0 ? '#10b981' : '#ef4444', marginTop: '2px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: summary.totalDifference >= 0 ? '#10b981' : '#ef4444' }}>
                         PKR {summary.totalDifference.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        Sale - Salary - WHT - SESSI
                     </div>
                 </div>
 
                 <div style={{
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: '10px 14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
                 }}>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                         Net Profit
                     </div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: summary.totalProfit >= 0 ? '#10b981' : '#ef4444', marginTop: '2px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: summary.totalProfit >= 0 ? '#10b981' : '#ef4444' }}>
                         PKR {summary.totalProfit.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                        After Operations Overhead
                     </div>
                 </div>
             </div>
@@ -423,13 +417,13 @@ export const FastCostingGridTab: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
-                gap: '12px',
+                gap: '8px',
                 background: 'var(--color-surface)',
                 border: '1px solid var(--color-border)',
-                borderRadius: '12px',
-                padding: '12px 18px'
+                borderRadius: '8px',
+                padding: '8px 14px'
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <Button variant="primary" onClick={handleAddBlankRow} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                         <i className='bx bx-plus' style={{ fontSize: '18px' }}></i> Add Client / Location Row
                     </Button>
@@ -462,8 +456,8 @@ export const FastCostingGridTab: React.FC = () => {
                     </Button>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ width: '260px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: '250px' }}>
                         <Input 
                             placeholder="Filter by client or location..." 
                             value={search} 
@@ -501,18 +495,18 @@ export const FastCostingGridTab: React.FC = () => {
             <div 
                 ref={tableContainerRef}
                 style={{
-                    height: '780px',
-                    maxHeight: '85vh',
-                    minHeight: '650px',
+                    flex: 1,
+                    minHeight: 0,
+                    height: '100%',
                     overflow: 'auto',
                     background: 'var(--color-surface)',
                     border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
                     WebkitOverflowScrolling: 'touch'
                 }}
             >
-                <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontSize: '13px', minWidth: '3450px' }}>
+                <table className="fast-costing-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontSize: '13px', minWidth: '3450px', overflow: 'visible', borderRadius: 0 }}>
                     <thead>
                         {/* Level 1 Group Header Row */}
                         <tr style={{ background: 'var(--color-surface, #ffffff)', height: '42px' }}>

@@ -176,20 +176,22 @@ export const SecurityCRMModule: React.FC = () => {
     }
 
     return (
-        <PageContainer>
-            <PageHeader 
-                title="Clients & Contracts" 
-                subtitle="Manage security clients, locations, and proposals"
-                actions={
-                    activeTab === 'customers' && (
-                        <Button variant="primary" onClick={() => setIsEntityModalOpen(true)}>
-                            <i className='bx bx-plus'></i> Add Client
-                        </Button>
-                    )
-                }
-            />
+        <PageContainer style={activeTab === 'costing_grid' ? { height: '100%', maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '12px 20px 8px' } : undefined}>
+            {activeTab !== 'costing_grid' && (
+                <PageHeader 
+                    title="Clients & Contracts" 
+                    subtitle="Manage security clients, locations, and proposals"
+                    actions={
+                        activeTab === 'customers' && (
+                            <Button variant="primary" onClick={() => setIsEntityModalOpen(true)}>
+                                <i className='bx bx-plus'></i> Add Client
+                            </Button>
+                        )
+                    }
+                />
+            )}
 
-            <div className="crm-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid var(--color-border)', paddingBottom: '16px', marginBottom: '16px' }}>
+            <div className="crm-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid var(--color-border)', paddingBottom: activeTab === 'costing_grid' ? '8px' : '16px', marginBottom: activeTab === 'costing_grid' ? '8px' : '16px' }}>
                 <button
                     style={{
                         padding: '8px 16px',

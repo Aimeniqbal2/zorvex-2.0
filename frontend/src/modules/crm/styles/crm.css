@@ -30,3 +30,19 @@
     border-color: var(--color-primary);
     color: white;
 }
+
+/* Fast Costing Sheet Table overrides against global table overflow: hidden */
+.fast-costing-table {
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+}
+
+.fast-costing-table thead,
+.fast-costing-table tbody,
+.fast-costing-table tr,
+.fast-costing-table th {
+    overflow: visible !important;
+}
+
