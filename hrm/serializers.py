@@ -163,19 +163,13 @@ class EmployeeSerializer(BaseTenantSerializer):
         if data.get('joining_date') and not data.get('hire_date'):
             data['hire_date'] = data['joining_date']
 
-        # Safely normalize background_type
+        # Safely normalize background_type to either EX_ARMY or CIVILIAN
         if 'background_type' in data and data['background_type']:
             bg_raw = str(data['background_type']).strip().upper()
-            if bg_raw in ('MILITARY', 'ARMY', 'EX_ARMY', 'EX-ARMY'):
+            if any(k in bg_raw for k in ('ARMY', 'MILITARY', 'RANGERS', 'MUJAHID', 'POLICE', 'FORCE', 'EX')):
                 data['background_type'] = 'EX_ARMY'
-            elif bg_raw in ('RANGERS', 'EX_RANGERS', 'EX-RANGERS'):
-                data['background_type'] = 'EX_RANGERS'
-            elif bg_raw in ('MUJAHID', 'MUJAHID_FORCE', 'EX_MUJAHID', 'EX-MUJAHID', 'EX_MUJAHID_FORCE'):
-                data['background_type'] = 'EX_MUJAHID'
-            elif bg_raw in ('POLICE', 'EX_POLICE', 'EX-POLICE'):
-                data['background_type'] = 'EX_POLICE'
-            elif bg_raw in ('CIVILIAN', 'OTHER'):
-                data['background_type'] = bg_raw
+            else:
+                data['background_type'] = 'CIVILIAN'
 
         return super().to_internal_value(data)
 

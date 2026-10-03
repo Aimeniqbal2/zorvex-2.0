@@ -392,11 +392,8 @@ export const DeploymentsView: React.FC = () => {
                                 style={{ width: '180px' }}
                             >
                                 <option value="">All Backgrounds</option>
-                                <option value="CIVILIAN">Civilian Only</option>
+                                <option value="CIVILIAN">Civil Only</option>
                                 <option value="EX_ARMY">Ex-Army Only</option>
-                                <option value="EX_RANGERS">Ex-Rangers Only</option>
-                                <option value="EX_MUJAHID">Ex-Mujahid Only</option>
-                                <option value="EX_POLICE">Ex-Police Only</option>
                             </select>
                         </div>
 
@@ -450,8 +447,7 @@ export const DeploymentsView: React.FC = () => {
                                                     backgroundColor: isForces ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
                                                     color: isForces ? '#2563eb' : '#059669',
                                                 }}>
-                                                    {isForces ? '🎖️ ' : '🏢 '}
-                                                    {g.background_type_display || g.background_type}
+                                                    {isForces ? '🎖️ Ex-Army' : '🏢 Civil'}
                                                 </span>
                                             </td>
                                             <td style={{ padding: '12px 14px' }}>{g.designation_name || 'Security Guard'}</td>

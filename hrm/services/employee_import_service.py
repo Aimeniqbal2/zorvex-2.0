@@ -524,16 +524,8 @@ class EmployeeImportService:
                         emp.classification = 'INDIRECT' if 'INDIRECT' in wf_in else 'DIRECT'
                     if r.get('background_type'):
                         bg_in = str(r.get('background_type')).upper()
-                        if 'ARMY' in bg_in or 'MILITARY' in bg_in:
+                        if any(k in bg_in for k in ('ARMY', 'MILITARY', 'RANGER', 'MUJAHID', 'POLICE', 'FORCE', 'EX')):
                             emp.background_type = 'EX_ARMY'
-                        elif 'RANGER' in bg_in:
-                            emp.background_type = 'EX_RANGERS'
-                        elif 'MUJAHID' in bg_in:
-                            emp.background_type = 'EX_MUJAHID'
-                        elif 'POLICE' in bg_in:
-                            emp.background_type = 'EX_POLICE'
-                        elif 'OTHER' in bg_in:
-                            emp.background_type = 'OTHER'
                         else:
                             emp.background_type = 'CIVILIAN'
                     if r.get('eobi_number'):
@@ -566,16 +558,8 @@ class EmployeeImportService:
 
                     bg_val = 'CIVILIAN'
                     bg_in = str(r.get('background_type') or '').upper()
-                    if 'ARMY' in bg_in or 'MILITARY' in bg_in:
+                    if any(k in bg_in for k in ('ARMY', 'MILITARY', 'RANGER', 'MUJAHID', 'POLICE', 'FORCE', 'EX')):
                         bg_val = 'EX_ARMY'
-                    elif 'RANGER' in bg_in:
-                        bg_val = 'EX_RANGERS'
-                    elif 'MUJAHID' in bg_in:
-                        bg_val = 'EX_MUJAHID'
-                    elif 'POLICE' in bg_in:
-                        bg_val = 'EX_POLICE'
-                    elif 'OTHER' in bg_in:
-                        bg_val = 'OTHER'
 
                     try:
                         male_ch = int(r.get('children_male') or 0)

@@ -117,12 +117,8 @@ class Employee(BaseModel):
     background_type = models.CharField(
         max_length=30,
         choices=[
-            ('CIVILIAN', 'Civilian'),
-            ('EX_ARMY', 'Ex-Army / Military'),
-            ('EX_RANGERS', 'Rangers'),
-            ('EX_MUJAHID', 'Mujahid Force'),
-            ('EX_POLICE', 'Ex-Police / Law Enforcement'),
-            ('OTHER', 'Other Background'),
+            ('CIVILIAN', 'Civil'),
+            ('EX_ARMY', 'Ex-Army'),
         ],
         default='CIVILIAN'
     )

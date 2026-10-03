@@ -147,10 +147,11 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         if (employee) {
             const prefPay = employee.preferred_payment_destination;
             let bgType = employee?.background_type || 'CIVILIAN';
-            if (bgType === 'MILITARY') bgType = 'EX_ARMY';
-            if (bgType === 'POLICE') bgType = 'EX_POLICE';
-            if (bgType === 'RANGERS') bgType = 'EX_RANGERS';
-            if (bgType === 'MUJAHID' || bgType === 'MUJAHID_FORCE') bgType = 'EX_MUJAHID';
+            if (['EX_ARMY', 'MILITARY', 'ARMY', 'POLICE', 'EX_POLICE', 'RANGERS', 'EX_RANGERS', 'MUJAHID', 'EX_MUJAHID'].includes(bgType)) {
+                bgType = 'EX_ARMY';
+            } else {
+                bgType = 'CIVILIAN';
+            }
 
             setFormData({
                 ...employee,
@@ -1230,12 +1231,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             value={formData.background_type || 'CIVILIAN'} 
                                             onChange={handleChange}
                                         >
-                                            <option value="CIVILIAN">Civilian</option>
-                                            <option value="EX_ARMY">Ex-Army / Military</option>
-                                            <option value="EX_RANGERS">Rangers</option>
-                                            <option value="EX_MUJAHID">Mujahid Force</option>
-                                            <option value="EX_POLICE">Ex-Police / Law Enforcement</option>
-                                            <option value="OTHER">Other Background</option>
+                                            <option value="CIVILIAN">Civil</option>
+                                            <option value="EX_ARMY">Ex-Army</option>
                                         </select>
                                     </div>
                                 </div>
