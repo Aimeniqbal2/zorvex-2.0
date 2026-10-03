@@ -677,13 +677,14 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
         return qs
 
     def perform_create(self, serializer):
+        company_id = self._resolve_company_id(self.request)
         user = self.request.user if self.request.user.is_authenticated else None
         post = serializer.validated_data.get('post')
         salary = serializer.validated_data.get('location_monthly_salary')
         if not salary and post and post.monthly_pay_rate:
-            dep = serializer.save(assigned_by=user, location_monthly_salary=post.monthly_pay_rate)
+            dep = serializer.save(company_id=company_id, assigned_by=user, location_monthly_salary=post.monthly_pay_rate)
         else:
-            dep = serializer.save(assigned_by=user)
+            dep = serializer.save(company_id=company_id, assigned_by=user)
 
         if dep.status == DeploymentStatus.ACTIVE:
             try:

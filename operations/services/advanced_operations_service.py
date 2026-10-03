@@ -169,6 +169,9 @@ class AdvancedOperationsService:
             incident.immediate_action = immediate_action
         if assigned_to:
             incident.assigned_to = assigned_to
+        if user and getattr(user, 'is_authenticated', False):
+            incident.reviewed_by = user
+            incident.reviewed_at = timezone.now()
 
         if new_status in [IncidentReport.IncidentStatus.RESOLVED, IncidentReport.IncidentStatus.CLOSED]:
             incident.closed_by = user

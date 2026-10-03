@@ -915,11 +915,11 @@ class CrossModuleIntegrationService:
             })
 
         # Today's Roster & Attendance
-        today = timezone.now().date()
+        today_dates = list({timezone.now().date(), date.today()})
         rosters = DutyRoster.objects.filter(
             company_id=company_id,
             site=site,
-            duty_date=today,
+            duty_date__in=today_dates,
             is_deleted=False
         ).select_related('employee', 'shift', 'post')
 
@@ -928,7 +928,7 @@ class CrossModuleIntegrationService:
             att = WorkforceAttendance.objects.filter(
                 company_id=company_id,
                 employee=r.employee,
-                date=today,
+                date=r.duty_date,
                 is_deleted=False
             ).first()
             rosters_data.append({

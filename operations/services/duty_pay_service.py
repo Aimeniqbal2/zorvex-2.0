@@ -159,8 +159,8 @@ def resolve_daily_rate_and_attribution(company_id, employee, duty_date, roster=N
         rate_source = DailyPayRateSource.POST_RATE
         site_label = worked_site.name if worked_site else (home_dep.site.name if home_dep.site else 'Location')
         rate_ref = f"Location Salary: PKR {home_dep.location_monthly_salary}/mo ({site_label}, {days_in_month} days)"
-    # 4. Contract designation pay rate (ContractRate)
-    elif worked_contract:
+    # 4. Contract designation pay rate (ContractRate for replacements)
+    elif is_replacement and worked_contract:
         target_desig_id = None
         if worked_post and worked_post.required_designation_id:
             target_desig_id = worked_post.required_designation_id
@@ -213,7 +213,33 @@ def resolve_daily_rate_and_attribution(company_id, employee, duty_date, roster=N
                 rate_ref = f"Base Salary {emp_comp.base_salary} / {divisor}"
             else:
                 unresolved_reason = "Employee salary assignment has zero base salary and no daily rate."
-        else:
+        elif worked_contract:
+            # Fallback to contract rate if employee has no direct salary assignment
+            target_desig_id = None
+            if worked_post and worked_post.required_designation_id:
+                target_desig_id = worked_post.required_designation_id
+            elif home_dep and home_dep.designation_id:
+                target_desig_id = home_dep.designation_id
+            elif employee.designation_id:
+                target_desig_id = employee.designation_id
+
+            if target_desig_id:
+                cr = ContractRate.objects.filter(
+                    company_id=company_id,
+                    service_contract=worked_contract,
+                    designation_id=target_desig_id,
+                    effective_date__lte=d_date,
+                    is_deleted=False
+                ).order_by('-effective_date').first()
+                if cr and cr.pay_rate and cr.pay_rate > Decimal('0.00'):
+                    if cr.pay_rate >= Decimal('5000.00'):
+                        daily_rate = (cr.pay_rate / divisor).quantize(Decimal('0.01'))
+                        rate_ref = f"Contract {worked_contract.contract_code} [{cr.designation.name}] (PKR {cr.pay_rate}/mo)"
+                    else:
+                        daily_rate = cr.pay_rate
+                        rate_ref = f"Contract {worked_contract.contract_code} [{cr.designation.name}] (PKR {cr.pay_rate}/day)"
+                    rate_source = DailyPayRateSource.CONTRACT_RATE
+        if daily_rate == Decimal('0.00') and not unresolved_reason:
             unresolved_reason = "No active salary assignment or post rate found on this date."
 
     # 4. Attendance Pay Percentage

@@ -81,7 +81,9 @@ class SecurityReportingService:
     @classmethod
     def _parse_dates(cls, filters: Optional[Dict[str, Any]] = None):
         filters = filters or {}
-        today = timezone.localdate() if hasattr(timezone, 'localdate') else date.today()
+        today_local = date.today()
+        today_tz = timezone.localdate() if hasattr(timezone, 'localdate') else today_local
+        today = max(today_local, today_tz)
         
         start_date_str = filters.get('start_date') or filters.get('date_from')
         end_date_str = filters.get('end_date') or filters.get('date_to')

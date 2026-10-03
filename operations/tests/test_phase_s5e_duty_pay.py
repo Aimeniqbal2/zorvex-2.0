@@ -237,7 +237,7 @@ class PhaseS5EDutyPayTests(TestCase):
 
     def test_location_monthly_salary_deployment_resolution(self):
         """Test that client location guard salary on active deployment overrides base compensation."""
-        today = date(2026, 5, 10)
+        today = date(2026, 4, 10)  # April has 30 days
         # Set location_monthly_salary on deployment = 30,000 PKR
         self.dep_b.location_monthly_salary = Decimal("30000.00")
         self.dep_b.save()
@@ -263,7 +263,7 @@ class PhaseS5EDutyPayTests(TestCase):
 
     def test_post_monthly_pay_rate_resolution(self):
         """Test that SecurityPost monthly_pay_rate overrides deployment and base compensation."""
-        today = date(2026, 5, 11)
+        today = date(2026, 4, 11)  # April has 30 days
         # Set monthly_pay_rate on post = 36,000 PKR
         self.post_mall.monthly_pay_rate = Decimal("36000.00")
         self.post_mall.save()
@@ -297,6 +297,43 @@ class PhaseS5EDutyPayTests(TestCase):
         self.assertEqual(pay_record.daily_payable_rate, Decimal("1200.00"))
         self.assertEqual(pay_record.payable_amount, Decimal("1200.00"))
         self.assertEqual(pay_record.rate_source, DailyPayRateSource.POST_RATE)
+
+    def test_dynamic_month_days_calculation(self):
+        """Test dynamic calculation for 31-day months (May) and 28-day months (Feb)."""
+        # May (31 days): 30,000 / 31 = 967.74
+        self.dep_b.location_monthly_salary = Decimal("30000.00")
+        self.dep_b.save()
+
+        may_date = date(2026, 5, 15)
+        WorkforceAttendance.objects.create(
+            company=self.company,
+            employee=self.guard_b,
+            date=may_date,
+            status=AttendanceStatus.PRESENT
+        )
+        pay_may, _ = generate_daily_duty_pay(
+            company=self.company,
+            employee=self.guard_b,
+            duty_date=may_date,
+            user=self.user
+        )
+        self.assertEqual(pay_may.daily_payable_rate, Decimal("967.74"))
+
+        # Feb (28 days in 2026): 30,000 / 28 = 1071.43
+        feb_date = date(2026, 2, 15)
+        WorkforceAttendance.objects.create(
+            company=self.company,
+            employee=self.guard_b,
+            date=feb_date,
+            status=AttendanceStatus.PRESENT
+        )
+        pay_feb, _ = generate_daily_duty_pay(
+            company=self.company,
+            employee=self.guard_b,
+            duty_date=feb_date,
+            user=self.user
+        )
+        self.assertEqual(pay_feb.daily_payable_rate, Decimal("1071.43"))
 
     def test_absent_attendance_pays_zero(self):
         """Test that ABSENT attendance produces 0% payable percentage and 0.00 payable amount."""
