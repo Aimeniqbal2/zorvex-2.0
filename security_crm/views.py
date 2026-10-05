@@ -1601,7 +1601,11 @@ class CostingGridBatchSyncView(APIView):
                             customer = None
 
                     if not customer:
-                        customer = CRMEntity.objects.filter(company=company, name__iexact=client_name).first()
+                        customer = getattr(CRMEntity, 'all_objects', CRMEntity.objects).filter(company=company, name__iexact=client_name).first()
+                        if customer and customer.is_deleted:
+                            customer.is_deleted = False
+                            customer.active = True
+                            customer.save(update_fields=['is_deleted', 'active'])
                     if not customer:
                         customer = CRMEntity.objects.create(
                             company=company,
@@ -1611,11 +1615,15 @@ class CostingGridBatchSyncView(APIView):
                         )
 
                     loc_name = str(row.get('location_name') or '').strip() or client_name
-                    location = ClientLocation.objects.filter(
+                    location = getattr(ClientLocation, 'all_objects', ClientLocation.objects).filter(
                         company=company,
                         customer=customer,
                         name__iexact=loc_name
                     ).first()
+                    if location and location.is_deleted:
+                        location.is_deleted = False
+                        location.is_active = True
+                        location.save(update_fields=['is_deleted', 'is_active'])
                     if not location:
                         location = ClientLocation.objects.create(
                             company=company,
@@ -1624,10 +1632,13 @@ class CostingGridBatchSyncView(APIView):
                             is_active=True
                         )
 
-                    proposal = SecurityProposal.objects.filter(
+                    proposal = getattr(SecurityProposal, 'all_objects', SecurityProposal.objects).filter(
                         company=company,
                         customer=customer
                     ).order_by('-created_at').first()
+                    if proposal and proposal.is_deleted:
+                        proposal.is_deleted = False
+                        proposal.save(update_fields=['is_deleted'])
                     if not proposal:
                         proposal = SecurityProposal.objects.create(
                             company=company,
@@ -1962,8 +1973,13 @@ class CostingGridImportExcelView(APIView):
                     if not client_name:
                         continue
 
-                    customer = CRMEntity.objects.filter(company=company, name__iexact=client_name).first()
-                    if not customer:
+                    customer = getattr(CRMEntity, 'all_objects', CRMEntity.objects).filter(company=company, name__iexact=client_name).first()
+                    if customer:
+                        if customer.is_deleted:
+                            customer.is_deleted = False
+                            customer.active = True
+                            customer.save(update_fields=['is_deleted', 'active'])
+                    else:
                         customer = CRMEntity.objects.create(
                             company=company,
                             name=client_name,
@@ -1971,12 +1987,17 @@ class CostingGridImportExcelView(APIView):
                             active=True
                         )
 
-                    location = ClientLocation.objects.filter(
+                    location = getattr(ClientLocation, 'all_objects', ClientLocation.objects).filter(
                         company=company,
                         customer=customer,
                         name__iexact=loc_name
                     ).first()
-                    if not location:
+                    if location:
+                        if location.is_deleted:
+                            location.is_deleted = False
+                            location.is_active = True
+                            location.save(update_fields=['is_deleted', 'is_active'])
+                    else:
                         location = ClientLocation.objects.create(
                             company=company,
                             customer=customer,
@@ -1984,7 +2005,10 @@ class CostingGridImportExcelView(APIView):
                             is_active=True
                         )
 
-                    proposal = SecurityProposal.objects.filter(company=company, customer=customer).order_by('-created_at').first()
+                    proposal = getattr(SecurityProposal, 'all_objects', SecurityProposal.objects).filter(company=company, customer=customer).order_by('-created_at').first()
+                    if proposal and proposal.is_deleted:
+                        proposal.is_deleted = False
+                        proposal.save(update_fields=['is_deleted'])
                     if not proposal:
                         proposal = SecurityProposal.objects.create(
                             company=company,

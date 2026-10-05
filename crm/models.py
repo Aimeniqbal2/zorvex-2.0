@@ -56,6 +56,7 @@ class CRMEntity(BaseModel):
     def generate_next_code(cls, company_id, entity_type='CUSTOMER'):
         """
         Generates a collision-free sequential code per company and entity type (e.g. CUST-0001, SUPP-0001).
+        Must query all_objects to check across soft-deleted rows and enforce table-level uniqueness.
         """
         prefix_map = {
             'CUSTOMER': 'CUST',
@@ -72,7 +73,8 @@ class CRMEntity(BaseModel):
         prefix = prefix_map.get(entity_type, 'CUST')
         
         import re
-        existing_codes = cls.objects.filter(
+        manager = getattr(cls, 'all_objects', cls.objects)
+        existing_codes = manager.filter(
             company_id=company_id,
             code__startswith=f"{prefix}-"
         ).values_list('code', flat=True)
@@ -80,6 +82,8 @@ class CRMEntity(BaseModel):
         max_num = 0
         pattern = re.compile(rf"^{prefix}-(\d+)$")
         for c in existing_codes:
+            if not c:
+                continue
             match = pattern.match(c)
             if match:
                 try:
@@ -92,7 +96,7 @@ class CRMEntity(BaseModel):
         next_num = max_num + 1
         candidate_code = f"{prefix}-{next_num:04d}"
         
-        while cls.objects.filter(company_id=company_id, code=candidate_code).exists():
+        while manager.filter(company_id=company_id, code=candidate_code).exists():
             next_num += 1
             candidate_code = f"{prefix}-{next_num:04d}"
             

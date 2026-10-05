@@ -50,6 +50,7 @@ class BaseModel(models.Model):
     is_deleted = models.BooleanField(default=False, db_index=True)
 
     objects = TenantManager()
+    all_objects = models.Manager()
 
     class Meta:
         abstract = True
