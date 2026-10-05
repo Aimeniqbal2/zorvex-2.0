@@ -102,14 +102,16 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
 
     const fetchStaticData = async () => {
         try {
-            const [sitesRes, desigRes] = await Promise.all([
-                apiClient.get('/api/operations/sites/?is_active=true&page_size=200'),
-                apiClient.get('/api/hrm/designations/?is_active=true&page_size=200'),
-            ]);
-            setSites(sitesRes.data.results || sitesRes.data);
-            setDesignations(desigRes.data.results || desigRes.data);
+            const res = await apiClient.get('/api/operations/sites/?is_active=true&page_size=200');
+            setSites(res.data.results || res.data || []);
         } catch (err) {
-            console.error('Failed to fetch static data', err);
+            console.error('Failed to fetch sites', err);
+        }
+        try {
+            const res = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=200');
+            setDesignations(res.data.results || res.data || []);
+        } catch (err) {
+            console.error('Failed to fetch designations', err);
         }
     };
 

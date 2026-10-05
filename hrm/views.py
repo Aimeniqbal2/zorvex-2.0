@@ -19,22 +19,19 @@ from .serializers import (
 )
 
 class DepartmentViewSet(TenantModelViewSet):
-    required_module = 'hr'
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
-    permission_classes = [IsAuthenticated, ModulePermission]
+    permission_classes = [IsAuthenticated]
 
 class PositionViewSet(TenantModelViewSet):
-    required_module = 'hr'
     queryset = Position.objects.select_related('department').all()
     serializer_class = PositionSerializer
-    permission_classes = [IsAuthenticated, ModulePermission]
+    permission_classes = [IsAuthenticated]
 
 class DesignationViewSet(TenantModelViewSet):
-    required_module = 'hr'
     queryset = Designation.objects.all()
     serializer_class = DesignationSerializer
-    permission_classes = [IsAuthenticated, ModulePermission]
+    permission_classes = [IsAuthenticated]
 
 
 def check_security_workforce_access(request, employee):

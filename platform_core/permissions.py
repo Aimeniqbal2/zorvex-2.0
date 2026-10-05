@@ -60,7 +60,15 @@ class ModulePermission(BasePermission):
             # their access is governed purely by RBAC.
             return True
 
+        from rest_framework.permissions import SAFE_METHODS
+
         enabled = is_module_enabled(company_id, module_code)
+        if not enabled:
+            if module_code == 'hr' and request.method in SAFE_METHODS:
+                enabled = is_module_enabled(company_id, 'operations') or is_module_enabled(company_id, 'security_ops')
+            elif module_code in ('security_ops', 'operations'):
+                enabled = is_module_enabled(company_id, 'operations') or is_module_enabled(company_id, 'security_ops')
+
         if not enabled:
             logger.info(
                 "Module '%s' is disabled for company %s — blocking user %s",
@@ -78,11 +86,16 @@ class ModulePermission(BasePermission):
         if getattr(request.user, 'access_mode', 'FULL_COMPANY') == 'CUSTOM':
             codes = [module_code]
             if module_code == 'billing':
-                codes.extend(['finance', 'security_ops'])
+                codes.extend(['finance', 'security_ops', 'operations'])
             elif module_code == 'payroll':
                 codes.extend(['hr', 'finance'])
             elif module_code == 'security_finance':
-                codes.extend(['finance', 'security_ops'])
+                codes.extend(['finance', 'security_ops', 'operations'])
+            elif module_code in ('security_ops', 'operations'):
+                codes.extend(['security_ops', 'operations', 'guards_staff'])
+            elif module_code == 'hr' and request.method in SAFE_METHODS:
+                # Read-only lookups (e.g. designations, workforce lists for rosters/deployments) needed by operations
+                codes.extend(['operations', 'security_ops', 'guards_staff'])
 
             has_user_access = request.user.custom_module_access.filter(
                 module__code__in=codes,

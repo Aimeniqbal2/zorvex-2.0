@@ -68,18 +68,31 @@ export const StaffingRequirementModal: React.FC<StaffingRequirementModalProps> =
 
     const fetchDependencies = async () => {
         try {
-            const [conRes, siteRes, desigRes, shiftRes] = await Promise.all([
-                apiClient.get('/api/operations/contracts/'),
-                apiClient.get('/api/operations/sites/'),
-                apiClient.get('/api/hrm/designations/'),
-                apiClient.get('/api/hrm/shifts/')
-            ]);
+            const conRes = await apiClient.get('/api/operations/contracts/');
             setContracts(conRes.data.results || (Array.isArray(conRes.data) ? conRes.data : []));
+        } catch (err: any) {
+            console.error("Failed to load contracts", err);
+        }
+
+        try {
+            const siteRes = await apiClient.get('/api/operations/sites/');
             setSites(siteRes.data.results || (Array.isArray(siteRes.data) ? siteRes.data : []));
+        } catch (err: any) {
+            console.error("Failed to load sites", err);
+        }
+
+        try {
+            const desigRes = await apiClient.get('/api/hrm/designations/');
             setDesignations(desigRes.data.results || (Array.isArray(desigRes.data) ? desigRes.data : []));
+        } catch (err: any) {
+            console.error("Failed to load designations", err);
+        }
+
+        try {
+            const shiftRes = await apiClient.get('/api/hrm/shifts/');
             setShifts(shiftRes.data.results || (Array.isArray(shiftRes.data) ? shiftRes.data : []));
         } catch (err: any) {
-            console.error("Failed to load dependencies", err);
+            console.error("Failed to load shifts", err);
         }
     };
 

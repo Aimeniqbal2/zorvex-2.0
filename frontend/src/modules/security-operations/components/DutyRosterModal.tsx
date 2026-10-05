@@ -66,16 +66,29 @@ export const DutyRosterModal: React.FC<DutyRosterModalProps> = ({
                 notes: activeRoster ? (activeRoster.notes || '') : ''
             });
 
-            Promise.all([
+            Promise.allSettled([
                 getShifts({ is_active: true }),
                 getSecurityPosts({ site: effectiveSiteId, is_active: true }),
                 apiClient.get('/api/hrm/employees/?employment_status=ACTIVE&page_size=200')
-            ]).then(([shs, pstsRes, empRes]) => {
-                setShifts(shs);
-                const postList = pstsRes.results || (Array.isArray(pstsRes) ? pstsRes : []);
-                setPosts(postList);
-                const empList = empRes.data.results || (Array.isArray(empRes.data) ? empRes.data : []);
-                setEmployees(empList);
+            ]).then(([shsSettled, pstsSettled, empSettled]) => {
+                let shs: any[] = [];
+                let postList: any[] = [];
+                let empList: any[] = [];
+
+                if (shsSettled.status === 'fulfilled') {
+                    shs = shsSettled.value || [];
+                    setShifts(shs);
+                }
+                if (pstsSettled.status === 'fulfilled') {
+                    const pstsRes = pstsSettled.value;
+                    postList = pstsRes?.results || (Array.isArray(pstsRes) ? pstsRes : []);
+                    setPosts(postList);
+                }
+                if (empSettled.status === 'fulfilled') {
+                    const empRes = empSettled.value;
+                    empList = empRes?.data?.results || (Array.isArray(empRes?.data) ? empRes.data : []);
+                    setEmployees(empList);
+                }
 
                 if (!activeRoster) {
                     if (shs.length > 0) setFormData(prev => ({ ...prev, shift: prev.shift || shs[0].id }));

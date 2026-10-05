@@ -73,14 +73,17 @@ export const DeploymentTransferModal: React.FC<DeploymentTransferModalProps> = (
 
     const fetchInitialData = async () => {
         try {
-            const [sitesRes, desigRes] = await Promise.all([
-                apiClient.get('/api/operations/sites/?is_active=true&page_size=200'),
-                apiClient.get('/api/hrm/designations/?is_active=true&page_size=200')
-            ]);
-            setSites(sitesRes.data.results || sitesRes.data);
-            setDesignations(desigRes.data.results || desigRes.data);
+            const sitesRes = await apiClient.get('/api/operations/sites/?is_active=true&page_size=200');
+            setSites(sitesRes.data.results || sitesRes.data || []);
         } catch (err) {
-            console.error('Failed to fetch transfer options', err);
+            console.error('Failed to fetch sites for transfer', err);
+        }
+
+        try {
+            const desigRes = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=200');
+            setDesignations(desigRes.data.results || desigRes.data || []);
+        } catch (err) {
+            console.error('Failed to fetch designations for transfer', err);
         }
     };
 
@@ -89,7 +92,7 @@ export const DeploymentTransferModal: React.FC<DeploymentTransferModalProps> = (
             ...prev, 
             new_site: siteId, 
             new_post: '', 
-            new_contract: '',
+            new_contract: '', 
             new_location_monthly_salary: null 
         }));
         if (!siteId) {
@@ -97,21 +100,26 @@ export const DeploymentTransferModal: React.FC<DeploymentTransferModalProps> = (
             setContracts([]);
             return;
         }
+
         try {
-            const [postsRes, contractsRes] = await Promise.all([
-                apiClient.get(`/api/operations/posts/?site=${siteId}&is_active=true&page_size=100`),
-                apiClient.get(`/api/operations/contracts/?status=ACTIVE&page_size=100`)
-            ]);
-            const pList: SecurityPost[] = postsRes.data.results || postsRes.data;
-            setPosts(pList);
-            const allC: ServiceContract[] = contractsRes.data.results || contractsRes.data;
+            const postsRes = await apiClient.get(`/api/operations/posts/?site=${siteId}&is_active=true&page_size=100`);
+            setPosts(postsRes.data.results || postsRes.data || []);
+        } catch (err) {
+            console.error('Failed to fetch posts for new site', err);
+            setPosts([]);
+        }
+
+        try {
+            const contractsRes = await apiClient.get(`/api/operations/contracts/?status=ACTIVE&page_size=100`);
+            const allC: ServiceContract[] = contractsRes.data.results || contractsRes.data || [];
             const siteMatches = allC.filter(c => c.sites?.includes(siteId));
             setContracts(siteMatches);
             if (siteMatches.length > 0) {
                 setFormData(prev => ({ ...prev, new_contract: siteMatches[0].id }));
             }
         } catch (err) {
-            console.error('Failed to fetch posts/contracts for new site', err);
+            console.error('Failed to fetch contracts for new site', err);
+            setContracts([]);
         }
     };
 

@@ -86,15 +86,18 @@ export const SiteManpowerModal: React.FC<SiteManpowerModalProps> = ({
     const fetchDropdowns = useCallback(async () => {
         if (!site) return;
         try {
-            const [desigRes, contractsRes] = await Promise.all([
-                apiClient.get('/api/hrm/designations/?is_active=true&page_size=200'),
-                apiClient.get('/api/operations/contracts/?status=ACTIVE&page_size=100')
-            ]);
-            setDesignations(desigRes.data.results || desigRes.data);
-            const allContracts: ServiceContract[] = contractsRes.data.results || contractsRes.data;
+            const desigRes = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=200');
+            setDesignations(desigRes.data.results || desigRes.data || []);
+        } catch (err) {
+            console.error('Failed to fetch designations', err);
+        }
+
+        try {
+            const contractsRes = await apiClient.get('/api/operations/contracts/?status=ACTIVE&page_size=100');
+            const allContracts: ServiceContract[] = contractsRes.data.results || contractsRes.data || [];
             setSiteContracts(allContracts.filter(c => c.sites?.includes(site.id)));
         } catch (err) {
-            console.error('Failed to fetch dropdowns', err);
+            console.error('Failed to fetch contracts', err);
         }
     }, [site]);
 
