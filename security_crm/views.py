@@ -1955,6 +1955,36 @@ class CostingGridImportExcelView(APIView):
                     return loc, loc
             return raw, raw
 
+        # Dynamically detect columns from header rows (Row 1 & 2)
+        col_map = {
+            'wht': 29,             # Col AC: Tax (7%)
+            'sessi': 31,           # Col AE: SESSI
+            'eobi': 32,            # Col AF: EOBI
+            'service_charges': 33, # Col AG: Service Charges
+            'sales_tax': 34,       # Col AH: Sales Tax
+            'expense': 28,         # Col AB: Total Expense
+            'strength': 27,        # Col AA: Total Con Str
+        }
+
+        for c in range(1, min(max_rows + 1, 45)):
+            h1 = str(get_cell_val(1, c) or '').lower().replace('\n', ' ').strip()
+            h2 = str(get_cell_val(2, c) or '').lower().replace('\n', ' ').strip()
+            combined = f"{h1} {h2}".strip()
+            if 'service' in combined and ('charge' in combined or 'fee' in combined):
+                col_map['service_charges'] = c
+            elif 'sales' in combined and 'tax' in combined:
+                col_map['sales_tax'] = c
+            elif ('tax' in combined and '7' in combined) or 'wht' in combined or 'withholding' in combined:
+                col_map['wht'] = c
+            elif 'sessi' in combined:
+                col_map['sessi'] = c
+            elif 'eobi' in combined:
+                col_map['eobi'] = c
+            elif 'expense' in combined or 'overhead' in combined:
+                col_map['expense'] = c
+            elif 'con str' in combined or 'strength' in combined or 'total guard' in combined:
+                col_map['strength'] = c
+
         imported_clients_set = set()
         imported_locations = 0
         imported_lines = 0
@@ -2017,16 +2047,51 @@ class CostingGridImportExcelView(APIView):
                             status='DRAFT'
                         )
 
-                    sessi_val = get_cell_val(r, 31)
-                    eobi_val = get_cell_val(r, 32)
+                    # 1. Service Charges
+                    sc_raw = get_cell_val(r, col_map['service_charges'])
                     try:
-                        sessi = Decimal(str(sessi_val or 0)) if sessi_val else Decimal('0.00')
+                        sc_val = Decimal(str(sc_raw)) if sc_raw is not None and str(sc_raw).strip() != '' else Decimal('0.00')
+                    except Exception:
+                        sc_val = Decimal('0.00')
+
+                    # 2. Sales Tax (Rupee Override)
+                    st_raw = get_cell_val(r, col_map['sales_tax'])
+                    try:
+                        st_val = Decimal(str(st_raw)) if st_raw is not None and str(st_raw).strip() != '' else None
+                    except Exception:
+                        st_val = None
+
+                    # 3. WHT Tax (Rupee Override)
+                    wht_raw = get_cell_val(r, col_map['wht'])
+                    try:
+                        wht_val = Decimal(str(wht_raw)) if wht_raw is not None and str(wht_raw).strip() != '' else None
+                    except Exception:
+                        wht_val = None
+
+                    # 4. SESSI & EOBI
+                    sessi_raw = get_cell_val(r, col_map['sessi'])
+                    eobi_raw = get_cell_val(r, col_map['eobi'])
+                    try:
+                        sessi = Decimal(str(sessi_raw)) if sessi_raw is not None and str(sessi_raw).strip() != '' else Decimal('0.00')
                     except Exception:
                         sessi = Decimal('0.00')
                     try:
-                        eobi = Decimal(str(eobi_val or 0)) if eobi_val else Decimal('0.00')
+                        eobi = Decimal(str(eobi_raw)) if eobi_raw is not None and str(eobi_raw).strip() != '' else Decimal('0.00')
                     except Exception:
                         eobi = Decimal('0.00')
+
+                    # 5. Overhead Exp per head
+                    exp_raw = get_cell_val(r, col_map['expense'])
+                    str_raw = get_cell_val(r, col_map['strength'])
+                    overhead = Decimal('6000.00')
+                    try:
+                        if exp_raw is not None and str_raw is not None:
+                            tot_exp = Decimal(str(exp_raw))
+                            tot_str = Decimal(str(str_raw))
+                            if tot_str > 0:
+                                overhead = (tot_exp / tot_str).quantize(Decimal('0.01'))
+                    except Exception:
+                        overhead = Decimal('6000.00')
 
                     version = ProposalVersion.objects.filter(company=company, proposal=proposal, is_frozen=False).order_by('-version_number').first()
                     if not version:
@@ -2036,21 +2101,35 @@ class CostingGridImportExcelView(APIView):
                             version_number=1,
                             version_type='Initial Proposal',
                             status='DRAFT',
-                            overhead_per_guard=Decimal('6000.00'),
-                            service_charges_per_guard=Decimal('3000.00'),
+                            overhead_per_guard=overhead,
+                            service_charges_per_guard=sc_val,
+                            sales_tax_override=st_val,
+                            withholding_tax_override=wht_val,
+                            withholding_tax_rate=Decimal('7.00'),
+                            tax_rate=Decimal('8.00'),
                             total_sessi=sessi,
                             total_eobi=eobi
                         )
                     else:
-                        dirty_fields = []
-                        if sessi > 0 and version.total_sessi != sessi:
-                            version.total_sessi = sessi
-                            dirty_fields.append('total_sessi')
-                        if eobi > 0 and version.total_eobi != eobi:
-                            version.total_eobi = eobi
-                            dirty_fields.append('total_eobi')
-                        if dirty_fields:
-                            version.save(update_fields=dirty_fields)
+                        version.overhead_per_guard = overhead
+                        version.service_charges_per_guard = sc_val
+                        version.sales_tax_override = st_val
+                        version.withholding_tax_override = wht_val
+                        version.withholding_tax_rate = Decimal('7.00')
+                        version.tax_rate = Decimal('8.00')
+                        version.total_sessi = sessi
+                        version.total_eobi = eobi
+                        version.save(update_fields=[
+                            'overhead_per_guard',
+                            'service_charges_per_guard',
+                            'sales_tax_override',
+                            'withholding_tax_override',
+                            'withholding_tax_rate',
+                            'tax_rate',
+                            'total_sessi',
+                            'total_eobi',
+                            'updated_at'
+                        ])
 
                     # Ensure idempotency by replacing any existing lines for this location in this proposal version
                     ProposalServiceLine.objects.filter(
