@@ -249,15 +249,13 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
         }
     };
 
-    const fetchGuardsDebounced = async (search: string, postId?: string, siteId?: string) => {
+    const fetchGuardsDebounced = async (search: string, _postId?: string, siteId?: string) => {
         setLoadingEmployees(true);
         try {
-            const effectivePost = postId || formData.post;
             const effectiveSite = siteId || formData.site;
             const params: any = {};
             if (search) params.search = search;
-            if (effectivePost) params.post = effectivePost;
-            else if (formData.designation) params.designation = formData.designation;
+            // No strict filter by post or designation — all undeployed employees from all designations are shown
 
             // Fetch undeployed guards
             const res = await getUndeployedGuards(params);
@@ -282,7 +280,6 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
             try {
                 const depRes = await getActiveDeployedGuards({
                     exclude_site: effectiveSite || undefined,
-                    post: effectivePost || undefined,
                     search: search || undefined
                 });
                 setDeployedGuards(depRes.results || []);
@@ -393,11 +390,6 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
     };
 
     const isEditActive = deployment?.status === 'ACTIVE';
-    const activeSelectedPost = sitePosts.find(p => p.id === formData.post);
-    const postReqText = activeSelectedPost ? `${activeSelectedPost.post_name} ${activeSelectedPost.required_designation_name || ''}`.toLowerCase() : '';
-    const isExArmyPost = activeSelectedPost && (postReqText.includes('ex') || postReqText.includes('army') || postReqText.includes('military'));
-    const isCivilPost = activeSelectedPost && postReqText.includes('civil') && !isExArmyPost;
-    const isLadyPost = activeSelectedPost && (postReqText.includes('lady') || postReqText.includes('searcher') || postReqText.includes('female'));
 
     const linkedContract = siteContracts.find(c => c.id === formData.service_contract) || siteContracts[0];
 
@@ -494,39 +486,7 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                         </div>
                     </div>
 
-                    {/* Post Requirement Guidance Banner */}
-                    {activeSelectedPost && (
-                        <div style={{
-                            padding: '10px 14px',
-                            borderRadius: '6px',
-                            backgroundColor: isExArmyPost ? 'rgba(59, 130, 246, 0.1)' : isCivilPost ? 'rgba(16, 185, 129, 0.1)' : isLadyPost ? 'rgba(236, 72, 153, 0.1)' : 'rgba(99, 102, 241, 0.1)',
-                            border: `1px solid ${isExArmyPost ? 'rgba(59, 130, 246, 0.3)' : isCivilPost ? 'rgba(16, 185, 129, 0.3)' : isLadyPost ? 'rgba(236, 72, 153, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`,
-                            fontSize: '12px',
-                            lineHeight: 1.4,
-                            marginBottom: '14px'
-                        }}>
-                            {isExArmyPost && (
-                                <div style={{ color: '#3b82f6', fontWeight: 600 }}>
-                                    🎖️ Ex-Army / Armed Forces Post: Strict filter active. Only undeployed Ex-Army / Forces personnel are listed.
-                                </div>
-                            )}
-                            {isCivilPost && (
-                                <div style={{ color: '#10b981', fontWeight: 600 }}>
-                                    🏢 Civilian Security Post: Strict filter active. Only undeployed Civilian guards are listed.
-                                </div>
-                            )}
-                            {isLadyPost && (
-                                <div style={{ color: '#ec4899', fontWeight: 600 }}>
-                                    👩 Lady Guard / Searcher Post: Strict filter active. Only undeployed Female workforce are listed.
-                                </div>
-                            )}
-                            {!isExArmyPost && !isCivilPost && !isLadyPost && (
-                                <div style={{ color: 'var(--color-primary)' }}>
-                                    📋 Post: {activeSelectedPost.post_name} | Required: {activeSelectedPost.required_headcount} personnel
-                                </div>
-                            )}
-                        </div>
-                    )}
+
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'center' }}>
                         {/* Designation */}

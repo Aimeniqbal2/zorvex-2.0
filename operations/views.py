@@ -720,41 +720,6 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
             is_deleted=False
         ).exclude(id__in=active_deployed_ids).select_related('designation', 'department')
 
-        if post_id:
-            try:
-                post = SecurityPost.objects.select_related('required_designation').get(id=post_id, company_id=company_id)
-                post_text = f"{post.post_name} {post.required_designation.name if post.required_designation else ''}".lower()
-
-                is_ex_army = any(kw in post_text for kw in ['ex-army', 'ex_army', 'ex army', 'army', 'military', 'ex_rangers', 'rangers', 'mujahid', 'ssg', 'commando'])
-                is_civil = ('civil' in post_text or 'civ' in post_text) and not is_ex_army
-                is_female = any(kw in post_text for kw in ['lady', 'female', 'searcher'])
-
-                if is_ex_army:
-                    qs = qs.filter(background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
-                elif is_civil:
-                    qs = qs.filter(background_type='CIVILIAN')
-
-                if is_female:
-                    qs = qs.filter(gender='FEMALE')
-
-                if post.required_designation_id:
-                    from django.db.models import Q
-                    desig_name = post.required_designation.name.lower()
-                    if 'supervisor' in desig_name:
-                        qs = qs.filter(designation__name__icontains='supervisor')
-                    elif 'cpo' in desig_name or 'close protection' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='cpo') | Q(designation__name__icontains='close protection'))
-                    elif 'head' in desig_name or 'senior guard' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='head') | Q(designation__name__icontains='senior guard'))
-                    elif 'cctv' in desig_name:
-                        qs = qs.filter(designation__name__icontains='cctv')
-                    elif 'searcher' in desig_name:
-                        qs = qs.filter(designation__name__icontains='searcher')
-                    elif 'deo' in desig_name or 'data entry' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='deo') | Q(designation__name__icontains='data entry'))
-            except SecurityPost.DoesNotExist:
-                pass
-
         if background_type:
             if background_type == 'EX_ARMY':
                 qs = qs.filter(background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
@@ -766,9 +731,6 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
         city = request.query_params.get('city') or request.query_params.get('station')
         if city and city.strip().upper() not in ('ALL', ''):
             qs = qs.filter(city__iexact=city.strip())
-
-        if designation_id:
-            qs = qs.filter(designation_id=designation_id)
 
         if search:
             from django.db.models import Q
@@ -823,41 +785,6 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
 
         if exclude_site_id:
             qs = qs.exclude(site_id=exclude_site_id)
-
-        if post_id:
-            try:
-                post = SecurityPost.objects.select_related('required_designation').get(id=post_id, company_id=company_id)
-                post_text = f"{post.post_name} {post.required_designation.name if post.required_designation else ''}".lower()
-
-                is_ex_army = any(kw in post_text for kw in ['ex-army', 'ex_army', 'ex army', 'army', 'military', 'ex_rangers', 'rangers', 'mujahid', 'ssg', 'commando'])
-                is_civil = ('civil' in post_text or 'civ' in post_text) and not is_ex_army
-                is_female = any(kw in post_text for kw in ['lady', 'female', 'searcher'])
-
-                if is_ex_army:
-                    qs = qs.filter(employee__background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
-                elif is_civil:
-                    qs = qs.filter(employee__background_type='CIVILIAN')
-
-                if is_female:
-                    qs = qs.filter(employee__gender='FEMALE')
-
-                if post.required_designation_id:
-                    from django.db.models import Q
-                    desig_name = post.required_designation.name.lower()
-                    if 'supervisor' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='supervisor') | Q(employee__designation__name__icontains='supervisor'))
-                    elif 'cpo' in desig_name or 'close protection' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='cpo') | Q(designation__name__icontains='close protection') | Q(employee__designation__name__icontains='cpo') | Q(employee__designation__name__icontains='close protection'))
-                    elif 'head' in desig_name or 'senior guard' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='head') | Q(designation__name__icontains='senior guard') | Q(employee__designation__name__icontains='head') | Q(employee__designation__name__icontains='senior guard'))
-                    elif 'cctv' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='cctv') | Q(employee__designation__name__icontains='cctv'))
-                    elif 'searcher' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='searcher') | Q(employee__designation__name__icontains='searcher'))
-                    elif 'deo' in desig_name or 'data entry' in desig_name:
-                        qs = qs.filter(Q(designation__name__icontains='deo') | Q(designation__name__icontains='data entry') | Q(employee__designation__name__icontains='deo') | Q(employee__designation__name__icontains='data entry'))
-            except SecurityPost.DoesNotExist:
-                pass
 
         if background_type:
             if background_type == 'EX_ARMY':
