@@ -103,8 +103,8 @@ export const DeploymentsView: React.FC = () => {
     const fetchPosts = useCallback(async () => {
         setPostsLoading(true);
         try {
-            const res = await getSecurityPosts({ is_active: true });
-            setPostsList(res.results || []);
+            const res = await getSecurityPosts({ is_active: true, page_size: 1000 });
+            setPostsList(res.results || (Array.isArray(res) ? res : []));
         } catch (err) {
             console.error('Failed to fetch posts', err);
         } finally {
@@ -312,7 +312,7 @@ export const DeploymentsView: React.FC = () => {
                             transition: 'all 0.2s ease',
                         }}
                     >
-                        📋 Location Posts & Requirements
+                        📋 Location Posts & Requirements {postsList.length > 0 ? `(${postsList.length})` : ''}
                     </button>
                 </div>
 

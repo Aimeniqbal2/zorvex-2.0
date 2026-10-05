@@ -17,6 +17,82 @@ interface DeploymentModalProps {
 
 const DEPLOYMENT_STATUSES = ['DRAFT', 'PLANNED', 'ACTIVE', 'COMPLETED', 'RELIEVED', 'CANCELLED'] as const;
 
+export const resolveDesignationId = (post: SecurityPost | null | undefined, desigList: DesignationOption[]): string => {
+    if (!post || !desigList || desigList.length === 0) {
+        return (post?.required_designation as string) || '';
+    }
+
+    // 1. Exact ID match if post.required_designation is already a valid designation ID
+    if (post.required_designation) {
+        const byId = desigList.find(d => String(d.id) === String(post.required_designation));
+        if (byId) return byId.id;
+    }
+
+    // Candidate names from the post
+    const candidates = [
+        post.required_designation_name,
+        post.post_name,
+        typeof post.required_designation === 'string' ? post.required_designation : ''
+    ].filter(Boolean) as string[];
+
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // 2. Try exact normalized name match
+    for (const c of candidates) {
+        const normC = normalize(c);
+        if (!normC) continue;
+        const matched = desigList.find(d => normalize(d.name) === normC);
+        if (matched) return matched.id;
+    }
+
+    // 3. Try containment / substring match
+    for (const c of candidates) {
+        const normC = normalize(c);
+        if (!normC) continue;
+        const matched = desigList.find(d => {
+            const normD = normalize(d.name);
+            return normD.includes(normC) || normC.includes(normD);
+        });
+        if (matched) return matched.id;
+    }
+
+    // 4. Keyword heuristic based on security workforce categories
+    for (const c of candidates) {
+        const lower = c.toLowerCase();
+        if (lower.includes('ex-army') || lower.includes('army') || lower.includes('military') || lower.includes('forces')) {
+            const exArmy = desigList.find(d => {
+                const dl = d.name.toLowerCase();
+                return dl.includes('army') || dl.includes('forces');
+            });
+            if (exArmy) return exArmy.id;
+        }
+        if (lower.includes('lady') || lower.includes('female') || lower.includes('searcher')) {
+            const lady = desigList.find(d => {
+                const dl = d.name.toLowerCase();
+                return dl.includes('lady') || dl.includes('female');
+            });
+            if (lady) return lady.id;
+        }
+        if (lower.includes('supervisor')) {
+            const sup = desigList.find(d => d.name.toLowerCase().includes('supervisor'));
+            if (sup) return sup.id;
+        }
+        if (lower.includes('cctv')) {
+            const cctv = desigList.find(d => d.name.toLowerCase().includes('cctv'));
+            if (cctv) return cctv.id;
+        }
+        if (lower.includes('civil') || lower.includes('guard')) {
+            const civil = desigList.find(d => {
+                const dl = d.name.toLowerCase();
+                return dl.includes('civil') || (dl.includes('guard') && !dl.includes('army') && !dl.includes('lady'));
+            });
+            if (civil) return civil.id;
+        }
+    }
+
+    return (post.required_designation as string) || '';
+};
+
 export const DeploymentModal: React.FC<DeploymentModalProps> = ({
     isOpen, onClose, onSave, deployment, initialPostId, initialEmployeeId, initialSiteId
 }) => {
@@ -66,7 +142,7 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
                     notes: deployment.notes || '',
                 });
                 fetchContractsForSite(deployment.site);
-                fetchPostsForSite(deployment.site);
+                fetchPostsForSite(deployment.site, deployment.post || undefined);
                 fetchGuardsDebounced('', deployment.post || undefined);
             } else {
                 const targetSite = initialSiteId || '';
@@ -89,7 +165,7 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
 
                 if (targetSite) {
                     fetchContractsForSite(targetSite);
-                    fetchPostsForSite(targetSite);
+                    fetchPostsForSite(targetSite, targetPost);
                 } else {
                     setSiteContracts([]);
                     setSitePosts([]);
@@ -102,35 +178,38 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
 
     const fetchStaticData = async () => {
         try {
-            const res = await apiClient.get('/api/operations/sites/?is_active=true&page_size=200');
+            const res = await apiClient.get('/api/operations/sites/?is_active=true&page_size=1000');
             setSites(res.data.results || res.data || []);
         } catch (err) {
             console.error('Failed to fetch sites', err);
         }
         try {
-            const res = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=200');
+            const res = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=1000');
             setDesignations(res.data.results || res.data || []);
         } catch (err) {
             console.error('Failed to fetch designations', err);
         }
     };
 
-    const fetchPostsForSite = async (siteId: string) => {
+    const fetchPostsForSite = async (siteId: string, preselectedPostId?: string) => {
         if (!siteId) { setSitePosts([]); return; }
         try {
             const res = await apiClient.get(`/api/operations/posts/?site=${siteId}&is_active=true&page_size=100`);
-            const pList: SecurityPost[] = res.data.results || res.data;
+            const pList: SecurityPost[] = res.data.results || res.data || [];
             setSitePosts(pList);
 
-            if (formData.post) {
-                const matched = pList.find(p => p.id === formData.post);
+            const activePostId = preselectedPostId || (pList.length === 1 ? pList[0].id : formData.post);
+            if (activePostId) {
+                const matched = pList.find(p => p.id === activePostId);
                 if (matched) {
                     const postSal = matched.monthly_pay_rate ? Number(matched.monthly_pay_rate) : null;
+                    const matchedDesig = resolveDesignationId(matched, designations);
                     setFormData(prev => ({
                         ...prev,
+                        post: activePostId,
                         location_monthly_salary: postSal !== null ? postSal : prev.location_monthly_salary,
                         service_contract: matched.service_contract || prev.service_contract,
-                        designation: matched.required_designation || prev.designation
+                        designation: matchedDesig || prev.designation
                     }));
                 }
             }
@@ -138,6 +217,22 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
             setSitePosts([]);
         }
     };
+
+    // Auto-sync designation whenever post, posts list, or designations list change
+    useEffect(() => {
+        if (formData.post && sitePosts.length > 0 && designations.length > 0) {
+            const selectedPost = sitePosts.find(p => p.id === formData.post);
+            if (selectedPost) {
+                const matchedDesigId = resolveDesignationId(selectedPost, designations);
+                if (matchedDesigId && formData.designation !== matchedDesigId) {
+                    setFormData(prev => ({
+                        ...prev,
+                        designation: matchedDesigId
+                    }));
+                }
+            }
+        }
+    }, [formData.post, sitePosts, designations, formData.designation]);
 
     const fetchContractsForSite = async (siteId: string) => {
         if (!siteId) { setSiteContracts([]); return; }
@@ -215,17 +310,18 @@ export const DeploymentModal: React.FC<DeploymentModalProps> = ({
         if (name === 'site') {
             fetchContractsForSite(value);
             fetchPostsForSite(value);
-            setFormData(prev => ({ ...prev, site: value, post: '', service_contract: null, location_monthly_salary: null }));
+            setFormData(prev => ({ ...prev, site: value, post: '', designation: '', service_contract: null, location_monthly_salary: null }));
             fetchGuardsDebounced(empSearch, '');
         }
         if (name === 'post') {
             const selectedPost = sitePosts.find(p => p.id === value);
             if (selectedPost) {
                 const postSal = selectedPost.monthly_pay_rate ? Number(selectedPost.monthly_pay_rate) : null;
+                const matchedDesig = resolveDesignationId(selectedPost, designations);
                 setFormData(prev => ({
                     ...prev,
                     post: value,
-                    designation: selectedPost.required_designation || prev.designation,
+                    designation: matchedDesig || prev.designation,
                     location_monthly_salary: postSal !== null ? postSal : prev.location_monthly_salary,
                     service_contract: selectedPost.service_contract || prev.service_contract || (siteContracts[0]?.id || null),
                     employee: ''

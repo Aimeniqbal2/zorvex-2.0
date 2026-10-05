@@ -59,8 +59,8 @@ export const getOperationalSites = async (params?: { page?: number, page_size?: 
 };
 
 // Security Posts
-export const getSecurityPosts = async (params?: { site?: string, is_active?: boolean, page?: number }): Promise<PaginatedResponse<SecurityPost>> => {
-    const response = await apiClient.get('/api/operations/posts/', { params });
+export const getSecurityPosts = async (params?: { site?: string, is_active?: boolean, page?: number, page_size?: number, search?: string }): Promise<PaginatedResponse<SecurityPost>> => {
+    const response = await apiClient.get('/api/operations/posts/', { params: { page_size: 1000, ...params } });
     return response.data;
 };
 

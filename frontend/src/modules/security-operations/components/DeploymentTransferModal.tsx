@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { apiClient, transferDeployment } from '../api';
 import type { OperationalSite, SecurityPost, ServiceContract, DesignationOption } from '../types';
+import { resolveDesignationId } from './DeploymentModal';
 
 interface DeploymentTransferModalProps {
     isOpen: boolean;
@@ -73,14 +74,14 @@ export const DeploymentTransferModal: React.FC<DeploymentTransferModalProps> = (
 
     const fetchInitialData = async () => {
         try {
-            const sitesRes = await apiClient.get('/api/operations/sites/?is_active=true&page_size=200');
+            const sitesRes = await apiClient.get('/api/operations/sites/?is_active=true&page_size=1000');
             setSites(sitesRes.data.results || sitesRes.data || []);
         } catch (err) {
             console.error('Failed to fetch sites for transfer', err);
         }
 
         try {
-            const desigRes = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=200');
+            const desigRes = await apiClient.get('/api/hrm/designations/?is_active=true&page_size=1000');
             setDesignations(desigRes.data.results || desigRes.data || []);
         } catch (err) {
             console.error('Failed to fetch designations for transfer', err);
@@ -125,10 +126,11 @@ export const DeploymentTransferModal: React.FC<DeploymentTransferModalProps> = (
 
     const handlePostChange = (postId: string) => {
         const selectedPost = posts.find(p => p.id === postId);
+        const matchedDesig = resolveDesignationId(selectedPost, designations);
         setFormData(prev => ({
             ...prev,
             new_post: postId,
-            new_designation: selectedPost?.required_designation || prev.new_designation,
+            new_designation: matchedDesig || prev.new_designation,
             new_contract: selectedPost?.service_contract || prev.new_contract || (contracts[0]?.id || ''),
             new_location_monthly_salary: selectedPost?.monthly_pay_rate ? Number(selectedPost.monthly_pay_rate) : null
         }));

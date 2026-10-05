@@ -40,7 +40,7 @@ export const SitesView: React.FC<SitesViewProps> = ({ onNavigate }) => {
         setIsLoading(true);
         setHasError(false);
         try {
-            const response = await getOperationalSites({ page, search: debouncedSearch });
+            const response = await getOperationalSites({ page, page_size: 20, search: debouncedSearch });
             setData(response);
         } catch (err) {
             setHasError(true);
@@ -167,7 +167,7 @@ export const SitesView: React.FC<SitesViewProps> = ({ onNavigate }) => {
                     emptyMessage={searchQuery ? "No sites match your search." : "No operational sites yet. Operational sites are created automatically from CRM client locations."}
                     pagination={data ? {
                         page: page,
-                        pageSize: 10,
+                        pageSize: 20,
                         totalItems: data.count,
                         onPageChange: (newPage) => setPage(newPage)
                     } : undefined}
