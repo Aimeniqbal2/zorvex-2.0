@@ -1,8 +1,11 @@
+import logging
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
+
+logger = logging.getLogger(__name__)
 from django.utils import timezone
 from platform_core.permissions import ModulePermission
 from erp_core.views import TenantModelViewSet
@@ -118,16 +121,40 @@ class SecurityProposalViewSet(TenantModelViewSet):
 
     def perform_create(self, serializer):
         company = self.request.user.company
-        proposal = serializer.save(company=company)
-        # Auto-create version 1
+        proposal = serializer.save(
+            company=company,
+            status=SecurityProposalStatus.ACTIVE,
+            is_handoff_ready=True
+        )
+        # Auto-create active version 1 for Final Requirements
         from django.db import transaction
         with transaction.atomic():
             ProposalVersion.objects.create(
                 proposal=proposal,
                 company=company,
                 version_number=1,
-                version_type='INITIAL'
+                version_type='Final Requirement',
+                status='ACTIVE'
             )
+            try:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(proposal)
+            except Exception as e:
+                logger.warning(f"Error auto-syncing new requirement to operations: {e}")
+
+    @action(detail=True, methods=['post'], url_path='sync-to-operations')
+    def sync_to_operations(self, request, pk=None):
+        proposal = self.get_object()
+        try:
+            contract = SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(proposal)
+            return Response({
+                'success': True,
+                'status': proposal.status,
+                'contract_id': str(contract.id) if contract else None,
+                'contract_code': contract.contract_code if contract else None,
+                'message': 'Successfully synced final requirements into Operations!'
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])
     def transition(self, request, pk=None):
@@ -1138,10 +1165,12 @@ class ProposalVersionViewSet(TenantModelViewSet):
         serializer.save(company=self.request.user.company)
 
     def perform_update(self, serializer):
-        instance = self.get_object()
-        if instance.is_frozen:
-            raise ValidationError({'detail': 'Cannot modify a frozen proposal version. Create a revision instead.'})
-        serializer.save()
+        instance = serializer.save()
+        try:
+            if instance.proposal:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(instance.proposal)
+        except Exception as e:
+            logger.warning(f"Error auto-syncing version update to operations: {e}")
 
     @action(detail=True, methods=['post'], url_path='import-recommendations')
     def import_recommendations(self, request, pk=None):
@@ -1219,11 +1248,11 @@ class ProposalServiceLineViewSet(TenantModelViewSet):
 
         if not existing_line and service_type:
             st_name = (service_type.name or '').lower()
-            if 'guard' in st_name and not ('ex' in st_name or 'arm' in st_name):
+            if st_name in ['security guard', 'security guard civil', 'security guard (civil)']:
                 existing_line = ProposalServiceLine.objects.filter(
                     proposal_version=version,
                     location=location,
-                    service_type__name__in=['Security Guard', 'Security Guard (Civil)']
+                    service_type__name__in=['Security Guard', 'Security Guard (Civil)', 'Security Guard Civil']
                 ).first()
 
         if existing_line:
@@ -1232,6 +1261,10 @@ class ProposalServiceLineViewSet(TenantModelViewSet):
                 if field not in ['proposal_version', 'location']:
                     setattr(existing_line, field, val)
             existing_line.save()
+            try:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(version.proposal)
+            except Exception as e:
+                logger.warning(f"Error auto-syncing updated service line to operations: {e}")
             return Response(self.get_serializer(existing_line).data, status=status.HTTP_200_OK)
 
         self.perform_create(serializer)
@@ -1252,25 +1285,34 @@ class ProposalServiceLineViewSet(TenantModelViewSet):
 
         if version and str(version.company_id) != str(company.id):
             raise ValidationError({'proposal_version': 'ProposalVersion company mismatch.'})
-        if version and version.is_frozen:
-            raise ValidationError({'detail': 'Cannot add service lines to a frozen proposal version.'})
         if location and str(location.company_id) != str(company.id):
             raise ValidationError({'location': 'Location company mismatch.'})
         if service_type and str(service_type.company_id) != str(company.id):
             raise ValidationError({'service_type': 'ServiceType company mismatch.'})
 
-        serializer.save(company=company)
+        instance = serializer.save(company=company)
+        try:
+            if instance.proposal_version and instance.proposal_version.proposal:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(instance.proposal_version.proposal)
+        except Exception as e:
+            logger.warning(f"Error auto-syncing created service line to operations: {e}")
 
     def perform_update(self, serializer):
-        instance = self.get_object()
-        if instance.proposal_version.is_frozen:
-            raise ValidationError({'detail': 'Cannot modify service lines in a frozen proposal version.'})
-        serializer.save()
+        instance = serializer.save()
+        try:
+            if instance.proposal_version and instance.proposal_version.proposal:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(instance.proposal_version.proposal)
+        except Exception as e:
+            logger.warning(f"Error auto-syncing updated service line to operations: {e}")
 
     def perform_destroy(self, instance):
-        if instance.proposal_version.is_frozen:
-            raise ValidationError({'detail': 'Cannot delete service lines from a frozen proposal version.'})
+        proposal = instance.proposal_version.proposal if instance.proposal_version else None
         super().perform_destroy(instance)
+        if proposal:
+            try:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(proposal)
+            except Exception as e:
+                logger.warning(f"Error auto-syncing deleted service line to operations: {e}")
 
 
 class ContractEquipmentRequirementViewSet(TenantModelViewSet):
@@ -1439,13 +1481,22 @@ class CostingGridView(APIView):
                     "sessi": float(ver.total_sessi if ver.total_sessi is not None else 0),
                     "eobi": float(ver.total_eobi if ver.total_eobi is not None else 0),
 
-                    "sup_ex_qty": 0, "sup_ex_rate": 0, "sup_ex_sal": 0,
                     "sup_civ_qty": 0, "sup_civ_rate": 0, "sup_civ_sal": 0,
-                    "guard_ex_qty": 0, "guard_ex_rate": 0, "guard_ex_sal": 0,
+                    "sup_ex_qty": 0, "sup_ex_rate": 0, "sup_ex_sal": 0,
+                    "sr_sup_civ_qty": 0, "sr_sup_civ_rate": 0, "sr_sup_civ_sal": 0,
+                    "sr_sup_ex_qty": 0, "sr_sup_ex_rate": 0, "sr_sup_ex_sal": 0,
                     "guard_civ_qty": 0, "guard_civ_rate": 0, "guard_civ_sal": 0,
-                    "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
-                    "cpo_ex_qty": 0, "cpo_ex_rate": 0, "cpo_ex_sal": 0,
+                    "guard_ex_qty": 0, "guard_ex_rate": 0, "guard_ex_sal": 0,
+                    "hd_gd_civ_qty": 0, "hd_gd_civ_rate": 0, "hd_gd_civ_sal": 0,
+                    "hd_gd_ex_qty": 0, "hd_gd_ex_rate": 0, "hd_gd_ex_sal": 0,
                     "cpo_civ_qty": 0, "cpo_civ_rate": 0, "cpo_civ_sal": 0,
+                    "cpo_ex_qty": 0, "cpo_ex_rate": 0, "cpo_ex_sal": 0,
+                    "cpo_ssg_qty": 0, "cpo_ssg_rate": 0, "cpo_ssg_sal": 0,
+                    "lady_searcher_qty": 0, "lady_searcher_rate": 0, "lady_searcher_sal": 0,
+                    "cctv_op_qty": 0, "cctv_op_rate": 0, "cctv_op_sal": 0,
+                    "deo_qty": 0, "deo_rate": 0, "deo_sal": 0,
+                    # Legacy fallback
+                    "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
                 }
 
                 for l in loc_info["lines"]:
@@ -1456,20 +1507,34 @@ class CostingGridView(APIView):
                     s = float(l.guard_salary or 0)
 
                     is_ex = ('ex' in st_name or 'arm' in st_name or '_EX' in st_code)
+                    is_ssg = ('ssg' in st_name or 'commando' in st_name or 'SSG' in st_code)
 
-                    if st_code in ['SUP_EX', 'SUP_CIV'] or 'sup' in st_name:
-                        if is_ex:
-                            row["sup_ex_qty"] += q; row["sup_ex_rate"] = r; row["sup_ex_sal"] = s
-                        else:
-                            row["sup_civ_qty"] += q; row["sup_civ_rate"] = r; row["sup_civ_sal"] = s
-                    elif st_code in ['CPO_EX', 'CPO_CIV'] or 'cpo' in st_name or 'close protection' in st_name:
-                        if is_ex:
-                            row["cpo_ex_qty"] += q; row["cpo_ex_rate"] = r; row["cpo_ex_sal"] = s
-                        else:
-                            row["cpo_civ_qty"] += q; row["cpo_civ_rate"] = r; row["cpo_civ_sal"] = s
-                    elif st_code == 'LADY_CCTV' or 'lady' in st_name or 'cctv' in st_name or 'searcher' in st_name:
+                    if st_code == 'CPO_SSG' or (('cpo' in st_name or 'close protection' in st_name) and is_ssg):
+                        row["cpo_ssg_qty"] += q; row["cpo_ssg_rate"] = r; row["cpo_ssg_sal"] = s
+                    elif st_code == 'CPO_EX' or (('cpo' in st_name or 'close protection' in st_name) and is_ex):
+                        row["cpo_ex_qty"] += q; row["cpo_ex_rate"] = r; row["cpo_ex_sal"] = s
+                    elif st_code == 'CPO_CIV' or ('cpo' in st_name or 'close protection' in st_name):
+                        row["cpo_civ_qty"] += q; row["cpo_civ_rate"] = r; row["cpo_civ_sal"] = s
+                    elif st_code == 'SR_SUP_EX' or (('senior supervisor' in st_name or 'sr supervisor' in st_name) and is_ex):
+                        row["sr_sup_ex_qty"] += q; row["sr_sup_ex_rate"] = r; row["sr_sup_ex_sal"] = s
+                    elif st_code == 'SR_SUP_CIV' or ('senior supervisor' in st_name or 'sr supervisor' in st_name):
+                        row["sr_sup_civ_qty"] += q; row["sr_sup_civ_rate"] = r; row["sr_sup_civ_sal"] = s
+                    elif st_code == 'SUP_EX' or ('sup' in st_name and is_ex):
+                        row["sup_ex_qty"] += q; row["sup_ex_rate"] = r; row["sup_ex_sal"] = s
+                    elif st_code == 'SUP_CIV' or 'sup' in st_name:
+                        row["sup_civ_qty"] += q; row["sup_civ_rate"] = r; row["sup_civ_sal"] = s
+                    elif st_code == 'HD_GD_EX' or (('head' in st_name or 'senior guard' in st_name) and is_ex):
+                        row["hd_gd_ex_qty"] += q; row["hd_gd_ex_rate"] = r; row["hd_gd_ex_sal"] = s
+                    elif st_code == 'HD_GD_CIV' or ('head' in st_name or 'senior guard' in st_name):
+                        row["hd_gd_civ_qty"] += q; row["hd_gd_civ_rate"] = r; row["hd_gd_civ_sal"] = s
+                    elif st_code in ['CCTV_OP', 'CCTV'] or ('cctv' in st_name and 'lady' not in st_name):
+                        row["cctv_op_qty"] += q; row["cctv_op_rate"] = r; row["cctv_op_sal"] = s
+                    elif st_code in ['LADY_SEARCHER', 'LADY_CCTV'] or 'lady' in st_name or 'searcher' in st_name:
+                        row["lady_searcher_qty"] += q; row["lady_searcher_rate"] = r; row["lady_searcher_sal"] = s
                         row["lady_cctv_qty"] += q; row["lady_cctv_rate"] = r; row["lady_cctv_sal"] = s
-                    elif is_ex:
+                    elif st_code == 'DEO' or 'deo' in st_name or 'data entry' in st_name:
+                        row["deo_qty"] += q; row["deo_rate"] = r; row["deo_sal"] = s
+                    elif st_code == 'GD_EX' or is_ex:
                         row["guard_ex_qty"] += q; row["guard_ex_rate"] = r; row["guard_ex_sal"] = s
                     else:
                         row["guard_civ_qty"] += q; row["guard_civ_rate"] = r; row["guard_civ_sal"] = s
@@ -1503,13 +1568,20 @@ class CostingGridBatchSyncView(APIView):
         synced_count = 0
 
         role_definitions = [
-            ("sup_ex", "Supervisor (Ex-Army)", "SUP_EX", "UNARMED"),
-            ("sup_civ", "Supervisor (Civil)", "SUP_CIV", "UNARMED"),
-            ("guard_ex", "Security Guard (Ex-Army)", "GD_EX", "UNARMED"),
-            ("guard_civ", "Security Guard (Civil)", "GD_CIV", "UNARMED"),
-            ("lady_cctv", "Lady Searcher / CCTV Operator", "LADY_CCTV", "CCTV_OPERATOR"),
-            ("cpo_ex", "Close Protection Officer (Ex-Army)", "CPO_EX", "PISTOL"),
-            ("cpo_civ", "Close Protection Officer (Civil)", "CPO_CIV", "PISTOL"),
+            ("sup_civ", "Supervisor Civil", "SUP_CIV", "UNARMED"),
+            ("sup_ex", "Supervisor Ex-Army", "SUP_EX", "UNARMED"),
+            ("sr_sup_civ", "Senior Supervisor Civil", "SR_SUP_CIV", "UNARMED"),
+            ("sr_sup_ex", "Senior Supervisor Ex-Army", "SR_SUP_EX", "UNARMED"),
+            ("guard_civ", "Security Guard Civil", "GD_CIV", "UNARMED"),
+            ("guard_ex", "Security Guard Ex-Army", "GD_EX", "UNARMED"),
+            ("hd_gd_civ", "Head / Senior Guard Civil", "HD_GD_CIV", "UNARMED"),
+            ("hd_gd_ex", "Head / Senior Guard Ex-Army", "HD_GD_EX", "UNARMED"),
+            ("cpo_civ", "Close Protection Officer Civil", "CPO_CIV", "PISTOL"),
+            ("cpo_ex", "Close Protection Officer Ex-Army", "CPO_EX", "PISTOL"),
+            ("cpo_ssg", "Close Protection Officer Ex-SSG Commando", "CPO_SSG", "PISTOL"),
+            ("lady_searcher", "Lady Searcher", "LADY_SEARCHER", "UNARMED"),
+            ("cctv_op", "CCTV Operator", "CCTV_OP", "CCTV_OPERATOR"),
+            ("deo", "Data Entry Operator (DEO)", "DEO", "UNARMED"),
         ]
 
         proposals_to_sync = set()
@@ -1560,9 +1632,15 @@ class CostingGridBatchSyncView(APIView):
                         proposal = SecurityProposal.objects.create(
                             company=company,
                             customer=customer,
-                            title=f"{customer.name} - Commercial Proposal",
-                            status='DRAFT'
+                            title=f"{customer.name} - Final Requirements",
+                            status=SecurityProposalStatus.ACTIVE,
+                            is_handoff_ready=True
                         )
+                    else:
+                        if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:
+                            proposal.status = SecurityProposalStatus.ACTIVE
+                            proposal.is_handoff_ready = True
+                            proposal.save(update_fields=['status', 'is_handoff_ready'])
 
                     def _parse_dec(v, default):
                         if v is None or str(v).strip() == '':
@@ -1591,16 +1669,15 @@ class CostingGridBatchSyncView(APIView):
 
                     version = ProposalVersion.objects.filter(
                         company=company,
-                        proposal=proposal,
-                        is_frozen=False
+                        proposal=proposal
                     ).order_by('-version_number').first()
                     if not version:
                         version = ProposalVersion.objects.create(
                             company=company,
                             proposal=proposal,
                             version_number=1,
-                            version_type='Initial Proposal',
-                            status='DRAFT',
+                            version_type='Final Requirement',
+                            status='ACTIVE',
                             overhead_per_guard=overhead,
                             service_charges_per_guard=service_charges,
                             withholding_tax_rate=wht,
@@ -1628,9 +1705,20 @@ class CostingGridBatchSyncView(APIView):
                     ).select_related('service_type'))
 
                     for prefix, role_name, role_code, default_weapon in role_definitions:
-                        qty = int(float(row.get(f"{prefix}_qty") or 0))
-                        rate = Decimal(str(row.get(f"{prefix}_rate") or 0))
-                        sal = Decimal(str(row.get(f"{prefix}_sal") or 0))
+                        raw_qty = row.get(f"{prefix}_qty")
+                        raw_rate = row.get(f"{prefix}_rate")
+                        raw_sal = row.get(f"{prefix}_sal")
+
+                        # Backwards compatibility fallback for lady_searcher / lady_cctv
+                        if prefix == "lady_searcher" and (raw_qty is None or float(raw_qty or 0) == 0):
+                            if row.get("lady_cctv_qty"):
+                                raw_qty = row.get("lady_cctv_qty")
+                                raw_rate = row.get("lady_cctv_rate")
+                                raw_sal = row.get("lady_cctv_sal")
+
+                        qty = int(float(raw_qty or 0))
+                        rate = Decimal(str(raw_rate or 0))
+                        sal = Decimal(str(raw_sal or 0))
 
                         st = SecurityServiceType.objects.filter(company=company, code=role_code).first()
                         if not st:
@@ -1649,15 +1737,34 @@ class CostingGridBatchSyncView(APIView):
                             cand_name = (cand.service_type.name or '').lower() if cand.service_type else ''
                             cand_code = (cand.service_type.code or '').upper() if cand.service_type else ''
                             is_cand_ex = ('ex' in cand_name or 'arm' in cand_name or '_EX' in cand_code)
+                            is_cand_ssg = ('ssg' in cand_name or 'commando' in cand_name or 'SSG' in cand_code)
 
                             matched_role = None
-                            if cand_code in ['SUP_EX', 'SUP_CIV'] or 'sup' in cand_name:
-                                matched_role = 'sup_ex' if is_cand_ex else 'sup_civ'
-                            elif cand_code in ['CPO_EX', 'CPO_CIV'] or 'cpo' in cand_name or 'close protection' in cand_name:
-                                matched_role = 'cpo_ex' if is_cand_ex else 'cpo_civ'
-                            elif cand_code == 'LADY_CCTV' or 'lady' in cand_name or 'cctv' in cand_name or 'searcher' in cand_name:
-                                matched_role = 'lady_cctv'
-                            elif is_cand_ex:
+                            if cand_code == 'CPO_SSG' or (('cpo' in cand_name or 'close protection' in cand_name) and is_cand_ssg):
+                                matched_role = 'cpo_ssg'
+                            elif cand_code == 'CPO_EX' or (('cpo' in cand_name or 'close protection' in cand_name) and is_cand_ex):
+                                matched_role = 'cpo_ex'
+                            elif cand_code == 'CPO_CIV' or ('cpo' in cand_name or 'close protection' in cand_name):
+                                matched_role = 'cpo_civ'
+                            elif cand_code == 'SR_SUP_EX' or (('senior supervisor' in cand_name or 'sr supervisor' in cand_name) and is_cand_ex):
+                                matched_role = 'sr_sup_ex'
+                            elif cand_code == 'SR_SUP_CIV' or ('senior supervisor' in cand_name or 'sr supervisor' in cand_name):
+                                matched_role = 'sr_sup_civ'
+                            elif cand_code == 'SUP_EX' or ('sup' in cand_name and is_cand_ex):
+                                matched_role = 'sup_ex'
+                            elif cand_code == 'SUP_CIV' or 'sup' in cand_name:
+                                matched_role = 'sup_civ'
+                            elif cand_code == 'HD_GD_EX' or (('head' in cand_name or 'senior guard' in cand_name) and is_cand_ex):
+                                matched_role = 'hd_gd_ex'
+                            elif cand_code == 'HD_GD_CIV' or ('head' in cand_name or 'senior guard' in cand_name):
+                                matched_role = 'hd_gd_civ'
+                            elif cand_code in ['CCTV_OP', 'CCTV'] or ('cctv' in cand_name and 'lady' not in cand_name):
+                                matched_role = 'cctv_op'
+                            elif cand_code in ['LADY_SEARCHER', 'LADY_CCTV'] or 'lady' in cand_name or 'searcher' in cand_name:
+                                matched_role = 'lady_searcher'
+                            elif cand_code == 'DEO' or 'deo' in cand_name or 'data entry' in cand_name:
+                                matched_role = 'deo'
+                            elif cand_code == 'GD_EX' or is_cand_ex:
                                 matched_role = 'guard_ex'
                             else:
                                 matched_role = 'guard_civ'
@@ -1697,8 +1804,8 @@ class CostingGridBatchSyncView(APIView):
 
                 for prop in proposals_to_sync:
                     try:
-                        from security_crm.services.workflow import SecurityProposalWorkflow
-                        SecurityProposalWorkflow.sync_proposal_and_locations_to_operations(prop)
+                        from security_crm.services.workflow import SecurityProposalWorkflowService
+                        SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(prop)
                     except Exception as sync_err:
                         logger.warning(f"Error syncing proposal {prop.id} to operations: {sync_err}")
 
@@ -1811,13 +1918,13 @@ class CostingGridImportExcelView(APIView):
             return Response({"error": f"Failed to parse Excel file: {err_msg}"}, status=status.HTTP_400_BAD_REQUEST)
 
         role_specs = [
-            ("Supervisor (Ex-Army)", "SUP_EX", 4, 5, 6, "UNARMED"),
-            ("Supervisor (Civil)", "SUP_CIV", 7, 8, 9, "UNARMED"),
-            ("Security Guard (Ex-Army)", "GD_EX", 10, 11, 12, "UNARMED"),
-            ("Security Guard (Civil)", "GD_CIV", 13, 14, 15, "UNARMED"),
-            ("Lady Searcher / CCTV Operator", "LADY_CCTV", 16, 17, 18, "CCTV_OPERATOR"),
-            ("Close Protection Officer (Ex-Army)", "CPO_EX", 19, 20, 21, "PISTOL"),
-            ("Close Protection Officer (Civil)", "CPO_CIV", 22, 23, 24, "PISTOL"),
+            ("Supervisor Ex-Army", "SUP_EX", 4, 5, 6, "UNARMED"),
+            ("Supervisor Civil", "SUP_CIV", 7, 8, 9, "UNARMED"),
+            ("Security Guard Ex-Army", "GD_EX", 10, 11, 12, "UNARMED"),
+            ("Security Guard Civil", "GD_CIV", 13, 14, 15, "UNARMED"),
+            ("Lady Searcher", "LADY_SEARCHER", 16, 17, 18, "UNARMED"),
+            ("Close Protection Officer Ex-Army", "CPO_EX", 19, 20, 21, "PISTOL"),
+            ("Close Protection Officer Civil", "CPO_CIV", 22, 23, 24, "PISTOL"),
         ]
 
         def parse_client_and_location(raw_name):

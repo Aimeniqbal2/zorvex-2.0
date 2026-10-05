@@ -9,7 +9,11 @@ import { ErrorState } from '../../../components/ui/ErrorState';
 import { SiteModal } from './SiteModal';
 import { SiteManpowerModal } from './SiteManpowerModal';
 
-export const SitesView: React.FC = () => {
+interface SitesViewProps {
+    onNavigate?: (tab: string, siteId?: string) => void;
+}
+
+export const SitesView: React.FC<SitesViewProps> = ({ onNavigate }) => {
     const [page, setPage] = useState(1);
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -50,8 +54,32 @@ export const SitesView: React.FC = () => {
     }, [fetchSites]);
 
     const columns: Column<OperationalSite>[] = [
-        { key: 'name', header: 'Site Name' },
+        { key: 'name', header: 'Site / Location Name' },
         { key: 'customer_name', header: 'Customer', render: (row: OperationalSite) => row.customer_name || 'N/A' },
+        { 
+            key: 'contract_codes', 
+            header: 'Contract Code', 
+            render: (row: OperationalSite) => (
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {row.contract_codes && row.contract_codes.length > 0 ? (
+                        row.contract_codes.map(code => (
+                            <Badge key={code} variant="default">{code}</Badge>
+                        ))
+                    ) : (
+                        <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>—</span>
+                    )}
+                </div>
+            )
+        },
+        {
+            key: 'active_posts_count',
+            header: 'Active Posts',
+            render: (row: OperationalSite) => (
+                <Badge variant={row.active_posts_count && row.active_posts_count > 0 ? 'primary' : 'default'}>
+                    {row.active_posts_count || 0} Posts
+                </Badge>
+            )
+        },
         { key: 'address', header: 'Address' },
         { 
             key: 'is_active', 
@@ -62,7 +90,7 @@ export const SitesView: React.FC = () => {
             key: 'actions',
             header: 'Actions',
             render: (row: OperationalSite) => (
-                <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <button 
                         onClick={() => { setManpowerSite(row); setIsManpowerModalOpen(true); }}
                         style={{
@@ -77,6 +105,23 @@ export const SitesView: React.FC = () => {
                         <i className="bx bx-group" style={{ marginRight: '4px' }}></i>
                         Posts & Manpower
                     </button>
+                    {onNavigate && (
+                        <button 
+                            onClick={() => onNavigate('attendance', row.id)}
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#10b981',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                fontSize: '13px'
+                            }}
+                            title="Open Attendance for this site"
+                        >
+                            <i className="bx bx-time-five" style={{ marginRight: '4px' }}></i>
+                            Attendance
+                        </button>
+                    )}
                     <button 
                         onClick={() => { setSelectedSite(row); setIsModalOpen(true); }}
                         style={{

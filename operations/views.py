@@ -725,7 +725,7 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
                 post = SecurityPost.objects.select_related('required_designation').get(id=post_id, company_id=company_id)
                 post_text = f"{post.post_name} {post.required_designation.name if post.required_designation else ''}".lower()
 
-                is_ex_army = any(kw in post_text for kw in ['ex-army', 'ex_army', 'ex army', 'army', 'military', 'ex_rangers', 'rangers', 'mujahid'])
+                is_ex_army = any(kw in post_text for kw in ['ex-army', 'ex_army', 'ex army', 'army', 'military', 'ex_rangers', 'rangers', 'mujahid', 'ssg', 'commando'])
                 is_civil = ('civil' in post_text or 'civ' in post_text) and not is_ex_army
                 is_female = any(kw in post_text for kw in ['lady', 'female', 'searcher'])
 
@@ -738,9 +738,20 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
                     qs = qs.filter(gender='FEMALE')
 
                 if post.required_designation_id:
+                    from django.db.models import Q
                     desig_name = post.required_designation.name.lower()
                     if 'supervisor' in desig_name:
                         qs = qs.filter(designation__name__icontains='supervisor')
+                    elif 'cpo' in desig_name or 'close protection' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='cpo') | Q(designation__name__icontains='close protection'))
+                    elif 'head' in desig_name or 'senior guard' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='head') | Q(designation__name__icontains='senior guard'))
+                    elif 'cctv' in desig_name:
+                        qs = qs.filter(designation__name__icontains='cctv')
+                    elif 'searcher' in desig_name:
+                        qs = qs.filter(designation__name__icontains='searcher')
+                    elif 'deo' in desig_name or 'data entry' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='deo') | Q(designation__name__icontains='data entry'))
             except SecurityPost.DoesNotExist:
                 pass
 
@@ -752,6 +763,10 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
             else:
                 qs = qs.filter(background_type=background_type)
 
+        city = request.query_params.get('city') or request.query_params.get('station')
+        if city and city.strip().upper() not in ('ALL', ''):
+            qs = qs.filter(city__iexact=city.strip())
+
         if designation_id:
             qs = qs.filter(designation_id=designation_id)
 
@@ -761,6 +776,7 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
                 Q(first_name__icontains=search) |
                 Q(last_name__icontains=search) |
                 Q(employee_code__icontains=search) |
+                Q(previous_employee_code__icontains=search) |
                 Q(cnic_number__icontains=search)
             )
 
@@ -768,19 +784,120 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
             {
                 'id': str(emp.id),
                 'full_name': f"{emp.first_name} {emp.last_name}".strip(),
-                'employee_code': emp.employee_code,
+                'employee_code': emp.previous_employee_code or emp.employee_code,
+                'city': emp.city or 'KHI',
                 'cnic_number': emp.cnic_number,
                 'designation_id': str(emp.designation_id) if emp.designation_id else None,
                 'designation_name': emp.designation.name if emp.designation else 'Guard',
                 'background_type': emp.background_type,
                 'background_type_display': emp.get_background_type_display() if hasattr(emp, 'get_background_type_display') else emp.background_type,
                 'gender': emp.gender,
-                'phone_number': getattr(emp, 'mobile_number', '') or getattr(emp, 'phone_number', '') or '',
+                'phone_number': getattr(emp, 'mobile_number', '') or getattr(emp, 'phone_number', '') or getattr(emp, 'phone', '') or '',
                 'hire_date': str(emp.hire_date) if emp.hire_date else None,
                 'status': emp.employment_status,
             }
             for emp in qs[:200]
         ]
+        return Response({'count': len(data), 'results': data})
+
+    @action(detail=False, methods=['get'], url_path='active-deployed-guards')
+    def active_deployed_guards(self, request):
+        """
+        Returns active deployed guards who can be shifted/transferred to another location.
+        Supports filtering by exclude_site, post, search, and background_type.
+        """
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        if not company_id:
+            return Response({'error': 'Company context required.'}, status=400)
+
+        exclude_site_id = request.query_params.get('exclude_site') or request.query_params.get('site_exclude')
+        post_id = request.query_params.get('post')
+        background_type = request.query_params.get('background_type')
+        search = request.query_params.get('search')
+
+        qs = Deployment.objects.filter(
+            company_id=company_id,
+            status=DeploymentStatus.ACTIVE,
+            is_deleted=False
+        ).select_related('employee', 'site', 'post', 'designation', 'employee__designation')
+
+        if exclude_site_id:
+            qs = qs.exclude(site_id=exclude_site_id)
+
+        if post_id:
+            try:
+                post = SecurityPost.objects.select_related('required_designation').get(id=post_id, company_id=company_id)
+                post_text = f"{post.post_name} {post.required_designation.name if post.required_designation else ''}".lower()
+
+                is_ex_army = any(kw in post_text for kw in ['ex-army', 'ex_army', 'ex army', 'army', 'military', 'ex_rangers', 'rangers', 'mujahid', 'ssg', 'commando'])
+                is_civil = ('civil' in post_text or 'civ' in post_text) and not is_ex_army
+                is_female = any(kw in post_text for kw in ['lady', 'female', 'searcher'])
+
+                if is_ex_army:
+                    qs = qs.filter(employee__background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
+                elif is_civil:
+                    qs = qs.filter(employee__background_type='CIVILIAN')
+
+                if is_female:
+                    qs = qs.filter(employee__gender='FEMALE')
+
+                if post.required_designation_id:
+                    from django.db.models import Q
+                    desig_name = post.required_designation.name.lower()
+                    if 'supervisor' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='supervisor') | Q(employee__designation__name__icontains='supervisor'))
+                    elif 'cpo' in desig_name or 'close protection' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='cpo') | Q(designation__name__icontains='close protection') | Q(employee__designation__name__icontains='cpo') | Q(employee__designation__name__icontains='close protection'))
+                    elif 'head' in desig_name or 'senior guard' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='head') | Q(designation__name__icontains='senior guard') | Q(employee__designation__name__icontains='head') | Q(employee__designation__name__icontains='senior guard'))
+                    elif 'cctv' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='cctv') | Q(employee__designation__name__icontains='cctv'))
+                    elif 'searcher' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='searcher') | Q(employee__designation__name__icontains='searcher'))
+                    elif 'deo' in desig_name or 'data entry' in desig_name:
+                        qs = qs.filter(Q(designation__name__icontains='deo') | Q(designation__name__icontains='data entry') | Q(employee__designation__name__icontains='deo') | Q(employee__designation__name__icontains='data entry'))
+            except SecurityPost.DoesNotExist:
+                pass
+
+        if background_type:
+            if background_type == 'EX_ARMY':
+                qs = qs.filter(employee__background_type__in=['EX_ARMY', 'EX_RANGERS', 'EX_MUJAHID', 'EX_POLICE'])
+            elif background_type == 'CIVILIAN':
+                qs = qs.filter(employee__background_type='CIVILIAN')
+            else:
+                qs = qs.filter(employee__background_type=background_type)
+
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(employee__first_name__icontains=search) |
+                Q(employee__last_name__icontains=search) |
+                Q(employee__employee_code__icontains=search) |
+                Q(employee__previous_employee_code__icontains=search) |
+                Q(site__name__icontains=search)
+            )
+
+        data = []
+        for dep in qs[:200]:
+            emp = dep.employee
+            current_salary = dep.location_monthly_salary or (dep.post.monthly_pay_rate if dep.post else None) or getattr(emp, 'basic_salary', None)
+            data.append({
+                'deployment_id': str(dep.id),
+                'id': str(emp.id),
+                'full_name': f"{emp.first_name} {emp.last_name}".strip(),
+                'employee_code': emp.previous_employee_code or emp.employee_code,
+                'current_site_id': str(dep.site_id) if dep.site_id else None,
+                'current_site_name': dep.site.name if dep.site else 'Unknown Site',
+                'current_post_id': str(dep.post_id) if dep.post_id else None,
+                'current_post_name': dep.post.post_name if dep.post else 'General',
+                'current_monthly_salary': float(current_salary) if current_salary else 0.0,
+                'start_date': str(dep.start_date),
+                'designation_id': str(dep.designation_id) if dep.designation_id else None,
+                'designation_name': dep.designation.name if dep.designation else (emp.designation.name if emp.designation else 'Guard'),
+                'background_type': emp.background_type,
+                'background_type_display': emp.get_background_type_display() if hasattr(emp, 'get_background_type_display') else emp.background_type,
+                'gender': emp.gender,
+            })
         return Response({'count': len(data), 'results': data})
 
     @action(detail=False, methods=['post'], url_path='assign')
@@ -873,20 +990,34 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
         new_designation_id = data.get('new_designation') or deployment.designation_id
         new_start_date = data.get('new_start_date') or relieved_date
         new_assignment_type = data.get('new_assignment_type', DeploymentAssignmentType.PERMANENT)
+        new_salary = data.get('new_location_monthly_salary') or data.get('location_monthly_salary')
         notes = data.get('notes', '')
 
+        if not new_salary and new_post_id:
+            try:
+                post_obj = SecurityPost.objects.filter(id=new_post_id).first()
+                if post_obj and post_obj.monthly_pay_rate:
+                    new_salary = post_obj.monthly_pay_rate
+            except Exception:
+                pass
+
         from django.db import transaction
+        from datetime import timedelta
         user = request.user if request.user.is_authenticated else None
         with transaction.atomic():
-            # 1. Relieve old deployment
+            # 1. Relieve old deployment cleanly without day overlap
+            old_end_date = relieved_date
+            if relieved_date and relieved_date == new_start_date:
+                old_end_date = new_start_date - timedelta(days=1)
+
             deployment.status = DeploymentStatus.RELIEVED
-            deployment.end_date = relieved_date
+            deployment.end_date = old_end_date
             deployment.relieved_date = relieved_date
             deployment.relief_reason = relief_reason or "Transferred to new site"
             deployment.relieved_by = user
             deployment.save()
 
-            # 2. Create new active deployment
+            # 2. Create new active deployment with new site pay rate
             new_dep = Deployment(
                 company=deployment.company,
                 employee=deployment.employee,
@@ -894,6 +1025,7 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
                 post_id=new_post_id,
                 service_contract_id=new_contract_id,
                 designation_id=new_designation_id,
+                location_monthly_salary=new_salary,
                 assignment_type=new_assignment_type,
                 start_date=new_start_date,
                 status=DeploymentStatus.ACTIVE,

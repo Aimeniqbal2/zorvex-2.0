@@ -138,6 +138,23 @@ class Employee(BaseModel):
     rehire_date = models.DateField(null=True, blank=True)
 
     # Legacy & Extended Personal Details
+    city = models.CharField(
+        max_length=20,
+        choices=[
+            ('KHI', 'Karachi (KHI)'),
+            ('LHR', 'Lahore (LHR)'),
+            ('ISB', 'Islamabad (ISB)'),
+            ('RAW', 'Rawalpindi (RAW)'),
+            ('MUL', 'Multan (MUL)'),
+            ('FSD', 'Faisalabad (FSD)'),
+            ('PEW', 'Peshawar (PEW)'),
+            ('QTA', 'Quetta (QTA)')
+        ],
+        default='KHI',
+        blank=True,
+        db_index=True,
+        help_text="Station / City code for workforce deployment scoping (e.g. KHI, LHR)"
+    )
     previous_employee_code = models.CharField(max_length=50, blank=True, default='', db_index=True)
     photograph = models.FileField(upload_to='hrm/employee_photos/', null=True, blank=True)
     gender = models.CharField(

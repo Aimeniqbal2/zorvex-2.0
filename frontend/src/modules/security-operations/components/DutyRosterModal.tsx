@@ -134,8 +134,9 @@ export const DutyRosterModal: React.FC<DutyRosterModalProps> = ({
             isOpen={isOpen} 
             onClose={onClose} 
             title={activeRoster ? 'Edit Scheduled Duty' : `Schedule Duty Slot — ${site?.name || 'Site'}`}
+            width="820px"
         >
-            <form onSubmit={handleSubmit} style={{ padding: '16px', maxWidth: '520px', width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <form onSubmit={handleSubmit} style={{ padding: '16px', width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {error && (
                     <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', fontSize: '13px' }}>
                         {error}

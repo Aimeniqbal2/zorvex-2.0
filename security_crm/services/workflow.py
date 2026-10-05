@@ -946,6 +946,57 @@ class SecurityProposalWorkflowService:
                             sp.is_active = True
                             sp.save(update_fields=['daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
 
+                        # Also sync to Operations SiteStaffingRequirement for coverage views
+                        try:
+                            from operations.models import Shift, SiteStaffingRequirement
+                            shift = Shift.objects.filter(company=proposal.company, is_active=True).first()
+                            if not shift:
+                                shift = Shift.objects.filter(company=proposal.company).first()
+                            if not shift:
+                                shift = Shift.objects.create(
+                                    company=proposal.company,
+                                    name='Standard 12h Shift',
+                                    start_time='08:00',
+                                    end_time='20:00',
+                                    is_active=True
+                                )
+                            if shift:
+                                ssr = SiteStaffingRequirement.objects.filter(
+                                    company=proposal.company,
+                                    service_contract=service_contract,
+                                    site=target_site,
+                                    designation=desig,
+                                    shift=shift,
+                                    is_deleted=False
+                                ).first()
+                                if not ssr:
+                                    SiteStaffingRequirement.objects.create(
+                                        company=proposal.company,
+                                        service_contract=service_contract,
+                                        site=target_site,
+                                        designation=desig,
+                                        shift=shift,
+                                        required_headcount=line.quantity,
+                                        effective_from=eff_date,
+                                        is_active=True
+                                    )
+                                else:
+                                    ssr.required_headcount = line.quantity
+                                    ssr.is_active = True
+                                    ssr.save(update_fields=['required_headcount', 'is_active'])
+                        except Exception as ssr_err:
+                            logger.warning(f"Error syncing SiteStaffingRequirement for {line}: {ssr_err}")
+
+        # Mark proposal ACTIVE and ready for operations
+        if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:
+            proposal.status = SecurityProposalStatus.ACTIVE
+            proposal.is_handoff_ready = True
+            proposal.save(update_fields=['status', 'is_handoff_ready'])
+
+        if proposal.customer and proposal.customer.entity_type != 'CUSTOMER':
+            proposal.customer.entity_type = 'CUSTOMER'
+            proposal.customer.save(update_fields=['entity_type'])
+
         return service_contract
 
 

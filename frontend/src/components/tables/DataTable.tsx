@@ -3,7 +3,7 @@ import { Button } from '../ui/Button';
 
 export interface Column<T> {
     key: keyof T | string;
-    header: string;
+    header: React.ReactNode;
     width?: string | number;
     minWidth?: string | number;
     maxWidth?: string | number;

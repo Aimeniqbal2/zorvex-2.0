@@ -115,8 +115,13 @@ export const ShiftSetupModal: React.FC<ShiftSetupModalProps> = ({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Shift Templates & Work Rotations">
-            <div style={{ padding: '16px', maxWidth: '750px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title="Shift Templates & Work Rotations"
+            width="820px"
+        >
+            <div style={{ padding: '16px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {error && (
                     <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', fontSize: '13px' }}>
                         {error}

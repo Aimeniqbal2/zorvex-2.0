@@ -46,3 +46,34 @@
     overflow: visible !important;
 }
 
+/* Fast Costing Grid Custom Scrollbar - Seamless in both Light and Dark Themes */
+.fast-costing-scroll-container {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) var(--color-surface-secondary);
+}
+
+.fast-costing-scroll-container::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.fast-costing-scroll-container::-webkit-scrollbar-track {
+    background: var(--color-surface-secondary);
+    border-radius: 6px;
+}
+
+.fast-costing-scroll-container::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 6px;
+    border: 2px solid var(--color-surface-secondary);
+}
+
+.fast-costing-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+}
+
+.fast-costing-scroll-container::-webkit-scrollbar-corner {
+    background: var(--color-surface-secondary);
+}
+
+

@@ -6,10 +6,11 @@ import type {
 } from '../api';
 import { 
     getProposalVersions, updateProposalVersion, importAssessmentRecommendations,
-    createFinalProposalRevision, createProposalServiceLine, updateProposalServiceLine,
+    createProposalServiceLine, updateProposalServiceLine,
     deleteProposalServiceLine, createContractEquipment, updateContractEquipment,
     deleteContractEquipment, createProposalAdditionalCharge, updateProposalAdditionalCharge,
-    deleteProposalAdditionalCharge, prepareFinalProposalEmail, sendFinalProposalEmail
+    deleteProposalAdditionalCharge, prepareFinalProposalEmail, sendFinalProposalEmail,
+    syncProposalToOperations
 } from '../api';
 import { ImportRecommendationsModal } from './ImportRecommendationsModal';
 import { AddServiceLineModal } from './AddServiceLineModal';
@@ -187,21 +188,6 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         }
     };
 
-    const handleCreateRevision = async () => {
-        if (!activeVersion) return;
-        try {
-            const res = await createFinalProposalRevision(proposal.id, activeVersion.id);
-            useToastStore.getState().success(res.message || 'New revision created.');
-            await loadVersions();
-            if (res.version?.id) {
-                setSelectedVersionId(res.version.id);
-            }
-            await onRefresh();
-        } catch (err: any) {
-            useToastStore.getState().error(err?.response?.data?.error || err?.message || 'Failed to create revision.');
-        }
-    };
-
     // Service Line actions
     const handleSaveServiceLine = async (payload: Partial<ProposalServiceLine>) => {
         if (editingServiceLine) {
@@ -323,21 +309,21 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                 </div>
             )}
 
-            {/* 1. Hero / Version Switcher Bar */}
+            {/* 1. Hero / Requirements Bar */}
             <div className="fp-version-bar">
                 <div className="fp-version-info">
-                    <div className="fp-version-icon">
-                        <i className='bx bx-file'></i>
+                    <div className="fp-version-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+                        <i className='bx bx-check-shield'></i>
                     </div>
                     <div className="fp-version-title-group">
                         <div className="fp-version-title-row">
-                            <h2 className="fp-version-title">Final Proposal Commercial Offers</h2>
-                            <span className="fp-version-count-badge">
-                                {versions.length} Version{versions.length > 1 ? 's' : ''}
+                            <h2 className="fp-version-title">Service & Staffing Requirements Sheet</h2>
+                            <span className="fp-version-count-badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#10b981' }}>
+                                Live in Operations
                             </span>
                         </div>
                         <p className="fp-version-desc">
-                            Manage client pricing, overtime rates, equipment, and contract terms
+                            Direct operational post specifications, headcount requirements, weapons, billing rates, and staff salaries.
                         </p>
                     </div>
                 </div>
@@ -351,16 +337,10 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                 onClick={() => setSelectedVersionId(v.id)}
                                 className={`fp-version-pill ${isActive ? 'active' : ''}`}
                             >
-                                <span>v{v.version_number} - {v.version_type || 'Proposal'}</span>
-                                {v.is_frozen ? (
-                                    <span className="fp-pill-tag frozen">
-                                        <i className='bx bx-lock-alt'></i> Frozen
-                                    </span>
-                                ) : (
-                                    <span className="fp-pill-tag draft">
-                                        <i className='bx bx-edit'></i> Draft
-                                    </span>
-                                )}
+                                <span>Requirements Sheet {v.version_number}</span>
+                                <span className="fp-pill-tag active" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+                                    <i className='bx bx-check-circle'></i> Final & Live
+                                </span>
                             </button>
                         );
                     })}
@@ -370,65 +350,51 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
             {/* 2. Action Toolbar */}
             <div className="fp-action-bar">
                 <div className="fp-action-left">
-                    {!isFrozen && (
-                        <>
-                            <button
-                                onClick={() => setShowImportModal(true)}
-                                className="fp-btn-action btn-import"
-                            >
-                                <i className='bx bx-import'></i> Import Recommendations
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setEditingServiceLine(null);
-                                    setShowServiceModal(true);
-                                }}
-                                className="fp-btn-action btn-guard"
-                            >
-                                <i className='bx bx-user-plus'></i> + Add Guard Service
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setEditingEquipment(null);
-                                    setShowEquipmentModal(true);
-                                }}
-                                className="fp-btn-action btn-equipment"
-                            >
-                                <i className='bx bx-wrench'></i> + Add Equipment
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setEditingCharge(null);
-                                    setShowChargeModal(true);
-                                }}
-                                className="fp-btn-action btn-charge"
-                            >
-                                <i className='bx bx-briefcase-alt'></i> + Add Commercial Charge
-                            </button>
-                        </>
-                    )}
                     <button
-                        onClick={handleCreateRevision}
-                        className="fp-btn-action"
+                        onClick={() => {
+                            setEditingServiceLine(null);
+                            setShowServiceModal(true);
+                        }}
+                        className="fp-btn-action btn-guard"
                     >
-                        <i className='bx bx-copy'></i> Create New Revision
+                        <i className='bx bx-user-plus'></i> + Add Guard Service
+                    </button>
+                    <button
+                        onClick={() => {
+                            setEditingEquipment(null);
+                            setShowEquipmentModal(true);
+                        }}
+                        className="fp-btn-action btn-equipment"
+                    >
+                        <i className='bx bx-wrench'></i> + Add Equipment
+                    </button>
+                    <button
+                        onClick={() => {
+                            setEditingCharge(null);
+                            setShowChargeModal(true);
+                        }}
+                        className="fp-btn-action btn-charge"
+                    >
+                        <i className='bx bx-briefcase-alt'></i> + Add Commercial Charge
                     </button>
                 </div>
 
                 <div>
-                    {isFinalStage && !isFrozen && (
-                        <button
-                            onClick={handleOpenEmailComposer}
-                            className="fp-btn-send-main"
-                        >
-                            <i className='bx bx-mail-send'></i> Send Final Proposal to Client
-                        </button>
-                    )}
-                    {isFrozen && (
-                        <div className="fp-frozen-banner">
-                            <i className='bx bx-lock'></i> Version is formally frozen & immutable. Create a revision to modify.
-                        </div>
-                    )}
+                    <button
+                        onClick={async () => {
+                            try {
+                                const res = await syncProposalToOperations(proposal.id);
+                                useToastStore.getState().success(res.message || 'Requirements successfully synced into Operations!');
+                                await onRefresh();
+                            } catch (err: any) {
+                                useToastStore.getState().error('Failed to sync to Operations');
+                            }
+                        }}
+                        className="fp-btn-send-main"
+                        style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                    >
+                        <i className='bx bx-sync'></i> Save & Sync to Operations
+                    </button>
                 </div>
             </div>
 

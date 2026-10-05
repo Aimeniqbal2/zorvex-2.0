@@ -125,7 +125,12 @@ export const ContractModal: React.FC<ContractModalProps> = ({ isOpen, onClose, o
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={contract ? 'Edit Contract' : 'New Contract'}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={contract ? 'Edit Contract' : 'New Contract'}
+            width="860px"
+        >
             <form onSubmit={handleSubmit} className="space-y-4 p-4">
                 {error && <div className="text-red-500 mb-4">{error}</div>}
                 

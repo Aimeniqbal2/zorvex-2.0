@@ -585,7 +585,7 @@ export const SecurityReportsWorkspace: React.FC = () => {
                         {/* Finance Column */}
                         <div>
                             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.8rem', color: 'var(--color-primary)' }}>
-                                <i className="bx bx-dollar" style={{ marginRight: '0.4rem' }}></i> Financial Position (S-4J / GL Derived)
+                                <i className="bx bx-dollar" style={{ marginRight: '0.4rem' }}></i> Financial Position (General Ledger Derived)
                             </h3>
                             {executiveData.finance?.is_financial_masked ? (
                                 <div
@@ -632,7 +632,7 @@ export const SecurityReportsWorkspace: React.FC = () => {
                             GL-Derived Profitability Breakdown ({profitabilityDimension.toUpperCase()})
                         </h3>
                         <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                            Source: S-4J Profitability Service
+                            Source: Financial Profitability Ledger
                         </span>
                     </div>
 

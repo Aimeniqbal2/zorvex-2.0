@@ -29,6 +29,8 @@ export interface OperationalSite {
     longitude: string | null;
     geofence_radius_meters?: number;
     is_active: boolean;
+    contract_codes?: string[];
+    active_posts_count?: number;
     created_at: string;
     updated_at: string;
 }
@@ -177,6 +179,24 @@ export interface UndeployedGuard {
     phone_number?: string;
     hire_date?: string | null;
     status: string;
+}
+
+export interface ActiveDeployedGuard {
+    deployment_id: string;
+    id: string;
+    full_name: string;
+    employee_code: string;
+    current_site_id?: string | null;
+    current_site_name: string;
+    current_post_id?: string | null;
+    current_post_name: string;
+    current_monthly_salary: number;
+    start_date: string;
+    designation_id?: string | null;
+    designation_name: string;
+    background_type: string;
+    background_type_display?: string;
+    gender?: string;
 }
 
 // Staffing summary from /deployments/staffing-summary/

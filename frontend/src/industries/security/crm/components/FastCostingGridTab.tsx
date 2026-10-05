@@ -15,56 +15,105 @@ interface RoleColDef {
     qtyKey: keyof CostingGridRow;
 }
 
-// 7 exact role categories matching Sheet 1 without duplicate/redundant badges
+// 14 Canonical Role categories matching Sheet 1 & HRM designations
 const ROLE_COLUMNS: RoleColDef[] = [
     {
-        key: 'sup_ex',
-        label: 'Supervisor (Ex-Army)',
-        rateKey: 'sup_ex_rate',
-        salKey: 'sup_ex_sal',
-        qtyKey: 'sup_ex_qty'
-    },
-    {
         key: 'sup_civ',
-        label: 'Supervisor (Civil)',
+        label: 'Supervisor Civil',
         rateKey: 'sup_civ_rate',
         salKey: 'sup_civ_sal',
         qtyKey: 'sup_civ_qty'
     },
     {
-        key: 'guard_ex',
-        label: 'Security Guard (Ex-Army)',
-        rateKey: 'guard_ex_rate',
-        salKey: 'guard_ex_sal',
-        qtyKey: 'guard_ex_qty'
+        key: 'sup_ex',
+        label: 'Supervisor Ex-Army',
+        rateKey: 'sup_ex_rate',
+        salKey: 'sup_ex_sal',
+        qtyKey: 'sup_ex_qty'
+    },
+    {
+        key: 'sr_sup_civ',
+        label: 'Senior Supervisor Civil',
+        rateKey: 'sr_sup_civ_rate',
+        salKey: 'sr_sup_civ_sal',
+        qtyKey: 'sr_sup_civ_qty'
+    },
+    {
+        key: 'sr_sup_ex',
+        label: 'Senior Supervisor Ex-Army',
+        rateKey: 'sr_sup_ex_rate',
+        salKey: 'sr_sup_ex_sal',
+        qtyKey: 'sr_sup_ex_qty'
     },
     {
         key: 'guard_civ',
-        label: 'Security Guard (Civil)',
+        label: 'Security Guard Civil',
         rateKey: 'guard_civ_rate',
         salKey: 'guard_civ_sal',
         qtyKey: 'guard_civ_qty'
     },
     {
-        key: 'lady_cctv',
-        label: 'Lady Searcher / CCTV',
-        rateKey: 'lady_cctv_rate',
-        salKey: 'lady_cctv_sal',
-        qtyKey: 'lady_cctv_qty'
+        key: 'guard_ex',
+        label: 'Security Guard Ex-Army',
+        rateKey: 'guard_ex_rate',
+        salKey: 'guard_ex_sal',
+        qtyKey: 'guard_ex_qty'
+    },
+    {
+        key: 'hd_gd_civ',
+        label: 'Head / Senior Guard Civil',
+        rateKey: 'hd_gd_civ_rate',
+        salKey: 'hd_gd_civ_sal',
+        qtyKey: 'hd_gd_civ_qty'
+    },
+    {
+        key: 'hd_gd_ex',
+        label: 'Head / Senior Guard Ex-Army',
+        rateKey: 'hd_gd_ex_rate',
+        salKey: 'hd_gd_ex_sal',
+        qtyKey: 'hd_gd_ex_qty'
+    },
+    {
+        key: 'cpo_civ',
+        label: 'Close Protection Officer Civil',
+        rateKey: 'cpo_civ_rate',
+        salKey: 'cpo_civ_sal',
+        qtyKey: 'cpo_civ_qty'
     },
     {
         key: 'cpo_ex',
-        label: 'CPO (Ex-Army)',
+        label: 'Close Protection Officer Ex-Army',
         rateKey: 'cpo_ex_rate',
         salKey: 'cpo_ex_sal',
         qtyKey: 'cpo_ex_qty'
     },
     {
-        key: 'cpo_civ',
-        label: 'CPO (Civil)',
-        rateKey: 'cpo_civ_rate',
-        salKey: 'cpo_civ_sal',
-        qtyKey: 'cpo_civ_qty'
+        key: 'cpo_ssg',
+        label: 'Close Protection Officer Ex-SSG Commando',
+        rateKey: 'cpo_ssg_rate',
+        salKey: 'cpo_ssg_sal',
+        qtyKey: 'cpo_ssg_qty'
+    },
+    {
+        key: 'lady_searcher',
+        label: 'Lady Searcher',
+        rateKey: 'lady_searcher_rate',
+        salKey: 'lady_searcher_sal',
+        qtyKey: 'lady_searcher_qty'
+    },
+    {
+        key: 'cctv_op',
+        label: 'CCTV Operator',
+        rateKey: 'cctv_op_rate',
+        salKey: 'cctv_op_sal',
+        qtyKey: 'cctv_op_qty'
+    },
+    {
+        key: 'deo',
+        label: 'Data Entry Operator (DEO)',
+        rateKey: 'deo_rate',
+        salKey: 'deo_sal',
+        qtyKey: 'deo_qty'
     }
 ];
 
@@ -217,13 +266,21 @@ export const FastCostingGridTab: React.FC = () => {
             sales_tax_rate: 0,
             sessi: 0,
             eobi: 0,
-            sup_ex_qty: 0, sup_ex_rate: 0, sup_ex_sal: 0,
             sup_civ_qty: 0, sup_civ_rate: 0, sup_civ_sal: 0,
-            guard_ex_qty: 0, guard_ex_rate: 0, guard_ex_sal: 0,
+            sup_ex_qty: 0, sup_ex_rate: 0, sup_ex_sal: 0,
+            sr_sup_civ_qty: 0, sr_sup_civ_rate: 0, sr_sup_civ_sal: 0,
+            sr_sup_ex_qty: 0, sr_sup_ex_rate: 0, sr_sup_ex_sal: 0,
             guard_civ_qty: 0, guard_civ_rate: 0, guard_civ_sal: 0,
-            lady_cctv_qty: 0, lady_cctv_rate: 0, lady_cctv_sal: 0,
-            cpo_ex_qty: 0, cpo_ex_rate: 0, cpo_ex_sal: 0,
+            guard_ex_qty: 0, guard_ex_rate: 0, guard_ex_sal: 0,
+            hd_gd_civ_qty: 0, hd_gd_civ_rate: 0, hd_gd_civ_sal: 0,
+            hd_gd_ex_qty: 0, hd_gd_ex_rate: 0, hd_gd_ex_sal: 0,
             cpo_civ_qty: 0, cpo_civ_rate: 0, cpo_civ_sal: 0,
+            cpo_ex_qty: 0, cpo_ex_rate: 0, cpo_ex_sal: 0,
+            cpo_ssg_qty: 0, cpo_ssg_rate: 0, cpo_ssg_sal: 0,
+            lady_searcher_qty: 0, lady_searcher_rate: 0, lady_searcher_sal: 0,
+            cctv_op_qty: 0, cctv_op_rate: 0, cctv_op_sal: 0,
+            deo_qty: 0, deo_rate: 0, deo_sal: 0,
+            lady_cctv_qty: 0, lady_cctv_rate: 0, lady_cctv_sal: 0,
         };
         setRows([newRow, ...rows]);
     };
@@ -494,6 +551,7 @@ export const FastCostingGridTab: React.FC = () => {
             {/* Interactive Wide Matrix Costing Table with Sticky Header & Freeze Panes */}
             <div 
                 ref={tableContainerRef}
+                className="fast-costing-scroll-container"
                 style={{
                     flex: 1,
                     minHeight: 0,
@@ -506,10 +564,10 @@ export const FastCostingGridTab: React.FC = () => {
                     WebkitOverflowScrolling: 'touch'
                 }}
             >
-                <table className="fast-costing-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontSize: '13px', minWidth: '3450px', overflow: 'visible', borderRadius: 0 }}>
+                <table className="fast-costing-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontSize: '13px', minWidth: '5500px', overflow: 'visible', borderRadius: 0 }}>
                     <thead>
                         {/* Level 1 Group Header Row */}
-                        <tr style={{ background: 'var(--color-surface, #ffffff)', height: '42px' }}>
+                        <tr style={{ background: 'var(--color-surface)', height: '42px' }}>
                             <th 
                                 colSpan={3} 
                                 style={{ 
@@ -517,14 +575,15 @@ export const FastCostingGridTab: React.FC = () => {
                                     borderRight: '2px solid var(--color-border)', 
                                     borderBottom: '1px solid var(--color-border)',
                                     fontWeight: 700, 
+                                    color: 'var(--color-text)',
                                     width: '480px',
                                     minWidth: '480px',
                                     position: 'sticky',
                                     left: 0,
                                     top: 0,
-                                    zIndex: 50,
-                                    background: 'var(--color-surface, #ffffff)',
-                                    boxShadow: '4px 0 8px rgba(0,0,0,0.06)',
+                                    zIndex: 60,
+                                    background: 'var(--color-surface)',
+                                    boxShadow: '4px 0 10px rgba(0,0,0,0.18)',
                                     boxSizing: 'border-box',
                                     height: '42px'
                                 }}
@@ -540,7 +599,11 @@ export const FastCostingGridTab: React.FC = () => {
                                         textAlign: 'center', 
                                         borderRight: '2px solid var(--color-border)',
                                         borderBottom: '1px solid var(--color-border)',
-                                        background: cIdx % 2 === 0 ? '#f0fdf4' : '#eff6ff',
+                                        backgroundColor: 'var(--color-surface)',
+                                        backgroundImage: cIdx % 2 === 0 
+                                            ? 'linear-gradient(rgba(16, 185, 129, 0.16), rgba(16, 185, 129, 0.16))' 
+                                            : 'linear-gradient(rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.16))',
+                                        color: 'var(--color-text)',
                                         fontWeight: 700,
                                         fontSize: '13px',
                                         width: '270px',
@@ -555,41 +618,55 @@ export const FastCostingGridTab: React.FC = () => {
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={12} style={{ padding: '10px 16px', textAlign: 'center', background: '#fefce8', borderBottom: '1px solid var(--color-border)', fontWeight: 700, minWidth: '1260px', position: 'sticky', top: 0, zIndex: 35, boxSizing: 'border-box', height: '42px' }}>
+                            <th colSpan={12} style={{ 
+                                padding: '10px 16px', 
+                                textAlign: 'center', 
+                                backgroundColor: 'var(--color-surface)',
+                                backgroundImage: 'linear-gradient(rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.16))',
+                                color: 'var(--color-text)',
+                                borderBottom: '1px solid var(--color-border)', 
+                                fontWeight: 700, 
+                                minWidth: '1260px', 
+                                position: 'sticky', 
+                                top: 0, 
+                                zIndex: 35, 
+                                boxSizing: 'border-box', 
+                                height: '42px' 
+                            }}>
                                 Live Costing, Tax & Margins
                             </th>
-                            <th style={{ padding: '10px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '1px solid var(--color-border)', boxSizing: 'border-box', height: '42px' }}></th>
+                            <th style={{ padding: '10px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 35, background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', boxSizing: 'border-box', height: '42px' }}></th>
                         </tr>
 
                         {/* Level 2 Sub-Column Header Row */}
-                        <tr style={{ background: 'var(--color-surface, #ffffff)', height: '40px' }}>
-                            <th style={{ padding: '9px 8px', width: '45px', minWidth: '45px', textAlign: 'center', position: 'sticky', left: 0, top: '42px', zIndex: 50, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>#</th>
-                            <th style={{ padding: '9px 10px', width: '235px', minWidth: '235px', position: 'sticky', left: '45px', top: '42px', zIndex: 50, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Client / Company Name *</th>
-                            <th style={{ padding: '9px 10px', width: '200px', minWidth: '200px', borderRight: '2px solid var(--color-border)', position: 'sticky', left: '280px', top: '42px', zIndex: 50, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxShadow: '4px 0 8px rgba(0,0,0,0.06)', boxSizing: 'border-box', height: '40px' }}>Location / Site *</th>
+                        <tr style={{ background: 'var(--color-surface)', height: '40px' }}>
+                            <th style={{ padding: '9px 8px', width: '45px', minWidth: '45px', textAlign: 'center', position: 'sticky', left: 0, top: '42px', zIndex: 60, background: 'var(--color-surface)', color: 'var(--color-text)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>#</th>
+                            <th style={{ padding: '9px 10px', width: '235px', minWidth: '235px', position: 'sticky', left: '45px', top: '42px', zIndex: 60, background: 'var(--color-surface)', color: 'var(--color-text)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Client / Company Name *</th>
+                            <th style={{ padding: '9px 10px', width: '200px', minWidth: '200px', borderRight: '2px solid var(--color-border)', position: 'sticky', left: '280px', top: '42px', zIndex: 60, background: 'var(--color-surface)', color: 'var(--color-text)', borderBottom: '2px solid var(--color-border)', boxShadow: '4px 0 10px rgba(0,0,0,0.18)', boxSizing: 'border-box', height: '40px' }}>Location / Site *</th>
 
                             {/* Under each role: Rate, Sal, Qty with ample width */}
                             {ROLE_COLUMNS.map(col => (
                                 <React.Fragment key={`${col.key}-sub`}>
-                                    <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Rate (PKR)</th>
-                                    <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Salary (PKR)</th>
-                                    <th style={{ padding: '9px 6px', width: '60px', minWidth: '60px', textAlign: 'center', borderRight: '2px solid var(--color-border)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Qty</th>
+                                    <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', color: 'var(--color-text)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Rate (PKR)</th>
+                                    <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', color: 'var(--color-text)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Salary (PKR)</th>
+                                    <th style={{ padding: '9px 6px', width: '60px', minWidth: '60px', textAlign: 'center', borderRight: '2px solid var(--color-border)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', color: 'var(--color-text)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Qty</th>
                                 </React.Fragment>
                             ))}
 
                             {/* Summary Columns with generous space */}
-                            <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#3b82f6', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Monthly Sale</th>
-                            <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Direct Salary</th>
-                            <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Strength</th>
-                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overhead Exp</th>
-                            <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Service Charges</th>
-                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Sales Tax</th>
-                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Tax</th>
-                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>SESSI</th>
-                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>EOBI</th>
-                            <th style={{ padding: '9px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Gross Margin</th>
-                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Diff / Head</th>
-                            <th style={{ padding: '9px 10px', width: '110px', minWidth: '110px', textAlign: 'right', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Net Profit</th>
-                            <th style={{ padding: '9px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface, #ffffff)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}></th>
+                            <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#38bdf8', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Monthly Sale</th>
+                            <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#fbbf24', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Direct Salary</th>
+                            <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', color: 'var(--color-text)', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Strength</th>
+                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overhead Exp</th>
+                            <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Service Charges</th>
+                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#fbbf24', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Sales Tax</th>
+                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Tax</th>
+                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>SESSI</th>
+                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>EOBI</th>
+                            <th style={{ padding: '9px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#34d399', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Gross Margin</th>
+                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Diff / Head</th>
+                            <th style={{ padding: '9px 10px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#34d399', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Net Profit</th>
+                            <th style={{ padding: '9px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -602,7 +679,7 @@ export const FastCostingGridTab: React.FC = () => {
                         ) : (
                             filteredRows.map((row, idx) => {
                                 const calc = computeRowTotals(row);
-                                const rowBg = idx % 2 === 0 ? 'var(--color-surface)' : 'rgba(0,0,0,0.015)';
+                                const rowBg = idx % 2 === 0 ? 'var(--color-surface)' : 'var(--color-surface-secondary)';
 
                                 return (
                                     <tr 
@@ -620,8 +697,9 @@ export const FastCostingGridTab: React.FC = () => {
                                             textAlign: 'center',
                                             position: 'sticky',
                                             left: 0,
-                                            zIndex: 2,
-                                            background: rowBg
+                                            zIndex: 20,
+                                            background: rowBg,
+                                            boxSizing: 'border-box'
                                         }}>
                                             {idx + 1}
                                         </td>
@@ -631,8 +709,9 @@ export const FastCostingGridTab: React.FC = () => {
                                             padding: '8px 8px',
                                             position: 'sticky',
                                             left: '45px',
-                                            zIndex: 2,
-                                            background: rowBg
+                                            zIndex: 20,
+                                            background: rowBg,
+                                            boxSizing: 'border-box'
                                         }}>
                                             <input 
                                                 type="text"
@@ -660,9 +739,10 @@ export const FastCostingGridTab: React.FC = () => {
                                             borderRight: '2px solid var(--color-border)',
                                             position: 'sticky',
                                             left: '280px',
-                                            zIndex: 2,
+                                            zIndex: 20,
                                             background: rowBg,
-                                            boxShadow: '4px 0 8px rgba(0,0,0,0.06)'
+                                            boxShadow: '4px 0 10px rgba(0,0,0,0.18)',
+                                            boxSizing: 'border-box'
                                         }}>
                                             <input 
                                                 type="text"
@@ -975,9 +1055,10 @@ export const FastCostingGridTab: React.FC = () => {
                                         borderRight: '2px solid var(--color-border)',
                                         position: 'sticky',
                                         left: 0,
-                                        zIndex: 3,
+                                        zIndex: 30,
                                         background: 'var(--color-surface-secondary)',
-                                        boxShadow: '4px 0 8px rgba(0,0,0,0.06)'
+                                        color: 'var(--color-text)',
+                                        boxShadow: '4px 0 10px rgba(0,0,0,0.18)'
                                     }}
                                 >
                                     PORTFOLIO TOTALS ({filteredRows.length} Locations)

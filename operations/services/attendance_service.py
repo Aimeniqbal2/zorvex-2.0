@@ -524,14 +524,16 @@ def get_daily_attendance_workspace(
     import calendar
     from django.db.models import Count
 
-    deployments = {
-        str(dep.employee_id): dep
-        for dep in Deployment.objects.filter(
-            company_id=company_id,
-            status='ACTIVE',
-            is_deleted=False
-        ).select_related('site', 'post', 'service_contract')
-    }
+    from django.db.models import Q
+    deployments = {}
+    for dep in Deployment.objects.filter(
+        company_id=company_id,
+        is_deleted=False
+    ).filter(
+        Q(start_date__lte=d, end_date__gte=d) |
+        Q(start_date__lte=d, end_date__isnull=True, status='ACTIVE')
+    ).select_related('site', 'post', 'service_contract').order_by('start_date'):
+        deployments[str(dep.employee_id)] = dep
 
     # Month bounds for attendance accumulation
     days_in_month = calendar.monthrange(d.year, d.month)[1]

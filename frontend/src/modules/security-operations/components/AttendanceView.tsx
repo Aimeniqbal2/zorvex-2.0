@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import {
@@ -17,15 +17,50 @@ import { ApplyLeaveModal } from './ApplyLeaveModal';
 import { RestoreJumpModal } from './RestoreJumpModal';
 import { AttendanceHistoryModal } from './AttendanceHistoryModal';
 
-export const AttendanceView: React.FC = () => {
+interface AttendanceViewProps {
+    initialSiteId?: string;
+}
+
+export const AttendanceView: React.FC<AttendanceViewProps> = ({ initialSiteId }) => {
     const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
-    const [classificationFilter, setClassificationFilter] = useState<'ALL' | 'DIRECT' | 'INDIRECT'>('ALL');
-    const [siteFilter, setSiteFilter] = useState('');
+    const [siteFilter, setSiteFilter] = useState(initialSiteId || '');
+    const [siteSearchText, setSiteSearchText] = useState('');
+    const [isSiteDropdownOpen, setIsSiteDropdownOpen] = useState(false);
+    const siteDropdownRef = useRef<HTMLDivElement>(null);
     const [statusFilter, setStatusFilter] = useState<string>('ALL');
     const [searchQuery, setSearchQuery] = useState('');
+    const [sites, setSites] = useState<OperationalSite[]>([]);
+
+    useEffect(() => {
+        if (initialSiteId) {
+            setSiteFilter(initialSiteId);
+        }
+    }, [initialSiteId]);
+
+    // Keep site search input synchronized with selected site
+    useEffect(() => {
+        if (siteFilter) {
+            const found = sites.find(s => s.id === siteFilter);
+            if (found) {
+                setSiteSearchText(found.name + (found.customer_name ? ` (${found.customer_name})` : ''));
+            }
+        } else {
+            setSiteSearchText('');
+        }
+    }, [siteFilter, sites]);
+
+    // Close site dropdown when clicking outside
+    useEffect(() => {
+        const handleOutsideClick = (event: MouseEvent) => {
+            if (siteDropdownRef.current && !siteDropdownRef.current.contains(event.target as Node)) {
+                setIsSiteDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, []);
 
     const [workspace, setWorkspace] = useState<DailyAttendanceWorkspace | null>(null);
-    const [sites, setSites] = useState<OperationalSite[]>([]);
     const [loading, setLoading] = useState(true);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -46,24 +81,31 @@ export const AttendanceView: React.FC = () => {
     const [historyModalOpen, setHistoryModalOpen] = useState(false);
     const [selectedEmpForHistory, setSelectedEmpForHistory] = useState<{ id: string; name: string; code?: string } | null>(null);
 
-    // Watchlist view tab
-    const [activeTab, setActiveTab] = useState<'ATTENDANCE' | 'JUMP_WATCHLIST'>('ATTENDANCE');
-
     // Load available sites
     useEffect(() => {
-        getOperationalSites({ is_active: true, page: 1 })
+        getOperationalSites({ is_active: true, page_size: 500 })
             .then(res => setSites(res.results || []))
             .catch(() => setSites([]));
     }, []);
 
-    // Load attendance workspace data
+    // Filter sites based on typed search query in combobox
+    const filteredSites = useMemo(() => {
+        if (!siteSearchText.trim()) return sites;
+        const q = siteSearchText.toLowerCase();
+        return sites.filter(s =>
+            s.name.toLowerCase().includes(q) ||
+            (s.customer_name && s.customer_name.toLowerCase().includes(q))
+        );
+    }, [sites, siteSearchText]);
+
+    // Load attendance workspace data (strictly DIRECT deployed workforce)
     const fetchWorkspace = async () => {
         setLoading(true);
         setError(null);
         try {
             const data = await getDailyAttendanceWorkspace({
                 date: selectedDate,
-                classification: classificationFilter === 'ALL' ? undefined : classificationFilter,
+                classification: 'DIRECT',
                 site: siteFilter || undefined,
                 search: searchQuery || undefined,
                 status: statusFilter === 'ALL' ? undefined : statusFilter
@@ -79,7 +121,7 @@ export const AttendanceView: React.FC = () => {
 
     useEffect(() => {
         fetchWorkspace();
-    }, [selectedDate, classificationFilter, siteFilter, statusFilter]);
+    }, [selectedDate, siteFilter, statusFilter]);
 
     // Handle Quick Date Navigation
     const changeDateBy = (days: number) => {
@@ -98,7 +140,7 @@ export const AttendanceView: React.FC = () => {
                 date: selectedDate,
                 status: newStatus
             });
-            setActionSuccess(`Attendance status updated to ${newStatus}`);
+            setActionSuccess(`Attendance marked: ${newStatus}`);
             await fetchWorkspace();
         } catch (err: any) {
             setError(err.response?.data?.error || err.message || 'Failed to update attendance status');
@@ -119,7 +161,7 @@ export const AttendanceView: React.FC = () => {
                 date: selectedDate,
                 status: bulkStatus
             });
-            setActionSuccess(res.message || `Updated ${res.updated_count} employee records.`);
+            setActionSuccess(res.message || `Updated ${res.updated_count} records.`);
             setSelectedEmployeeIds([]);
             await fetchWorkspace();
         } catch (err: any) {
@@ -128,6 +170,8 @@ export const AttendanceView: React.FC = () => {
             setBulkLoading(false);
         }
     };
+
+
 
     const records = workspace?.workforce || workspace?.records || [];
 
@@ -143,11 +187,8 @@ export const AttendanceView: React.FC = () => {
                 (r.post_name && r.post_name.toLowerCase().includes(q))
             );
         }
-        if (activeTab === 'JUMP_WATCHLIST') {
-            list = list.filter(r => r.is_jump_active || (r.consecutive_absent_days >= 5) || r.is_jump_warning);
-        }
         return list;
-    }, [records, searchQuery, activeTab]);
+    }, [records, searchQuery]);
 
     const allSelected = filteredRecords.length > 0 && selectedEmployeeIds.length === filteredRecords.length;
 
@@ -181,18 +222,19 @@ export const AttendanceView: React.FC = () => {
         unfinalized: 0
     };
 
-    const uncoveredCount = workspace?.uncovered_absences_count ?? 0;
+    const totalLeaveAndOff = (totals.paid_leave || 0) + (totals.unpaid_leave || 0) + (totals.weekly_off || 0) + (totals.holiday || 0) + (totals.half_day || 0);
+    const activeSite = sites.find(s => s.id === siteFilter);
 
     return (
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Top Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
-                    <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: 'var(--color-text, #f8fafc)' }}>
-                        Workforce Attendance & JUMP Management
-                    </h1>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        Central daily muster, persistent state tracking, date-range leave & automated 7-day JUMP governance
+                    <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--color-text, #f8fafc)' }}>
+                        Daily Attendance
+                    </h2>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                        Record and verify daily workforce muster by location and date.
                     </p>
                 </div>
 
@@ -204,455 +246,479 @@ export const AttendanceView: React.FC = () => {
                             setLeaveModalOpen(true);
                         }}
                     >
-                        + Apply Date-Range Leave
+                        <i className="bx bx-calendar-plus" style={{ marginRight: '6px' }}></i>
+                        Apply Leave
                     </Button>
                     <Button variant="secondary" onClick={fetchWorkspace} disabled={loading}>
-                        ↻ Refresh
+                        <i className="bx bx-refresh" style={{ marginRight: '6px' }}></i>
+                        Refresh
                     </Button>
                 </div>
             </div>
-
-            {/* Date Navigator & Classification Pills */}
-            <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '12px',
-                background: 'var(--color-surface, #1e293b)',
-                padding: '14px 18px',
-                borderRadius: '8px',
-                border: '1px solid var(--color-border, #334155)'
-            }}>
-                {/* Date Controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Button variant="secondary" size="small" onClick={() => changeDateBy(-1)}>
-                        ‹ Prev
-                    </Button>
-                    <Input
-                        type="date"
-                        value={selectedDate}
-                        onChange={e => setSelectedDate(e.target.value)}
-                        style={{ width: '160px', fontWeight: 600 }}
-                    />
-                    <Button variant="secondary" size="small" onClick={() => changeDateBy(1)}>
-                        Next ›
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="small"
-                        onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
-                    >
-                        Today
-                    </Button>
-                </div>
-
-                {/* Classification Toggle */}
-                <div style={{ display: 'flex', background: 'var(--color-surface-hover, rgba(255,255,255,0.05))', borderRadius: '6px', padding: '3px' }}>
-                    <button
-                        onClick={() => setClassificationFilter('ALL')}
-                        style={{
-                            padding: '6px 14px',
-                            borderRadius: '4px',
-                            border: 'none',
-                            background: classificationFilter === 'ALL' ? 'var(--color-primary, #3b82f6)' : 'transparent',
-                            color: classificationFilter === 'ALL' ? '#ffffff' : 'var(--color-text-secondary, #94a3b8)',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                        }}
-                    >
-                        All Workforce
-                    </button>
-                    <button
-                        onClick={() => setClassificationFilter('DIRECT')}
-                        style={{
-                            padding: '6px 14px',
-                            borderRadius: '4px',
-                            border: 'none',
-                            background: classificationFilter === 'DIRECT' ? 'var(--color-primary, #3b82f6)' : 'transparent',
-                            color: classificationFilter === 'DIRECT' ? '#ffffff' : 'var(--color-text-secondary, #94a3b8)',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                        }}
-                    >
-                        DIRECT (Guards)
-                    </button>
-                    <button
-                        onClick={() => setClassificationFilter('INDIRECT')}
-                        style={{
-                            padding: '6px 14px',
-                            borderRadius: '4px',
-                            border: 'none',
-                            background: classificationFilter === 'INDIRECT' ? 'var(--color-primary, #3b82f6)' : 'transparent',
-                            color: classificationFilter === 'INDIRECT' ? '#ffffff' : 'var(--color-text-secondary, #94a3b8)',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                        }}
-                    >
-                        INDIRECT (Office)
-                    </button>
-                </div>
-
-                {/* Site Filter */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '13px', color: 'var(--color-text-secondary, #94a3b8)' }}>Site:</span>
-                    <select
-                        value={siteFilter}
-                        onChange={e => setSiteFilter(e.target.value)}
-                        style={{
-                            padding: '8px 12px',
-                            background: 'var(--color-surface, #1e293b)',
-                            border: '1px solid var(--color-border, #334155)',
-                            color: 'var(--color-text, #f8fafc)',
-                            borderRadius: '6px',
-                            fontSize: '13px',
-                            minWidth: '180px'
-                        }}
-                    >
-                        <option value="">All Operational Sites</option>
-                        {sites.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
-                </div>
-            </div>
-
-            {/* Metrics KPI Cards */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                gap: '12px'
-            }}>
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'var(--color-surface, #1e293b)',
-                    border: '1px solid var(--color-border, #334155)'
-                }}>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Total Workforce</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-text, #f8fafc)', marginTop: '4px' }}>
-                        {totals.total_workforce}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(34, 197, 94, 0.08)',
-                    border: '1px solid rgba(34, 197, 94, 0.3)'
-                }}>
-                    <div style={{ fontSize: '11px', color: '#22c55e', textTransform: 'uppercase', fontWeight: 600 }}>Present</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: '#22c55e', marginTop: '4px' }}>
-                        {totals.present}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)'
-                }}>
-                    <div style={{ fontSize: '11px', color: '#ef4444', textTransform: 'uppercase', fontWeight: 600 }}>Absent</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: '#ef4444', marginTop: '4px' }}>
-                        {totals.absent}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(59, 130, 246, 0.08)',
-                    border: '1px solid rgba(59, 130, 246, 0.3)'
-                }}>
-                    <div style={{ fontSize: '11px', color: '#3b82f6', textTransform: 'uppercase', fontWeight: 600 }}>Paid Leave</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: '#3b82f6', marginTop: '4px' }}>
-                        {totals.paid_leave}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(245, 158, 11, 0.08)',
-                    border: '1px solid rgba(245, 158, 11, 0.3)'
-                }}>
-                    <div style={{ fontSize: '11px', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 600 }}>Unpaid Leave</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: '#f59e0b', marginTop: '4px' }}>
-                        {totals.unpaid_leave}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(100, 116, 139, 0.08)',
-                    border: '1px solid rgba(100, 116, 139, 0.3)'
-                }}>
-                    <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Weekly Off</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: '#94a3b8', marginTop: '4px' }}>
-                        {totals.weekly_off}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(20, 184, 166, 0.08)',
-                    border: '1px solid rgba(20, 184, 166, 0.3)'
-                }}>
-                    <div style={{ fontSize: '11px', color: '#14b8a6', textTransform: 'uppercase', fontWeight: 600 }}>Half Day</div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: '#14b8a6', marginTop: '4px' }}>
-                        {totals.half_day}
-                    </div>
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: totals.jump_missing > 0 ? 'rgba(239, 68, 68, 0.2)' : 'var(--color-surface, #1e293b)',
-                    border: totals.jump_missing > 0 ? '1px solid #ef4444' : '1px solid var(--color-border, #334155)',
-                    cursor: 'pointer'
-                }} onClick={() => setActiveTab('JUMP_WATCHLIST')}>
-                    <div style={{ fontSize: '11px', color: totals.jump_missing > 0 ? '#ef4444' : 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase', fontWeight: 700 }}>
-                        🚨 JUMP / Missing
-                    </div>
-                    <div style={{ fontSize: '22px', fontWeight: 700, color: totals.jump_missing > 0 ? '#ef4444' : 'var(--color-text, #f8fafc)', marginTop: '4px' }}>
-                        {totals.jump_missing}
-                    </div>
-                </div>
-            </div>
-
-            {/* Location Dynamic Payroll & Days in Month Strip */}
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '16px',
-                padding: '14px 18px',
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%)',
-                border: '1px solid rgba(59, 130, 246, 0.25)',
-                borderRadius: '8px',
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                    <div style={{
-                        padding: '6px 14px',
-                        borderRadius: '6px',
-                        backgroundColor: 'var(--color-surface, #1e293b)',
-                        border: '1px solid var(--color-border, #334155)',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        color: 'var(--color-primary, #3b82f6)'
-                    }}>
-                        📅 Current Month Divisor: <span style={{ color: '#22c55e', fontSize: '15px' }}>{workspace?.days_in_month || 31} Days</span>
-                    </div>
-                    <span style={{ fontSize: '12px', color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        Dynamic Rate Rule: <code>Location Base Salary ÷ {workspace?.days_in_month || 31} Days</code> = Daily Attendance Pay (+ if Present, 0 / Deducted if Absent).
-                    </span>
-                </div>
-
-                <div style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
-                    <div>
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
-                            Today's Location Earned Pay
-                        </div>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#22c55e' }}>
-                            +PKR {Number(workspace?.totals?.total_payroll_earned_today || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                    </div>
-                    <div style={{ width: '1px', height: '32px', backgroundColor: 'var(--color-border, #334155)' }} />
-                    <div>
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
-                            Month-to-Date Earned Payroll
-                        </div>
-                        <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text, #f8fafc)' }}>
-                            PKR {Number(workspace?.totals?.total_payroll_month_earned || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Uncovered Absences Warning Banner */}
-            {uncoveredCount > 0 && (
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px 16px',
-                    background: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius: '8px',
-                    color: '#ef4444',
-                    fontSize: '13px'
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '18px' }}>⚠️</span>
-                        <span>
-                            <strong>Staffing Alert:</strong> {uncoveredCount} rostered security guard(s) are marked ABSENT without an assigned replacement guard!
-                        </span>
-                    </div>
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>Immediate supervisor coverage required</span>
-                </div>
-            )}
 
             {/* Notification and Errors */}
             {actionSuccess && (
                 <div style={{
-                    padding: '10px 14px',
+                    padding: '8px 14px',
                     borderRadius: '6px',
-                    background: 'rgba(34, 197, 94, 0.1)',
-                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                    color: '#22c55e',
-                    fontSize: '13px'
+                    background: 'rgba(16, 185, 129, 0.1)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    color: '#10b981',
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                 }}>
-                    ✓ {actionSuccess}
+                    <span>✓ {actionSuccess}</span>
+                    <button onClick={() => setActionSuccess(null)} style={{ background: 'none', border: 'none', color: '#10b981', cursor: 'pointer', fontSize: '14px' }}>✕</button>
                 </div>
             )}
 
             {error && (
                 <div style={{
-                    padding: '10px 14px',
+                    padding: '8px 14px',
                     borderRadius: '6px',
                     background: 'rgba(239, 68, 68, 0.1)',
                     border: '1px solid rgba(239, 68, 68, 0.3)',
                     color: '#ef4444',
-                    fontSize: '13px'
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                 }}>
-                    {error}
+                    <span>{error}</span>
+                    <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px' }}>✕</button>
                 </div>
             )}
 
-            {/* Main Tabs and Actions Toolbar */}
+            {/* Top Toolbar: Date & Site Selector */}
             <div style={{
+                background: 'var(--color-surface, #1e293b)',
+                border: '1px solid var(--color-border, #334155)',
+                borderRadius: '8px',
+                padding: '14px 16px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '14px'
+            }}>
+                {/* Date Navigation */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginRight: '4px' }}>
+                        Date:
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => changeDateBy(-1)}
+                        style={{
+                            padding: '6px 10px',
+                            background: 'var(--color-surface-hover, rgba(255,255,255,0.05))',
+                            border: '1px solid var(--color-border)',
+                            color: 'var(--color-text)',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '12px'
+                        }}
+                    >
+                        ‹
+                    </button>
+                    <Input
+                        type="date"
+                        value={selectedDate}
+                        onChange={e => setSelectedDate(e.target.value)}
+                        style={{ width: '150px', fontWeight: 600, padding: '5px 8px' }}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => changeDateBy(1)}
+                        style={{
+                            padding: '6px 10px',
+                            background: 'var(--color-surface-hover, rgba(255,255,255,0.05))',
+                            border: '1px solid var(--color-border)',
+                            color: 'var(--color-text)',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '12px'
+                        }}
+                    >
+                        ›
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                        style={{
+                            padding: '6px 10px',
+                            background: 'none',
+                            border: '1px solid var(--color-border)',
+                            color: 'var(--color-text-secondary)',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            marginLeft: '4px'
+                        }}
+                    >
+                        Today
+                    </button>
+                </div>
+
+                {/* Searchable Location / Site Combobox */}
+                <div 
+                    ref={siteDropdownRef} 
+                    style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px', minWidth: '320px', flex: '1 1 320px', maxWidth: '440px' }}
+                >
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                        Site / Location:
+                    </span>
+                    <div style={{ position: 'relative', width: '100%' }}>
+                        <input
+                            type="text"
+                            placeholder="Type or select site (e.g. Denning)..."
+                            value={siteSearchText}
+                            onFocus={() => setIsSiteDropdownOpen(true)}
+                            onChange={e => {
+                                setSiteSearchText(e.target.value);
+                                setIsSiteDropdownOpen(true);
+                            }}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (filteredSites.length > 0) {
+                                        const s = filteredSites[0];
+                                        setSiteFilter(s.id);
+                                        setSiteSearchText(s.name + (s.customer_name ? ` (${s.customer_name})` : ''));
+                                        setIsSiteDropdownOpen(false);
+                                    }
+                                } else if (e.key === 'Escape') {
+                                    setIsSiteDropdownOpen(false);
+                                }
+                            }}
+                            style={{
+                                width: '100%',
+                                height: '36px',
+                                padding: '0 32px 0 10px',
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                borderRadius: '6px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                color: 'var(--color-text)',
+                                boxSizing: 'border-box'
+                            }}
+                        />
+
+                        {/* Clear or Dropdown Caret Icon */}
+                        <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            {siteFilter && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSiteFilter('');
+                                        setSiteSearchText('');
+                                        setIsSiteDropdownOpen(false);
+                                    }}
+                                    title="Clear location filter"
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--color-text-muted)',
+                                        cursor: 'pointer',
+                                        fontSize: '13px',
+                                        padding: '2px'
+                                    }}
+                                >
+                                    ✕
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setIsSiteDropdownOpen(prev => !prev)}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--color-text-muted)',
+                                    cursor: 'pointer',
+                                    fontSize: '12px',
+                                    padding: '2px'
+                                }}
+                            >
+                                ▾
+                            </button>
+                        </div>
+
+                        {/* Floating Dropdown List */}
+                        {isSiteDropdownOpen && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '40px',
+                                left: 0,
+                                right: 0,
+                                maxHeight: '280px',
+                                overflowY: 'auto',
+                                background: 'var(--color-surface)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: '6px',
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                                zIndex: 100,
+                                padding: '4px 0'
+                            }}>
+                                <div
+                                    onClick={() => {
+                                        setSiteFilter('');
+                                        setSiteSearchText('');
+                                        setIsSiteDropdownOpen(false);
+                                    }}
+                                    style={{
+                                        padding: '8px 12px',
+                                        fontSize: '13px',
+                                        cursor: 'pointer',
+                                        fontWeight: siteFilter === '' ? 700 : 500,
+                                        color: siteFilter === '' ? 'var(--color-primary)' : 'var(--color-text)',
+                                        background: siteFilter === '' ? 'var(--color-surface-hover)' : 'transparent',
+                                        borderBottom: '1px solid var(--color-border)'
+                                    }}
+                                >
+                                    📍 All Operational Sites ({sites.length})
+                                </div>
+
+                                {filteredSites.length === 0 ? (
+                                    <div style={{ padding: '10px 12px', fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                        No sites matching "{siteSearchText}"
+                                    </div>
+                                ) : (
+                                    filteredSites.map(s => {
+                                        const isSelected = s.id === siteFilter;
+                                        return (
+                                            <div
+                                                key={s.id}
+                                                onClick={() => {
+                                                    setSiteFilter(s.id);
+                                                    setSiteSearchText(s.name + (s.customer_name ? ` (${s.customer_name})` : ''));
+                                                    setIsSiteDropdownOpen(false);
+                                                }}
+                                                style={{
+                                                    padding: '8px 12px',
+                                                    fontSize: '13px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: isSelected ? 700 : 500,
+                                                    color: isSelected ? 'var(--color-primary)' : 'var(--color-text)',
+                                                    background: isSelected ? 'var(--color-surface-hover)' : 'transparent',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center'
+                                                }}
+                                                onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-hover)')}
+                                                onMouseLeave={e => (e.currentTarget.style.background = isSelected ? 'var(--color-surface-hover)' : 'transparent')}
+                                            >
+                                                <span>{s.name}</span>
+                                                {s.customer_name && (
+                                                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginLeft: '8px' }}>
+                                                        {s.customer_name}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Guard Name / Code Search Bar */}
+                <div style={{ minWidth: '240px', flex: '1 1 240px', maxWidth: '360px' }}>
+                    <Input
+                        placeholder="Search guard name or code..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        style={{ padding: '6px 10px', fontSize: '13px' }}
+                    />
+                </div>
+            </div>
+
+            {/* Quick Muster & 4 Clean Neutral KPI Cards */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '12px'
+            }}>
+                {/* Total Workforce */}
+                <div 
+                    onClick={() => setStatusFilter('ALL')}
+                    style={{
+                        background: 'var(--color-surface, #1e293b)',
+                        border: statusFilter === 'ALL' ? '2px solid var(--color-primary, #3b82f6)' : '1px solid var(--color-border, #334155)',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                    }}
+                >
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
+                        Total Deployed
+                    </div>
+                    <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--color-text, #f8fafc)', marginTop: '2px' }}>
+                        {totals.total_workforce}
+                    </div>
+                </div>
+
+                {/* Present (Green Accent) */}
+                <div 
+                    onClick={() => setStatusFilter('PRESENT')}
+                    style={{
+                        background: 'var(--color-surface, #1e293b)',
+                        border: statusFilter === 'PRESENT' ? '2px solid #10b981' : '1px solid var(--color-border, #334155)',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                    }}
+                >
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#10b981', textTransform: 'uppercase' }}>
+                        ✓ Present
+                    </div>
+                    <div style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginTop: '2px' }}>
+                        {totals.present}
+                    </div>
+                </div>
+
+                {/* Absent (Red Accent) */}
+                <div 
+                    onClick={() => setStatusFilter('ABSENT')}
+                    style={{
+                        background: 'var(--color-surface, #1e293b)',
+                        border: statusFilter === 'ABSENT' ? '2px solid #ef4444' : '1px solid var(--color-border, #334155)',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                    }}
+                >
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#ef4444', textTransform: 'uppercase' }}>
+                        ✕ Absent
+                    </div>
+                    <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444', marginTop: '2px' }}>
+                        {totals.absent}
+                    </div>
+                </div>
+
+                {/* Leave & Off (Neutral Gray) */}
+                <div 
+                    onClick={() => setStatusFilter('PAID_LEAVE')}
+                    style={{
+                        background: 'var(--color-surface, #1e293b)',
+                        border: statusFilter === 'PAID_LEAVE' ? '2px solid var(--color-text-secondary)' : '1px solid var(--color-border, #334155)',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                    }}
+                >
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
+                        Leave & Off
+                    </div>
+                    <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--color-text-secondary, #94a3b8)', marginTop: '2px' }}>
+                        {totalLeaveAndOff}
+                    </div>
+                </div>
+            </div>
+
+            {/* Quick Action Bar for Site Attendance */}
+            <div style={{
+                background: 'var(--color-surface, #1e293b)',
+                border: '1px solid var(--color-border, #334155)',
+                borderRadius: '8px',
+                padding: '10px 16px',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 flexWrap: 'wrap',
                 gap: '12px'
             }}>
-                {/* Tab switcher */}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                        onClick={() => setActiveTab('ATTENDANCE')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '6px',
-                            border: '1px solid var(--color-border, #334155)',
-                            background: activeTab === 'ATTENDANCE' ? 'var(--color-surface-hover, rgba(255,255,255,0.08))' : 'transparent',
-                            color: activeTab === 'ATTENDANCE' ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                        }}
-                    >
-                        Daily Attendance Sheet ({filteredRecords.length})
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('JUMP_WATCHLIST')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '6px',
-                            border: '1px solid var(--color-border, #334155)',
-                            background: activeTab === 'JUMP_WATCHLIST' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                            color: activeTab === 'JUMP_WATCHLIST' ? '#ef4444' : 'var(--color-text-secondary, #94a3b8)',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px'
-                        }}
-                    >
-                        <span>🚨 JUMP / Missing Watchlist</span>
-                        {totals.jump_missing > 0 && (
-                            <span style={{
-                                background: '#ef4444',
-                                color: '#ffffff',
-                                borderRadius: '10px',
-                                padding: '1px 6px',
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                        {activeSite ? activeSite.name : 'All Operational Sites'}:
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                        {filteredRecords.length} Guards Listed
+                    </span>
+                    {statusFilter !== 'ALL' && (
+                        <button
+                            type="button"
+                            onClick={() => setStatusFilter('ALL')}
+                            style={{
+                                background: 'rgba(255,255,255,0.06)',
+                                border: '1px solid var(--color-border)',
+                                color: 'var(--color-primary)',
+                                borderRadius: '4px',
+                                padding: '2px 8px',
                                 fontSize: '11px',
-                                fontWeight: 700
-                            }}>
-                                {totals.jump_missing}
-                            </span>
-                        )}
-                    </button>
+                                cursor: 'pointer',
+                                marginLeft: '6px'
+                            }}
+                        >
+                            Filter: {statusFilter} ✕
+                        </button>
+                    )}
                 </div>
 
-                {/* Bulk status actions */}
-                {activeTab === 'ATTENDANCE' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontSize: '12px', color: 'var(--color-text-muted, #64748b)' }}>
-                            {selectedEmployeeIds.length} selected
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {/* Bulk Selection Actions */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            background: selectedEmployeeIds.length > 0 ? 'rgba(59, 130, 246, 0.14)' : 'var(--color-surface-hover, rgba(255,255,255,0.05))',
+                            color: selectedEmployeeIds.length > 0 ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary)',
+                            border: '1px solid var(--color-border)'
+                        }}>
+                            {selectedEmployeeIds.length} Checked
                         </span>
+
                         <select
                             value={bulkStatus}
                             onChange={e => setBulkStatus(e.target.value as AttendanceStatusCode)}
-                            style={{
-                                padding: '6px 10px',
-                                background: 'var(--color-surface, #1e293b)',
-                                border: '1px solid var(--color-border, #334155)',
-                                color: 'var(--color-text, #f8fafc)',
-                                borderRadius: '6px',
-                                fontSize: '13px'
-                            }}
                             disabled={selectedEmployeeIds.length === 0 || bulkLoading}
+                            style={{
+                                padding: '6px 12px',
+                                background: 'var(--color-surface)',
+                                border: '1px solid var(--color-border)',
+                                color: 'var(--color-text)',
+                                borderRadius: '6px',
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                cursor: selectedEmployeeIds.length === 0 ? 'not-allowed' : 'pointer',
+                                opacity: selectedEmployeeIds.length === 0 ? 0.6 : 1
+                            }}
                         >
-                            <option value="PRESENT">Mark PRESENT</option>
-                            <option value="ABSENT">Mark ABSENT</option>
-                            <option value="HALF_DAY">Mark HALF DAY</option>
-                            <option value="WEEKLY_OFF">Mark WEEKLY OFF</option>
-                            <option value="HOLIDAY">Mark HOLIDAY</option>
+                            <option value="PRESENT" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>Mark Present</option>
+                            <option value="ABSENT" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>Mark Absent</option>
+                            <option value="PAID_LEAVE" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>Mark Paid Leave</option>
+                            <option value="UNPAID_LEAVE" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>Mark Unpaid Leave</option>
+                            <option value="WEEKLY_OFF" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>Mark Weekly Off</option>
+                            <option value="HALF_DAY" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>Mark Half Day</option>
                         </select>
+
                         <Button
-                            variant="primary"
                             size="small"
+                            variant="primary"
                             onClick={handleBulkApply}
                             disabled={selectedEmployeeIds.length === 0 || bulkLoading}
+                            style={{
+                                padding: '6px 14px',
+                                fontWeight: 600,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                            }}
                         >
-                            {bulkLoading ? 'Updating...' : 'Apply to Selected'}
+                            {bulkLoading ? <i className="bx bx-loader-alt bx-spin"></i> : <i className="bx bx-check"></i>}
+                            Apply
                         </Button>
                     </div>
-                )}
-            </div>
-
-            {/* Quick Search & Filter Toolbar */}
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '240px' }}>
-                    <Input
-                        placeholder="Search employee by name, ID code, site or post..."
-                        value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
-                    />
                 </div>
-
-                {activeTab === 'ATTENDANCE' && (
-                    <div style={{ display: 'flex', gap: '6px', overflowX: 'auto' }}>
-                        {['ALL', 'PRESENT', 'ABSENT', 'PAID_LEAVE', 'UNPAID_LEAVE', 'WEEKLY_OFF', 'HALF_DAY'].map(st => (
-                            <button
-                                key={st}
-                                onClick={() => setStatusFilter(st)}
-                                style={{
-                                    padding: '5px 12px',
-                                    borderRadius: '16px',
-                                    border: '1px solid var(--color-border, #334155)',
-                                    background: statusFilter === st ? 'var(--color-primary, #3b82f6)' : 'transparent',
-                                    color: statusFilter === st ? '#ffffff' : 'var(--color-text-secondary, #94a3b8)',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    whiteSpace: 'nowrap'
-                                }}
-                            >
-                                {st}
-                            </button>
-                        ))}
-                    </div>
-                )}
             </div>
 
             {/* Attendance Table */}
@@ -664,22 +730,21 @@ export const AttendanceView: React.FC = () => {
             }}>
                 {loading ? (
                     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        Loading attendance workspace...
+                        <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+                        <div>Loading attendance sheet...</div>
                     </div>
                 ) : filteredRecords.length === 0 ? (
                     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted, #64748b)' }}>
-                        {activeTab === 'JUMP_WATCHLIST'
-                            ? 'No workforce members currently on JUMP status or with warning absence streaks.'
-                            : 'No attendance records match the selected filters.'}
+                        No guards found for the selected site or filters.
                     </div>
                 ) : (
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                         <thead>
                             <tr style={{
-                                background: 'var(--color-surface-hover, rgba(255,255,255,0.05))',
+                                background: 'var(--color-surface-hover, rgba(255,255,255,0.03))',
                                 borderBottom: '1px solid var(--color-border, #334155)'
                             }}>
-                                <th style={{ padding: '12px', width: '40px', textAlign: 'center' }}>
+                                <th style={{ padding: '12px 14px', width: '36px', textAlign: 'center' }}>
                                     <input
                                         type="checkbox"
                                         checked={allSelected}
@@ -687,38 +752,36 @@ export const AttendanceView: React.FC = () => {
                                         style={{ cursor: 'pointer' }}
                                     />
                                 </th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Employee</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Site & Post</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Location Base & Daily Rate</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Today's Status</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Today's Earned Pay</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Month-to-Date Pay</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Shift / Planned Duty</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600 }}>Absence Streak / JUMP</th>
-                                <th style={{ padding: '12px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)' }}>Guard / Employee</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)' }}>Site & Post</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)', minWidth: '220px' }}>Mark Attendance</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)' }}>Shift</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)' }}>Daily Rate</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)' }}>Month Muster</th>
+                                <th style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--color-text)', textAlign: 'right' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredRecords.map(row => {
+                            {filteredRecords.map((row, idx) => {
                                 const isSelected = selectedEmployeeIds.includes(row.employee_id);
                                 const isUpdating = updatingId === row.employee_id;
-                                const isDirect = row.classification === 'DIRECT';
+                                const isPresent = row.effective_status === 'PRESENT';
                                 const isAbsent = row.effective_status === 'ABSENT';
-                                const hasReplacement = row.has_replacement_coverage || row.replacement_coverage?.has_replacement;
-                                const reliefName = row.replacement_guard_name || row.replacement_coverage?.replacement_guard_name;
+                                const isOtherStatus = !isPresent && !isAbsent;
 
                                 return (
                                     <tr
                                         key={row.employee_id}
                                         style={{
-                                            borderBottom: '1px solid var(--color-border, #1e293b)',
-                                            background: row.is_jump_active
-                                                ? 'rgba(239, 68, 68, 0.05)'
-                                                : (isSelected ? 'rgba(59, 130, 246, 0.05)' : 'transparent'),
-                                            opacity: isUpdating ? 0.5 : 1
+                                            borderBottom: idx === filteredRecords.length - 1 ? 'none' : '1px solid var(--color-border, #1e293b)',
+                                            background: isSelected 
+                                                ? 'rgba(59, 130, 246, 0.05)' 
+                                                : (row.is_jump_active ? 'rgba(239, 68, 68, 0.03)' : 'transparent'),
+                                            opacity: isUpdating ? 0.5 : 1,
+                                            transition: 'background 0.1s ease'
                                         }}
                                     >
-                                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                                             <input
                                                 type="checkbox"
                                                 checked={isSelected}
@@ -727,275 +790,193 @@ export const AttendanceView: React.FC = () => {
                                             />
                                         </td>
 
-                                        {/* Employee */}
+                                        {/* Guard Name, Code & Designation */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                    <span style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)' }}>
-                                                        {row.employee_name}
-                                                    </span>
-                                                    <span style={{
-                                                        fontSize: '10px',
-                                                        fontWeight: 700,
-                                                        padding: '1px 5px',
-                                                        borderRadius: '3px',
-                                                        background: isDirect ? 'rgba(59, 130, 246, 0.15)' : 'rgba(100, 116, 139, 0.15)',
-                                                        color: isDirect ? '#3b82f6' : '#94a3b8'
-                                                    }}>
-                                                        {row.classification}
-                                                    </span>
-                                                </div>
-                                                <div style={{ fontSize: '12px', color: 'var(--color-text-secondary, #94a3b8)', marginTop: '2px' }}>
-                                                    {row.employee_code} • {row.designation_name || 'Staff'}
-                                                </div>
+                                            <div style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)', fontSize: '13.5px' }}>
+                                                {row.employee_name}
+                                            </div>
+                                            <div style={{ fontSize: '11.5px', color: 'var(--color-text-secondary, #94a3b8)', marginTop: '2px' }}>
+                                                {row.employee_code} • {row.designation_name || 'Guard'}
                                             </div>
                                         </td>
 
                                         {/* Site & Post */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            {row.site_name ? (
-                                                <div>
-                                                    <div style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)' }}>
-                                                        {row.site_name}
-                                                    </div>
-                                                    <div style={{ fontSize: '11px', color: 'var(--color-primary, #3b82f6)' }}>
-                                                        {row.post_name || 'General Deployment'}
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
-                                                    {isDirect ? 'Unassigned' : 'Head Office'}
-                                                </span>
-                                            )}
+                                            <div style={{ fontWeight: 500, color: 'var(--color-text, #f8fafc)' }}>
+                                                {row.site_name || 'General Deployment'}
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted, #64748b)' }}>
+                                                {row.post_name || 'General Post'}
+                                            </div>
                                         </td>
 
-                                        {/* Location Base & Daily Rate */}
+                                        {/* 1-Click Simple Attendance Buttons (Present / Absent / Other) */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            {row.location_monthly_salary ? (
-                                                <div>
-                                                    <div style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)' }}>
-                                                        PKR {Number(row.location_monthly_salary).toLocaleString()}
-                                                        <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--color-text-muted, #94a3b8)' }}>/mo</span>
-                                                    </div>
-                                                    <div style={{ fontSize: '11px', color: 'var(--color-primary, #3b82f6)', fontWeight: 500 }}>
-                                                        PKR {Number(row.daily_salary_rate || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/day
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
-                                                    Base not set
-                                                </span>
-                                            )}
-                                        </td>
-
-                                        {/* Status & Quick Toggle */}
-                                        <td style={{ padding: '12px 14px' }}>
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                <select
-                                                    value={row.effective_status}
-                                                    onChange={e => handleQuickStatusChange(row.employee_id, e.target.value as AttendanceStatusCode)}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                {/* Present Button */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleQuickStatusChange(row.employee_id, 'PRESENT')}
                                                     style={{
-                                                        padding: '4px 8px',
-                                                        borderRadius: '6px',
-                                                        fontSize: '12px',
+                                                        padding: '5px 12px',
+                                                        borderRadius: '4px',
+                                                        border: isPresent ? '1px solid #10b981' : '1px solid var(--color-border)',
+                                                        background: isPresent ? '#10b981' : 'transparent',
+                                                        color: isPresent ? '#ffffff' : 'var(--color-text-secondary)',
                                                         fontWeight: 600,
+                                                        fontSize: '12px',
                                                         cursor: 'pointer',
-                                                        background: 'var(--color-surface, #1e293b)',
-                                                        border: `1px solid ${
-                                                            row.effective_status === 'PRESENT' ? '#22c55e' :
-                                                            row.effective_status === 'ABSENT' ? '#ef4444' :
-                                                            row.effective_status === 'PAID_LEAVE' ? '#3b82f6' :
-                                                            row.effective_status === 'UNPAID_LEAVE' ? '#f59e0b' :
-                                                            row.effective_status === 'HALF_DAY' ? '#14b8a6' :
-                                                            'var(--color-border, #334155)'
-                                                        }`,
-                                                        color:
-                                                            row.effective_status === 'PRESENT' ? '#22c55e' :
-                                                            row.effective_status === 'ABSENT' ? '#ef4444' :
-                                                            row.effective_status === 'PAID_LEAVE' ? '#3b82f6' :
-                                                            row.effective_status === 'UNPAID_LEAVE' ? '#f59e0b' :
-                                                            row.effective_status === 'HALF_DAY' ? '#14b8a6' :
-                                                            'var(--color-text, #f8fafc)'
+                                                        transition: 'all 0.15s ease'
                                                     }}
                                                 >
-                                                    <option value="PRESENT">PRESENT</option>
-                                                    <option value="ABSENT">ABSENT</option>
-                                                    <option value="PAID_LEAVE">PAID LEAVE</option>
-                                                    <option value="UNPAID_LEAVE">UNPAID LEAVE</option>
-                                                    <option value="WEEKLY_OFF">WEEKLY OFF</option>
-                                                    <option value="HOLIDAY">HOLIDAY</option>
-                                                    <option value="HALF_DAY">HALF DAY</option>
+                                                    ✓ Present
+                                                </button>
+
+                                                {/* Absent Button */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleQuickStatusChange(row.employee_id, 'ABSENT')}
+                                                    style={{
+                                                        padding: '5px 12px',
+                                                        borderRadius: '4px',
+                                                        border: isAbsent ? '1px solid #ef4444' : '1px solid var(--color-border)',
+                                                        background: isAbsent ? '#ef4444' : 'transparent',
+                                                        color: isAbsent ? '#ffffff' : 'var(--color-text-secondary)',
+                                                        fontWeight: 600,
+                                                        fontSize: '12px',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease'
+                                                    }}
+                                                >
+                                                    ✕ Absent
+                                                </button>
+
+                                                {/* Other Status Dropdown */}
+                                                <select
+                                                    value={isOtherStatus ? row.effective_status : ''}
+                                                    onChange={e => {
+                                                        if (e.target.value) {
+                                                            handleQuickStatusChange(row.employee_id, e.target.value as AttendanceStatusCode);
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        padding: '5px 8px',
+                                                        borderRadius: '4px',
+                                                        border: isOtherStatus ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
+                                                        background: isOtherStatus ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                                                        color: isOtherStatus ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                                                        fontSize: '12px',
+                                                        fontWeight: isOtherStatus ? 600 : 400,
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    <option value="">
+                                                        {isOtherStatus ? row.effective_status.replace('_', ' ') : 'More ▾'}
+                                                    </option>
+                                                    <option value="PAID_LEAVE">Paid Leave</option>
+                                                    <option value="UNPAID_LEAVE">Unpaid Leave</option>
+                                                    <option value="WEEKLY_OFF">Weekly Off</option>
+                                                    <option value="HALF_DAY">Half Day</option>
+                                                    <option value="HOLIDAY">Holiday</option>
                                                 </select>
-                                                <div style={{ fontSize: '10px', color: 'var(--color-text-muted, #64748b)' }}>
-                                                    {row.is_materialized ? '● Finalized' : '○ Default State'}
-                                                </div>
                                             </div>
                                         </td>
 
-                                        {/* Today's Earned Pay */}
-                                        <td style={{ padding: '12px 14px' }}>
-                                            {row.effective_status === 'PRESENT' || row.effective_status === 'PAID_LEAVE' || row.effective_status === 'HOLIDAY' ? (
-                                                <div>
-                                                    <div style={{ fontWeight: 700, color: '#22c55e', fontSize: '13px' }}>
-                                                        +PKR {Number(row.today_earned_salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                    </div>
-                                                    <div style={{ fontSize: '10px', color: '#22c55e' }}>Earned today (+)</div>
-                                                </div>
-                                            ) : row.effective_status === 'HALF_DAY' ? (
-                                                <div>
-                                                    <div style={{ fontWeight: 700, color: '#14b8a6', fontSize: '13px' }}>
-                                                        +PKR {Number(row.today_earned_salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                    </div>
-                                                    <div style={{ fontSize: '10px', color: '#14b8a6' }}>Half-day pay (50%)</div>
-                                                </div>
-                                            ) : (
-                                                <div>
-                                                    <div style={{ fontWeight: 600, color: '#ef4444', fontSize: '13px' }}>
-                                                        PKR 0.00
-                                                    </div>
-                                                    <div style={{ fontSize: '10px', color: '#ef4444' }}>Deducted / Cut (-)</div>
-                                                </div>
-                                            )}
+                                        {/* Shift */}
+                                        <td style={{ padding: '12px 14px', color: 'var(--color-text-secondary)' }}>
+                                            {row.shift_name || 'Standard'}
                                         </td>
 
-                                        {/* Month-to-Date Pay */}
+                                        {/* Daily Rate & Today Pay */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <div style={{ fontWeight: 700, color: 'var(--color-text, #f8fafc)', fontSize: '13px' }}>
-                                                    PKR {Number(row.month_earned_salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                </div>
-                                                <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)', marginTop: '2px' }}>
-                                                    <span style={{ color: '#22c55e', fontWeight: 600 }}>{row.month_present_days || 0}d Present</span>
-                                                    {Number(row.month_absent_days || 0) > 0 && (
-                                                        <span style={{ color: '#ef4444', marginLeft: '6px' }}>({row.month_absent_days}d cut)</span>
-                                                    )}
-                                                </div>
+                                            <div style={{ fontWeight: 600, color: 'var(--color-text, #f8fafc)' }}>
+                                                PKR {Number(row.daily_salary_rate || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 400 }}> / day</span>
+                                            </div>
+                                            <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                                                {isPresent ? (
+                                                    <span style={{ color: '#10b981', fontWeight: 600 }}>Earned (+)</span>
+                                                ) : isAbsent ? (
+                                                    <span style={{ color: '#ef4444' }}>Deducted (-)</span>
+                                                ) : (
+                                                    <span style={{ color: 'var(--color-text-muted)' }}>{row.effective_status}</span>
+                                                )}
                                             </div>
                                         </td>
 
-                                        {/* Shift & Planned Duty */}
+                                        {/* Month Muster Summary */}
                                         <td style={{ padding: '12px 14px' }}>
-                                            {row.has_planned_duty || row.shift_name ? (
-                                                <div>
-                                                    <div style={{ fontWeight: 500, color: 'var(--color-text, #f8fafc)' }}>
-                                                        {row.shift_name}
-                                                    </div>
-                                                    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)' }}>
-                                                        {row.planned_duty || 'Rostered Duty'}
-                                                        {row.is_replacement_duty && (
-                                                            <span style={{ color: '#f59e0b', marginLeft: '4px' }}>(Relief)</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '12px' }}>
-                                                    {isDirect ? 'Standard Roster' : 'Standard Office'}
-                                                </span>
-                                            )}
-                                            {isDirect && isAbsent && (
-                                                <div style={{ marginTop: '4px' }}>
-                                                    {hasReplacement ? (
-                                                        <span style={{
-                                                            fontSize: '10px',
-                                                            color: '#22c55e',
-                                                            background: 'rgba(34, 197, 94, 0.1)',
-                                                            padding: '2px 6px',
-                                                            borderRadius: '3px',
-                                                            fontWeight: 600
-                                                        }}>
-                                                            ✓ Covered: {reliefName || 'Relief'}
-                                                        </span>
-                                                    ) : (
-                                                        <span style={{
-                                                            fontSize: '10px',
-                                                            color: '#ef4444',
-                                                            background: 'rgba(239, 68, 68, 0.1)',
-                                                            padding: '2px 6px',
-                                                            borderRadius: '3px',
-                                                            fontWeight: 600
-                                                        }}>
-                                                            ⚠️ Uncovered
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            )}
+                                            <div style={{ fontSize: '12.5px' }}>
+                                                <span style={{ color: '#10b981', fontWeight: 600 }}>{row.month_present_days || 0}d P</span>
+                                                {Number(row.month_absent_days || 0) > 0 && (
+                                                    <span style={{ color: '#ef4444', marginLeft: '6px', fontWeight: 600 }}>• {row.month_absent_days}d A</span>
+                                                )}
+                                            </div>
                                         </td>
 
-                                        {/* Absence Streak / JUMP */}
-                                        <td style={{ padding: '12px 14px' }}>
-                                            {row.is_jump_active ? (
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                    <span style={{
-                                                        fontSize: '11px',
-                                                        fontWeight: 700,
-                                                        color: '#ffffff',
-                                                        background: '#ef4444',
-                                                        padding: '2px 6px',
-                                                        borderRadius: '3px',
-                                                        textAlign: 'center'
-                                                    }}>
-                                                        🚨 JUMP / MISSING
-                                                    </span>
-                                                    <Button
-                                                        size="small"
-                                                        variant="primary"
+                                        {/* Actions */}
+                                        <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                {row.is_jump_active && (
+                                                    <button
+                                                        type="button"
                                                         onClick={() => {
                                                             setSelectedEmpForRestore(row);
                                                             setRestoreModalOpen(true);
                                                         }}
-                                                        style={{ fontSize: '11px', padding: '2px 6px', background: '#22c55e', borderColor: '#22c55e' }}
+                                                        style={{
+                                                            padding: '4px 8px',
+                                                            borderRadius: '4px',
+                                                            border: '1px solid #10b981',
+                                                            background: 'rgba(16, 185, 129, 0.1)',
+                                                            color: '#10b981',
+                                                            fontSize: '11.5px',
+                                                            fontWeight: 600,
+                                                            cursor: 'pointer'
+                                                        }}
+                                                        title="Restore from JUMP to Active"
                                                     >
-                                                        Restore to Active
-                                                    </Button>
-                                                </div>
-                                            ) : row.consecutive_absent_days >= 5 ? (
-                                                <span style={{
-                                                    fontSize: '11px',
-                                                    color: '#f59e0b',
-                                                    background: 'rgba(245, 158, 11, 0.15)',
-                                                    padding: '3px 8px',
-                                                    borderRadius: '4px',
-                                                    border: '1px solid rgba(245, 158, 11, 0.3)',
-                                                    fontWeight: 600
-                                                }}>
-                                                    ⚠️ {row.consecutive_absent_days}d Absent (JUMP Alert)
-                                                </span>
-                                            ) : row.consecutive_absent_days > 0 ? (
-                                                <span style={{ fontSize: '12px', color: 'var(--color-text-secondary, #94a3b8)' }}>
-                                                    {row.consecutive_absent_days} day(s) absent
-                                                </span>
-                                            ) : (
-                                                <span style={{ fontSize: '12px', color: '#22c55e' }}>
-                                                    Active
-                                                </span>
-                                            )}
-                                        </td>
-
-                                        {/* Row Actions */}
-                                        <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                                                <Button
-                                                    size="small"
-                                                    variant="secondary"
+                                                        Restore
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
                                                     onClick={() => {
                                                         setSelectedEmpForLeave({ id: row.employee_id, name: row.employee_name });
                                                         setLeaveModalOpen(true);
                                                     }}
+                                                    style={{
+                                                        padding: '4px 8px',
+                                                        borderRadius: '4px',
+                                                        border: '1px solid var(--color-border)',
+                                                        background: 'transparent',
+                                                        color: 'var(--color-text-secondary)',
+                                                        fontSize: '11.5px',
+                                                        cursor: 'pointer'
+                                                    }}
                                                     title="Apply scheduled leave"
                                                 >
                                                     Leave
-                                                </Button>
-                                                <Button
-                                                    size="small"
-                                                    variant="ghost"
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     onClick={() => {
                                                         setSelectedEmpForHistory({ id: row.employee_id, name: row.employee_name, code: row.employee_code });
                                                         setHistoryModalOpen(true);
                                                     }}
+                                                    style={{
+                                                        padding: '4px 8px',
+                                                        borderRadius: '4px',
+                                                        border: '1px solid var(--color-border)',
+                                                        background: 'transparent',
+                                                        color: 'var(--color-text-secondary)',
+                                                        fontSize: '11.5px',
+                                                        cursor: 'pointer'
+                                                    }}
                                                     title="View attendance history"
                                                 >
                                                     History
-                                                </Button>
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>
@@ -1014,7 +995,7 @@ export const AttendanceView: React.FC = () => {
                 employeeName={selectedEmpForLeave?.name}
                 defaultDate={selectedDate}
                 onSuccess={() => {
-                    setActionSuccess('Date-range leave recorded successfully.');
+                    setActionSuccess('Leave recorded successfully.');
                     fetchWorkspace();
                 }}
             />
@@ -1024,7 +1005,7 @@ export const AttendanceView: React.FC = () => {
                 onClose={() => setRestoreModalOpen(false)}
                 record={selectedEmpForRestore}
                 onSuccess={() => {
-                    setActionSuccess('Employee restored from JUMP to ACTIVE status.');
+                    setActionSuccess('Employee restored to ACTIVE status.');
                     fetchWorkspace();
                 }}
             />

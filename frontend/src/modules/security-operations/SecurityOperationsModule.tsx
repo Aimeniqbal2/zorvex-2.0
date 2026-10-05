@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { OperationsControlCenter } from './components/OperationsControlCenter';
 import { SecurityOverview } from './components/SecurityOverview';
 import { SitesView } from './components/SitesView';
-import { ContractsView } from './components/ContractsView';
 import { DeploymentsView } from './components/DeploymentsView';
 import { DutyAssignmentsView } from './components/DutyAssignmentsView';
 import { ExtraDutyView } from './components/ExtraDutyView';
@@ -16,7 +15,6 @@ import { AdvancedOperationsWorkspace } from './components/AdvancedOperationsWork
 import { IncidentsView } from './components/IncidentsView';
 import { DailyActivityReportsView } from './components/DailyActivityReportsView';
 import { ServiceInvoicesView } from './components/ServiceInvoicesView';
-import { StaffingRequirementsView } from './components/StaffingRequirementsView';
 import { TemporaryServicesView } from './components/TemporaryServicesView';
 import { QAInspectionsView } from './components/QAInspectionsView';
 import { CorrectiveActionsView } from './components/CorrectiveActionsView';
@@ -29,9 +27,7 @@ const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'overview', label: 'Control Center', icon: 'bx-radar' },
     { id: 'advanced_ops', label: 'Advanced Ops & Dispatch', icon: 'bx-broadcast' },
     { id: 'sites', label: 'Sites', icon: 'bx-building-house' },
-    { id: 'contracts', label: 'Contracts', icon: 'bx-file' },
     { id: 'deployments', label: 'Deployments', icon: 'bx-map-pin' },
-    { id: 'staffing', label: 'Staffing', icon: 'bx-group' },
     { id: 'duties', label: 'Duty Assignments', icon: 'bx-clipboard' },
     { id: 'roster', label: 'Roster', icon: 'bx-calendar' },
     { id: 'attendance', label: 'Attendance', icon: 'bx-time-five' },
@@ -52,6 +48,7 @@ const TABS: { id: Tab, label: string, icon: string }[] = [
 export const SecurityOperationsModule: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('overview');
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+    const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(undefined);
 
     const renderContent = () => {
         switch (activeTab) {
@@ -60,9 +57,23 @@ export const SecurityOperationsModule: React.FC = () => {
             case 'advanced_ops':
                 return <AdvancedOperationsWorkspace onNavigateTab={(tab: any) => setActiveTab(tab)} />;
             case 'sites':
-                return <SitesView />;
+                return (
+                    <SitesView 
+                        onNavigate={(tab, siteId) => {
+                            if (siteId) setSelectedSiteId(siteId);
+                            setActiveTab(tab as Tab);
+                        }} 
+                    />
+                );
             case 'contracts':
-                return <ContractsView />;
+                return (
+                    <SitesView 
+                        onNavigate={(tab, siteId) => {
+                            if (siteId) setSelectedSiteId(siteId);
+                            setActiveTab(tab as Tab);
+                        }} 
+                    />
+                );
             case 'deployments':
                 return <DeploymentsView />;
             case 'duties':
@@ -70,7 +81,7 @@ export const SecurityOperationsModule: React.FC = () => {
             case 'roster':
                 return <RosterView />;
             case 'attendance':
-                return <AttendanceView />;
+                return <AttendanceView initialSiteId={selectedSiteId} />;
             case 'daily_pay':
                 return <DailyPayReviewView />;
             case 'payroll_prep':
@@ -88,7 +99,7 @@ export const SecurityOperationsModule: React.FC = () => {
             case 'billing':
                 return <ServiceInvoicesView />;
             case 'staffing':
-                return <StaffingRequirementsView />;
+                return <DeploymentsView />;
             case 'temporary_services':
                 return <TemporaryServicesView />;
             case 'qa_inspections':

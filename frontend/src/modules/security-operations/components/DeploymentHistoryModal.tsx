@@ -33,8 +33,13 @@ export const DeploymentHistoryModal: React.FC<DeploymentHistoryModalProps> = ({
     }, [isOpen, employeeId]);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Deployment History — ${employeeName || 'Employee'}`}>
-            <div style={{ maxHeight: '75vh', overflowY: 'auto', padding: '8px' }}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={`Deployment History — ${employeeName || 'Employee'}`}
+            width="940px"
+        >
+            <div style={{ padding: '4px 6px' }}>
                 {error && (
                     <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', marginBottom: '14px', fontSize: '13px' }}>
                         {error}

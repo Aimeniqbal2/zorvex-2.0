@@ -89,6 +89,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         confirmation_date: '',
         designation: '',
         department: '',
+        city: 'KHI',
         classification: isSecurity ? 'DIRECT' : 'INDIRECT',
         background_type: 'CIVILIAN',
         employment_status: 'ACTIVE',
@@ -155,6 +156,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
             setFormData({
                 ...employee,
+                city: employee?.city || 'KHI',
                 background_type: bgType,
                 designation: employee?.designation || '',
                 department: employee?.department || '',
@@ -201,6 +203,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 confirmation_date: '',
                 designation: '',
                 department: '',
+                city: 'KHI',
                 classification: isSecurity ? 'DIRECT' : 'INDIRECT',
                 background_type: 'CIVILIAN',
                 employment_status: 'ACTIVE',
@@ -925,7 +928,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 400, marginTop: '2px' }}>
                             {employee 
-                                ? `Code: ${employee.previous_employee_code || employee.employee_code} • Department: ${employee.department_name || 'Unassigned'} • Designation: ${employee.designation_name || 'Staff'}` 
+                                ? `Code: ${employee.previous_employee_code || employee.employee_code} • Station: ${employee.city || 'KHI'} • Dept: ${employee.department_name || 'Operations'} • Site: ${employee.deployed_site_name || 'Undeployed'}` 
                                 : 'Complete mandatory workforce details marked with red asterisk (*)'
                             }
                         </div>
@@ -1087,17 +1090,56 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     </div>
                                     <div className="form-field">
                                         <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span>Employee Code</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                <span>Station</span>
+                                                <span style={{ color: 'var(--color-text-muted)', fontSize: '11px' }}>&amp;</span>
+                                                <span>Employee Code</span>
+                                            </div>
                                             {isCheckingCode && <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)' }}>Checking uniqueness...</span>}
                                         </label>
-                                        <input
-                                            className="modal-input"
-                                            name="previous_employee_code"
-                                            value={formData.previous_employee_code || ''}
-                                            onChange={handleCodeChange}
-                                            placeholder="e.g. 10600 (Unique per company)"
-                                            style={codeDuplicateError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}
-                                        />
+                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                            <select
+                                                name="city"
+                                                value={formData.city || 'KHI'}
+                                                onChange={handleChange}
+                                                className="modal-select"
+                                                style={{
+                                                    width: '92px',
+                                                    flexShrink: 0,
+                                                    fontWeight: 700,
+                                                    fontFamily: 'monospace',
+                                                    padding: '0 8px',
+                                                    height: '38px',
+                                                    background: 'var(--color-surface)',
+                                                    border: '1px solid var(--color-border)',
+                                                    borderRadius: '6px',
+                                                    color: 'var(--color-text)',
+                                                    cursor: 'pointer'
+                                                }}
+                                                title="Select Workforce Station / City"
+                                            >
+                                                <option value="KHI">KHI (Karachi)</option>
+                                                <option value="LHR">LHR (Lahore)</option>
+                                                <option value="ISB">ISB (Islamabad)</option>
+                                                <option value="RAW">RAW (Rawalpindi)</option>
+                                                <option value="MUL">MUL (Multan)</option>
+                                                <option value="FSD">FSD (Faisalabad)</option>
+                                                <option value="PEW">PEW (Peshawar)</option>
+                                                <option value="QTA">QTA (Quetta)</option>
+                                            </select>
+                                            <input
+                                                className="modal-input"
+                                                name="previous_employee_code"
+                                                value={formData.previous_employee_code || ''}
+                                                onChange={handleCodeChange}
+                                                placeholder="e.g. 10600 (Unique per company)"
+                                                style={{
+                                                    flex: 1,
+                                                    minWidth: 0,
+                                                    ...(codeDuplicateError ? { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {})
+                                                }}
+                                            />
+                                        </div>
                                         {codeDuplicateError && (
                                             <div style={{ color: '#ef4444', fontSize: '11.5px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                 <i className="bx bx-error-circle"></i> {codeDuplicateError}
@@ -1212,14 +1254,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                         </select>
                                     </div>
                                     <div className="form-field">
-                                        <label className="form-label">Department / Client Site</label>
+                                        <label className="form-label">Department</label>
                                         <select 
                                             className="modal-select"
                                             name="department" 
                                             value={formData.department || ''} 
                                             onChange={handleChange}
                                         >
-                                            <option value="">-- Select Department / Site --</option>
+                                            <option value="">-- Select Department --</option>
                                             {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                         </select>
                                     </div>
@@ -1234,6 +1276,100 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             <option value="CIVILIAN">Civil</option>
                                             <option value="EX_ARMY">Ex-Army</option>
                                         </select>
+                                    </div>
+                                </div>
+
+                                {/* Current Deployed Client Site - Read-Only / Managed via Operations */}
+                                <div style={{
+                                    background: 'var(--color-surface-secondary, rgba(0,0,0,0.02))',
+                                    border: '1px solid var(--color-border)',
+                                    borderRadius: '8px',
+                                    padding: '12px 14px',
+                                    marginBottom: '14px'
+                                }}>
+                                    <div className="form-field" style={{ margin: 0 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                            <label className="form-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                                                <i className="bx bx-map-pin" style={{ color: 'var(--color-primary)', fontSize: '15px' }}></i>
+                                                <span>Current Deployed Client Site</span>
+                                            </label>
+                                            <span style={{
+                                                fontSize: '11px',
+                                                color: 'var(--color-text-muted)',
+                                                background: 'var(--color-surface)',
+                                                padding: '2px 8px',
+                                                borderRadius: '4px',
+                                                border: '1px solid var(--color-border)',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '4px',
+                                                fontWeight: 500
+                                            }}>
+                                                <i className="bx bx-lock-alt"></i> Read-Only (Managed via Operations)
+                                            </span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <input
+                                                className="modal-input"
+                                                readOnly
+                                                disabled
+                                                value={
+                                                    currentDeployment?.site_name
+                                                        ? (currentDeployment.crm_entity_name 
+                                                            ? `${currentDeployment.crm_entity_name} — ${currentDeployment.site_name}${currentDeployment.post_name ? ` (${currentDeployment.post_name})` : ''}`
+                                                            : currentDeployment.site_name)
+                                                        : (employee?.deployed_site_name && employee.deployed_site_name !== 'Undeployed'
+                                                            ? employee.deployed_site_name
+                                                            : 'Undeployed')
+                                                }
+                                                style={{
+                                                    flex: 1,
+                                                    background: 'var(--color-surface)',
+                                                    cursor: 'not-allowed',
+                                                    color: 'var(--color-text)',
+                                                    fontWeight: 600,
+                                                    fontFamily: 'system-ui, sans-serif'
+                                                }}
+                                            />
+                                            {(currentDeployment?.site_name || (employee?.deployed_site_name && employee.deployed_site_name !== 'Undeployed')) ? (
+                                                <span style={{
+                                                    background: 'rgba(34, 197, 94, 0.1)',
+                                                    color: '#16a34a',
+                                                    border: '1px solid rgba(34, 197, 94, 0.25)',
+                                                    padding: '7px 12px',
+                                                    borderRadius: '6px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 700,
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '5px',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#16a34a' }}></span>
+                                                    Active Deployment
+                                                </span>
+                                            ) : (
+                                                <span style={{
+                                                    background: 'rgba(245, 158, 11, 0.1)',
+                                                    color: '#d97706',
+                                                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                                                    padding: '7px 12px',
+                                                    borderRadius: '6px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 700,
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '5px',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#d97706' }}></span>
+                                                    Undeployed
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                            Client site and post assignments are automatically synced from Operations. Direct edits by HR are disabled.
+                                        </div>
                                     </div>
                                 </div>
 

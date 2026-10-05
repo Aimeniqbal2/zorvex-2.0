@@ -85,7 +85,12 @@ export const SiteModal: React.FC<SiteModalProps> = ({ isOpen, onClose, onSave, s
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={site ? 'Edit Site' : 'New Site'}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={site ? 'Edit Site' : 'New Site'}
+            width="840px"
+        >
             <form onSubmit={handleSubmit} className="space-y-4 p-4">
                 {error && <div className="text-red-500 mb-4">{error}</div>}
                 

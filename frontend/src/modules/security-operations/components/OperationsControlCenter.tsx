@@ -177,7 +177,7 @@ export const OperationsControlCenter: React.FC<OperationsControlCenterProps> = (
                 </div>
 
                 {/* Manpower & Deployment */}
-                <div className="executive-kpi-card kpi-manpower" onClick={() => onNavigate('staffing')}>
+                <div className="executive-kpi-card kpi-manpower" onClick={() => onNavigate('deployments')}>
                     <div className="kpi-card-header">
                         <span>Manpower Capacity</span>
                         <i className="bx bx-briefcase-alt-2"></i>
@@ -454,7 +454,7 @@ export const OperationsControlCenter: React.FC<OperationsControlCenterProps> = (
                                 <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)' }}>
                                     Vacant Security Posts ({manpower.vacant_posts_count})
                                 </span>
-                                <button className="panel-sub-btn" onClick={() => onNavigate('staffing')}>Assign Staff</button>
+                                <button className="panel-sub-btn" onClick={() => onNavigate('deployments')}>Assign Staff</button>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '110px', overflowY: 'auto' }}>
                                 {manpower.vacant_posts.slice(0, 4).map(post => (

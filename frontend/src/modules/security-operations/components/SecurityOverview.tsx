@@ -46,10 +46,6 @@ export const SecurityOverview: React.FC<SecurityOverviewProps> = ({ onNavigate }
                     <div className="kpi-title">Active Sites</div>
                     <div className="kpi-value">{summary.active_sites}</div>
                 </div>
-                <div className="kpi-card" onClick={() => onNavigate('contracts')}>
-                    <div className="kpi-title">Active Contracts</div>
-                    <div className="kpi-value">{summary.active_contracts}</div>
-                </div>
                 <div className="kpi-card" onClick={() => onNavigate('deployments')}>
                     <div className="kpi-title">Active Deployments</div>
                     <div className="kpi-value">{summary.active_deployments}</div>
@@ -88,39 +84,9 @@ export const SecurityOverview: React.FC<SecurityOverviewProps> = ({ onNavigate }
                         {summary.staffing_shortage}
                     </div>
                 </div>
-                <div className="kpi-card" onClick={() => onNavigate('contracts')}>
-                    <div className="kpi-title">Expiring Contracts</div>
-                    <div className="kpi-value" style={{ color: summary.expiring_contracts > 0 ? 'var(--color-warning)' : 'inherit' }}>
-                        {summary.expiring_contracts}
-                    </div>
-                </div>
                 <div className="kpi-card" onClick={() => onNavigate('equipment_issues')}>
                     <div className="kpi-title">Issued Equipment</div>
                     <div className="kpi-value">{summary.currently_issued_equipment}</div>
-                </div>
-            </div>
-
-            <div style={{ marginTop: '24px', padding: '24px', background: 'var(--color-surface)', borderRadius: '8px', border: '1px solid var(--color-success)' }}>
-                <h3 style={{ color: 'var(--color-success)' }}>Commercial & Billing</h3>
-                <div className="kpi-grid" style={{ marginTop: '16px' }}>
-                    <div className="kpi-card" onClick={() => onNavigate('billing')}>
-                        <div className="kpi-title">Current Period Billed</div>
-                        <div className="kpi-value text-green-600">
-                            ${Number(summary.current_period_billed || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </div>
-                    </div>
-                    <div className="kpi-card" onClick={() => onNavigate('billing')}>
-                        <div className="kpi-title">Outstanding Receivables</div>
-                        <div className="kpi-value" style={{ color: summary.outstanding_receivables > 0 ? 'var(--color-warning)' : 'inherit' }}>
-                            ${Number(summary.outstanding_receivables || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </div>
-                    </div>
-                    <div className="kpi-card" onClick={() => onNavigate('billing')}>
-                        <div className="kpi-title">Invoices Pending Post</div>
-                        <div className="kpi-value" style={{ color: summary.pending_invoices > 0 ? 'var(--color-primary)' : 'inherit' }}>
-                            {summary.pending_invoices}
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -150,13 +116,14 @@ export const SecurityOverview: React.FC<SecurityOverviewProps> = ({ onNavigate }
             
             <div style={{ marginTop: '24px', padding: '24px', background: 'var(--color-surface)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
                 <h3>Quick Actions</h3>
-                <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>Navigate through the tabs above to manage your operations.</p>
+                <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>Navigate through the tabs to manage daily field operations.</p>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                     <button className="btn btn-secondary" onClick={() => onNavigate('sites')}><i className="bx bx-buildings"></i> View Sites</button>
                     <button className="btn btn-secondary" onClick={() => onNavigate('deployments')}><i className="bx bx-shield-quarter"></i> View Deployments</button>
+                    <button className="btn btn-secondary" onClick={() => onNavigate('roster')}><i className="bx bx-calendar"></i> Shift Roster</button>
+                    <button className="btn btn-secondary" onClick={() => onNavigate('attendance')}><i className="bx bx-time-five"></i> Attendance</button>
                     <button className="btn btn-secondary" onClick={() => onNavigate('incidents')}><i className="bx bx-error"></i> Report Incident</button>
                     <button className="btn btn-secondary" onClick={() => onNavigate('daily_activity')}><i className="bx bx-file"></i> View DARs</button>
-                    <button className="btn btn-secondary" onClick={() => onNavigate('billing')}><i className="bx bx-receipt"></i> View Invoices</button>
                 </div>
             </div>
         </div>

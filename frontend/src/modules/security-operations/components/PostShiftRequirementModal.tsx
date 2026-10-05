@@ -174,8 +174,9 @@ export const PostShiftRequirementModal: React.FC<PostShiftRequirementModalProps>
             isOpen={isOpen} 
             onClose={onClose} 
             title={`Shift Manpower Requirements — ${currentPostName}`}
+            width="860px"
         >
-            <div style={{ padding: '16px', maxWidth: '650px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ padding: '16px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {error && (
                     <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', fontSize: '13px' }}>
                         {error}

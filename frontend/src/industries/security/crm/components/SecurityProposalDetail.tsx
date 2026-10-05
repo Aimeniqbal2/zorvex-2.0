@@ -12,10 +12,7 @@ import {
     getProposalMeetings,
     getProposalFollowUps,
     getAssessments,
-    startMeetingStage,
-    advanceToSiteAssessment,
-    advanceToFinalProposal,
-    resumeProposalFromOnHold
+    syncProposalToOperations
 } from '../api';
 import type { 
     SecurityProposal, 
@@ -208,7 +205,7 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
             const versionParam = activeVersion?.id ? `?version_id=${activeVersion.id}` : '';
             const res = await api.get(`/api/security/crm/securityproposal/${proposalId}/prepare_email/${versionParam}`);
             setEmailPrefill({
-                subject: res.data.subject || '',
+                subject: res.data.subject || `Regarding Security Services for ${proposal?.customer_name || 'Client'}`,
                 body: res.data.body || '',
                 to: res.data.to || ''
             });
@@ -218,10 +215,19 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
         }
     };
 
+    const handleSyncToOps = async () => {
+        try {
+            const res = await syncProposalToOperations(proposalId);
+            useToastStore.getState().success(res.message || 'Requirements successfully synced to Operations!');
+            await loadData();
+        } catch (err: any) {
+            useToastStore.getState().error('Failed to sync to Operations');
+        }
+    };
+
     const handleEmailSent = async () => {
-        useToastStore.getState().success('Proposal sent successfully!');
+        useToastStore.getState().success('Email sent successfully!');
         setShowComposer(false);
-        // Refresh proposal to get updated status
         await loadData();
     };
 
@@ -259,25 +265,20 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                         <div>
                             <div className="flex items-center gap-3">
                                 <h1 className="sec-hero-title">
-                                    Proposal {proposal.proposal_number}
+                                    Final Requirements — {proposal.proposal_number}
                                 </h1>
-                                <span className={`sec-badge sec-badge-${(proposal.status || 'draft').toLowerCase()}`}>
-                                    {proposal.status}
+                                <span className="sec-badge sec-badge-active" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                                    <i className='bx bx-check-shield'></i> Live in Operations
                                 </span>
-                                {proposal.is_handoff_ready && (
-                                    <span className="sec-badge sec-badge-active">
-                                        <i className='bx bx-check-shield'></i> Handoff Certified
-                                    </span>
-                                )}
                             </div>
                             <div className="sec-hero-subtitle">
                                 <span><i className='bx bx-building'></i> <strong>{proposal.customer_name || 'Client'}</strong></span>
                                 <span>•</span>
-                                <span><i className='bx bx-git-branch'></i> {versions.length > 0 ? `${versions.length} Version${versions.length > 1 ? 's' : ''}` : 'Version 1'}</span>
+                                <span><i className='bx bx-map-pin'></i> {locations.length} Site{locations.length !== 1 ? 's' : ''}</span>
                                 {proposal.contract_code && (
                                     <>
                                         <span>•</span>
-                                        <span className="text-emerald-400 font-semibold"><i className='bx bx-file-blank'></i> {proposal.contract_code}</span>
+                                        <span className="text-emerald-400 font-semibold"><i className='bx bx-file-blank'></i> Contract: {proposal.contract_code}</span>
                                     </>
                                 )}
                             </div>
@@ -290,176 +291,15 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                                 <i className='bx bx-arrow-back'></i> Back
                             </Button>
                         )}
-
-                        {/* Lifecycle & Stage Progression Buttons */}
-                        {proposal.status === 'AWAITING_APPROVAL' && (
-                            <>
-                                <Button 
-                                    variant="primary" 
-                                    onClick={() => setShowApproveModal(true)}
-                                    className="sec-btn-gradient-green"
-                                >
-                                    <i className='bx bx-check-double'></i> Approve Proposal
-                                </Button>
-                                <Button 
-                                    variant="secondary" 
-                                    onClick={() => setShowPutOnHoldModal(true)}
-                                    style={{ color: '#d97706', borderColor: '#d97706' }}
-                                >
-                                    <i className='bx bx-pause-circle'></i> Put On Hold
-                                </Button>
-                                <Button 
-                                    variant="secondary" 
-                                    onClick={() => setShowRejectModal(true)}
-                                    style={{ color: '#dc2626', borderColor: '#dc2626' }}
-                                >
-                                    <i className='bx bx-x-circle'></i> Reject
-                                </Button>
-                            </>
-                        )}
-
-                        {proposal.status === 'ON_HOLD' && (
-                            <>
-                                <Button 
-                                    variant="primary" 
-                                    onClick={async () => {
-                                        try {
-                                            const updated = await resumeProposalFromOnHold(proposalId);
-                                            useToastStore.getState().success('Proposal resumed from On Hold.');
-                                            setProposal(updated);
-                                            await loadData();
-                                        } catch (err: any) {
-                                            useToastStore.getState().error('Failed to resume proposal');
-                                        }
-                                    }}
-                                    className="sec-btn-gradient-cyan"
-                                >
-                                    <i className='bx bx-play-circle'></i> Resume Proposal
-                                </Button>
-                                <Button 
-                                    variant="secondary" 
-                                    onClick={() => setShowRejectModal(true)}
-                                    style={{ color: '#dc2626', borderColor: '#dc2626' }}
-                                >
-                                    <i className='bx bx-x-circle'></i> Reject
-                                </Button>
-                            </>
-                        )}
-
-                        {proposal.status === 'APPROVED' && (
-                            <>
-                                <Button 
-                                    variant="primary" 
-                                    onClick={() => setActiveTab('signing')}
-                                    className="sec-btn-gradient-indigo"
-                                >
-                                    <i className='bx bx-pen'></i> Open Signing Workspace
-                                </Button>
-                                <Button 
-                                    variant="secondary" 
-                                    onClick={() => setShowPutOnHoldModal(true)}
-                                    style={{ color: '#d97706', borderColor: '#d97706' }}
-                                >
-                                    <i className='bx bx-pause-circle'></i> Put On Hold
-                                </Button>
-                                <Button 
-                                    variant="secondary" 
-                                    onClick={() => setShowRejectModal(true)}
-                                    style={{ color: '#dc2626', borderColor: '#dc2626' }}
-                                >
-                                    <i className='bx bx-x-circle'></i> Reject
-                                </Button>
-                            </>
-                        )}
-
-                        {proposal.status === 'SIGNING' && (
-                            <>
-                                <Button 
-                                    variant="primary" 
-                                    onClick={() => setActiveTab('signing')}
-                                    className="sec-btn-gradient-purple"
-                                >
-                                    <i className='bx bx-pen'></i> Complete Signing Workspace
-                                </Button>
-                                <Button 
-                                    variant="secondary" 
-                                    onClick={() => setShowPutOnHoldModal(true)}
-                                    style={{ color: '#d97706', borderColor: '#d97706' }}
-                                >
-                                    <i className='bx bx-pause-circle'></i> Put On Hold
-                                </Button>
-                            </>
-                        )}
-
-                        {proposal.status === 'SENT' && (
-                            <Button 
-                                variant="secondary" 
-                                onClick={async () => {
-                                    try {
-                                        await startMeetingStage(proposalId);
-                                        useToastStore.getState().success('Started Meeting stage.');
-                                        await loadData();
-                                    } catch (err: any) {
-                                        useToastStore.getState().error('Failed to transition stage.');
-                                    }
-                                }}
-                            >
-                                <i className='bx bx-play-circle'></i> Start Meeting Stage
-                            </Button>
-                        )}
-
-                        {proposal.status === 'MEETING' && (
-                            <Button 
-                                variant="primary" 
-                                onClick={async () => {
-                                    if (window.confirm('Advance this proposal to Site Assessment?')) {
-                                        try {
-                                            await advanceToSiteAssessment(proposalId);
-                                            useToastStore.getState().success('Proposal advanced to Site Assessment.');
-                                            await loadData();
-                                        } catch (err: any) {
-                                            useToastStore.getState().error('Failed to advance stage.');
-                                        }
-                                    }
-                                }}
-                                className="sec-btn-gradient-green"
-                            >
-                                <i className='bx bx-check-double'></i> Advance to Site Assessment
-                            </Button>
-                        )}
-
-                        {proposal.status === 'SITE_ASSESSMENT' && (
-                            <Button 
-                                variant="primary" 
-                                onClick={async () => {
-                                    if (window.confirm('Advance this proposal to Final Proposal (S-2F)?')) {
-                                        try {
-                                            await advanceToFinalProposal(proposalId);
-                                            useToastStore.getState().success('Proposal advanced to Final Proposal stage.');
-                                            await loadData();
-                                        } catch (err: any) {
-                                            useToastStore.getState().error('Failed to advance to Final Proposal.');
-                                        }
-                                    }
-                                }}
-                                className="sec-btn-gradient-indigo"
-                            >
-                                <i className='bx bx-file-blank'></i> Proceed to Final Proposal
-                            </Button>
-                        )}
-
-                        {proposal.status === 'ACTIVE' && (
-                            <Button 
-                                variant="primary" 
-                                onClick={() => setActiveTab('handoff')}
-                                className="sec-btn-gradient-green"
-                            >
-                                <i className='bx bx-git-merge'></i> {proposal.is_handoff_ready ? '✓ Handoff Certified' : 'Cross-Module Handoff (S-2H)'}
-                            </Button>
-                        )}
-
+                        <Button 
+                            variant="primary" 
+                            onClick={handleSyncToOps}
+                            className="sec-btn-gradient-green"
+                        >
+                            <i className='bx bx-sync'></i> Sync to Operations
+                        </Button>
                         <Button variant="secondary" onClick={handleSendClick}>
-                            <i className='bx bx-envelope'></i> Send Proposal Email
+                            <i className='bx bx-envelope'></i> Send Email to Client
                         </Button>
                     </div>
                 </div>
@@ -524,22 +364,7 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                     onClick={() => setActiveTab('final_proposal')}
                     className={`sec-tab-btn ${activeTab === 'final_proposal' ? 'active' : ''}`}
                 >
-                    <i className='bx bx-calculator'></i> Final Proposal & Commercials
-                </button>
-
-                <button
-                    onClick={() => setActiveTab('meetings')}
-                    className={`sec-tab-btn ${activeTab === 'meetings' ? 'active' : ''}`}
-                >
-                    <i className='bx bx-calendar-event'></i> Meetings & Follow-Ups
-                    <span className="sec-tab-badge">{meetings.length + followUps.filter(f => f.status === 'OPEN').length}</span>
-                </button>
-
-                <button
-                    onClick={() => setActiveTab('assessments')}
-                    className={`sec-tab-btn ${activeTab === 'assessments' ? 'active' : ''}`}
-                >
-                    <i className='bx bx-map-pin'></i> Site Security Assessment
+                    <i className='bx bx-calculator'></i> Service & Staffing Requirements
                 </button>
 
                 <button
@@ -547,7 +372,7 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                     className={`sec-tab-btn ${activeTab === 'signing' ? 'active' : ''}`}
                     style={activeTab === 'signing' ? { color: '#6366f1', borderBottomColor: '#6366f1' } : {}}
                 >
-                    <i className='bx bx-pen'></i> Signing & Active Workspace
+                    <i className='bx bx-file-blank'></i> Contract & Signed Agreement
                 </button>
 
                 <button
@@ -555,7 +380,7 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                     className={`sec-tab-btn ${activeTab === 'handoff' ? 'active' : ''}`}
                     style={activeTab === 'handoff' ? { color: '#059669', borderBottomColor: '#059669' } : {}}
                 >
-                    <i className='bx bx-git-merge'></i> Cross-Module Handoff (S-2H)
+                    <i className='bx bx-git-merge'></i> Operations Handoff
                 </button>
 
                 <button
@@ -564,6 +389,14 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                 >
                     <i className='bx bx-envelope'></i> Communications
                     <span className="sec-tab-badge">{emails.length}</span>
+                </button>
+
+                <button
+                    onClick={() => setActiveTab('meetings')}
+                    className={`sec-tab-btn ${activeTab === 'meetings' ? 'active' : ''}`}
+                >
+                    <i className='bx bx-calendar-event'></i> Client Meetings
+                    <span className="sec-tab-badge">{meetings.length + followUps.filter(f => f.status === 'OPEN').length}</span>
                 </button>
             </div>
 

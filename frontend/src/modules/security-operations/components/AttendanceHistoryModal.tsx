@@ -75,7 +75,12 @@ export const AttendanceHistoryModal: React.FC<AttendanceHistoryModalProps> = ({
     if (!isOpen) return null;
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Attendance History — ${employeeName || 'Employee'}`}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={`Attendance History — ${employeeName || 'Employee'}`}
+            width="880px"
+        >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: '650px' }}>
                 <div style={{
                     display: 'flex',

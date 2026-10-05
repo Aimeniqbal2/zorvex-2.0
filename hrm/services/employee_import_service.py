@@ -23,7 +23,7 @@ class EmployeeImportService:
         output = io.StringIO()
         writer = csv.writer(output)
         headers = [
-            'legacy_code', 'full_name', 'father_husband_name',
+            'legacy_code', 'station_city', 'full_name', 'father_husband_name',
             'gender', 'date_of_birth', 'place_of_birth', 'marital_status',
             'children_male', 'children_female', 'caste', 'cnic_number',
             'cnic_issue_date', 'cnic_expiry_date', 'telephone_number', 'mobile_number',
@@ -37,7 +37,7 @@ class EmployeeImportService:
         writer.writerow(headers)
         # Add sample row matching legacy screenshot
         writer.writerow([
-            '010571', 'Saad Khan Jadoon', 'Saeed Khan',
+            '010571', 'KHI', 'Saad Khan Jadoon', 'Saeed Khan',
             'Male', '2000-04-01', 'Distric Aptabad', 'Married',
             '0', '0', 'Jadoon', '13101-7124112-7',
             '2019-10-08', '2029-10-08', '03185559650', '03149329381',
@@ -181,11 +181,13 @@ class EmployeeImportService:
             if ('children' in norm and 'female' in norm) or norm in ('daughter', 'daughters', 'femalekids'):
                 return 'children_female'
 
-            # 12. Designation & Department
+            # 12. Designation & Department & City / Station
             if any(p in norm for p in ('designation', 'desig', 'rank', 'jobtitle', 'position', 'post', 'role')):
                 return 'designation'
-            if any(p in norm for p in ('department', 'dept')) or (('branch' in norm or 'location' in norm) and not any(b in norm for b in ('bank', 'code', 'acct', 'acc'))):
+            if any(p in norm for p in ('department', 'dept', 'officedepartment', 'internaldept')):
                 return 'department'
+            if any(p in norm for p in ('city', 'station', 'stationcode', 'citycode', 'branchcity', 'workstation', 'basecity')) or norm in ('locationcity', 'citylocation'):
+                return 'city'
             if any(p in norm for p in ('workforce', 'classification', 'workforcetype', 'category', 'directindirect')) or norm in ('type', 'workforcetype'):
                 return 'workforce_type'
             if 'background' in norm or norm in ('exarmy', 'civilianarmy'):
@@ -405,6 +407,27 @@ class EmployeeImportService:
                 cnic_issue = cls._parse_date(r.get('cnic_issue_date'))
                 cnic_exp = cls._parse_date(r.get('cnic_expiry_date'))
 
+                # Resolve Station / City
+                raw_city = str(r.get('city') or r.get('station') or '').strip().upper()
+                if 'LAHORE' in raw_city or 'LHR' in raw_city:
+                    city_val = 'LHR'
+                elif 'KARACHI' in raw_city or 'KHI' in raw_city:
+                    city_val = 'KHI'
+                elif 'ISLAMABAD' in raw_city or 'ISB' in raw_city:
+                    city_val = 'ISB'
+                elif 'RAWALPINDI' in raw_city or 'RAW' in raw_city or 'PINDI' in raw_city:
+                    city_val = 'RAW'
+                elif 'MULTAN' in raw_city or 'MUL' in raw_city:
+                    city_val = 'MUL'
+                elif 'FAISALABAD' in raw_city or 'FSD' in raw_city:
+                    city_val = 'FSD'
+                elif 'PESHAWAR' in raw_city or 'PEW' in raw_city:
+                    city_val = 'PEW'
+                elif 'QUETTA' in raw_city or 'QTA' in raw_city:
+                    city_val = 'QTA'
+                else:
+                    city_val = raw_city[:20] if raw_city else 'KHI'
+
                 # Resolve department
                 dept_name = str(r.get('department') or '').strip()[:250]
                 dept = None
@@ -540,6 +563,7 @@ class EmployeeImportService:
                         emp.is_guard_vaccine = str(r.get('is_guard_vaccine', '')).lower() in ('1', 'true', 'yes')
                     if 'is_guard_apsa_verified' in r:
                         emp.is_guard_apsa_verified = str(r.get('is_guard_apsa_verified', '')).lower() in ('1', 'true', 'yes')
+                    emp.city = city_val
                     emp.save()
                     updated_count += 1
                 else:
@@ -581,6 +605,7 @@ class EmployeeImportService:
                     emp = Employee(
                         company_id=company_id,
                         previous_employee_code=str(legacy_code)[:50],
+                        city=city_val,
                         first_name=str(name)[:200],
                         last_name='',
                         father_name=str(r.get('father_husband_name') or r.get('father_name', ''))[:100],

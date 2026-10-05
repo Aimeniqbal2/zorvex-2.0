@@ -541,6 +541,11 @@ export const deleteSecurityProposal = async (id: string) => {
     return response.data;
 };
 
+export const syncProposalToOperations = async (id: string) => {
+    const response = await apiClient.post(`/api/security/crm/securityproposal/${id}/sync-to-operations/`);
+    return response.data as { success: boolean; status: string; contract_id?: string; contract_code?: string; message: string };
+};
+
 export const getProposalVersions = async (proposalId: string) => {
     const response = await apiClient.get(`/api/security/crm/securityproposal/${proposalId}/versions/`);
     return (response.data.results || response.data) as ProposalVersion[];
@@ -594,7 +599,7 @@ export const deleteClientLocation = async (id: string) => {
 };
 
 export const getSecurityServiceTypes = async () => {
-    const response = await apiClient.get('/api/security/crm/securityservicetype/');
+    const response = await apiClient.get('/api/security/crm/securityservicetype/?page_size=100');
     return response.data as PaginatedResponse<SecurityServiceType>;
 };
 
@@ -1086,34 +1091,67 @@ export interface CostingGridRow {
     sessi?: number;
     eobi?: number;
 
-    // 7 Role categories matching Sheet 1 horizontal matrix
-    sup_ex_qty?: number;
-    sup_ex_rate?: number;
-    sup_ex_sal?: number;
-
+    // 14 Canonical Role categories matching Sheet 1 horizontal matrix & HRM Designations
     sup_civ_qty?: number;
     sup_civ_rate?: number;
     sup_civ_sal?: number;
 
-    guard_ex_qty?: number;
-    guard_ex_rate?: number;
-    guard_ex_sal?: number;
+    sup_ex_qty?: number;
+    sup_ex_rate?: number;
+    sup_ex_sal?: number;
+
+    sr_sup_civ_qty?: number;
+    sr_sup_civ_rate?: number;
+    sr_sup_civ_sal?: number;
+
+    sr_sup_ex_qty?: number;
+    sr_sup_ex_rate?: number;
+    sr_sup_ex_sal?: number;
 
     guard_civ_qty?: number;
     guard_civ_rate?: number;
     guard_civ_sal?: number;
 
-    lady_cctv_qty?: number;
-    lady_cctv_rate?: number;
-    lady_cctv_sal?: number;
+    guard_ex_qty?: number;
+    guard_ex_rate?: number;
+    guard_ex_sal?: number;
+
+    hd_gd_civ_qty?: number;
+    hd_gd_civ_rate?: number;
+    hd_gd_civ_sal?: number;
+
+    hd_gd_ex_qty?: number;
+    hd_gd_ex_rate?: number;
+    hd_gd_ex_sal?: number;
+
+    cpo_civ_qty?: number;
+    cpo_civ_rate?: number;
+    cpo_civ_sal?: number;
 
     cpo_ex_qty?: number;
     cpo_ex_rate?: number;
     cpo_ex_sal?: number;
 
-    cpo_civ_qty?: number;
-    cpo_civ_rate?: number;
-    cpo_civ_sal?: number;
+    cpo_ssg_qty?: number;
+    cpo_ssg_rate?: number;
+    cpo_ssg_sal?: number;
+
+    lady_searcher_qty?: number;
+    lady_searcher_rate?: number;
+    lady_searcher_sal?: number;
+
+    cctv_op_qty?: number;
+    cctv_op_rate?: number;
+    cctv_op_sal?: number;
+
+    deo_qty?: number;
+    deo_rate?: number;
+    deo_sal?: number;
+
+    // Legacy fallback alias
+    lady_cctv_qty?: number;
+    lady_cctv_rate?: number;
+    lady_cctv_sal?: number;
 
     // Client/UI Computed properties (Sheet 1 columns Y to AK)
     total_strength?: number;

@@ -143,6 +143,9 @@ class EmployeeViewSet(TenantModelViewSet):
         background_type = self.request.query_params.get('background_type')
         if background_type:
             qs = qs.filter(background_type=background_type)
+        city = self.request.query_params.get('city') or self.request.query_params.get('station')
+        if city and city.strip().upper() not in ('ALL', ''):
+            qs = qs.filter(city__iexact=city.strip())
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             if is_active.lower() in ('true', '1'):
@@ -723,13 +726,23 @@ class EmployeeViewSet(TenantModelViewSet):
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([
-            'Employee Code', 'Legacy Code', 'Full Name', 'Father/Husband Name',
+            'Employee Code', 'Station / City', 'Legacy Code', 'Full Name', 'Father/Husband Name',
             'Gender', 'DOB', 'CNIC', 'Phone', 'Landline', 'Department', 'Designation',
-            'Workforce Type', 'Joining Date', 'Status', 'EOBI #', 'SESSI #', 'Address'
+            'Deployed Site', 'Workforce Type', 'Joining Date', 'Status', 'EOBI #', 'SESSI #', 'Address'
         ])
         for emp in qs:
+            dep_site = "Undeployed"
+            try:
+                from operations.models import Deployment, DeploymentStatus
+                dep = Deployment.objects.filter(employee=emp, status=DeploymentStatus.ACTIVE, is_deleted=False).select_related('site', 'crm_entity').first()
+                if dep and dep.site:
+                    dep_site = f"{dep.crm_entity.name} - {dep.site.name}" if dep.crm_entity else dep.site.name
+            except Exception:
+                pass
+
             writer.writerow([
                 emp.employee_code,
+                emp.city or 'KHI',
                 emp.previous_employee_code,
                 emp.get_full_name(),
                 emp.father_name,
@@ -740,6 +753,7 @@ class EmployeeViewSet(TenantModelViewSet):
                 emp.telephone_number,
                 emp.department.name if emp.department else '',
                 emp.designation.name if emp.designation else '',
+                dep_site,
                 emp.workforce_type,
                 emp.joining_date.strftime('%Y-%m-%d') if emp.joining_date else '',
                 'ACTIVE' if emp.is_active else 'INACTIVE',

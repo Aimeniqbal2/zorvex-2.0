@@ -92,6 +92,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [filterTab, setFilterTab] = useState<string>('ALL');
+    const [selectedCity, setSelectedCity] = useState<string>('ALL');
     const [searchField, setSearchField] = useState<string>('ALL');
     const [searchQuery, setSearchQuery] = useState('');
     const [dateFrom, setDateFrom] = useState('');
@@ -121,6 +122,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             if (filterTab === 'ACTIVE') params.append('is_active', 'true');
             if (filterTab === 'INACTIVE') params.append('is_active', 'false');
             if (filterTab === 'CNIC_ALERTS') params.append('cnic_expiring', 'true');
+            if (selectedCity && selectedCity !== 'ALL') params.append('city', selectedCity);
             if (searchQuery.trim()) {
                 params.append('search', searchQuery.trim());
                 if (searchField !== 'ALL') {
@@ -166,6 +168,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         setSelectedEmployee(null);
         setIsModalOpen(false);
         setFilterTab('ALL');
+        setSelectedCity('ALL');
         setSearchQuery('');
         setDateFrom('');
         setDateTo('');
@@ -182,7 +185,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
     useEffect(() => {
         setCurrentPage(1);
         fetchEmployees(1, pageSize);
-    }, [filterTab, dateFrom, dateTo]);
+    }, [filterTab, selectedCity, dateFrom, dateTo]);
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -209,6 +212,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         if (filterTab === 'ACTIVE') params.append('is_active', 'true');
         if (filterTab === 'INACTIVE') params.append('is_active', 'false');
         if (filterTab === 'CNIC_ALERTS') params.append('cnic_expiring', 'true');
+        if (selectedCity && selectedCity !== 'ALL') params.append('city', selectedCity);
         if (searchQuery.trim()) {
             params.append('search', searchQuery.trim());
             if (searchField !== 'ALL') {
@@ -297,12 +301,52 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         },
         { 
             key: 'employee_code', 
-            header: 'Code', 
-            width: '85px',
+            header: (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }} onClick={(ev) => ev.stopPropagation()}>
+                    <span>Code</span>
+                    <select
+                        value={selectedCity}
+                        onChange={(ev) => setSelectedCity(ev.target.value)}
+                        style={{
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            padding: '1px 4px',
+                            borderRadius: '4px',
+                            border: selectedCity !== 'ALL' ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
+                            background: selectedCity !== 'ALL' ? 'var(--color-primary)' : 'var(--color-surface)',
+                            color: selectedCity !== 'ALL' ? '#ffffff' : 'var(--color-text)',
+                            cursor: 'pointer',
+                            outline: 'none',
+                            fontFamily: 'monospace'
+                        }}
+                        title="Filter guards by Station / City (KHI / LHR)"
+                    >
+                        <option value="ALL" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>ALL</option>
+                        <option value="KHI" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>KHI</option>
+                        <option value="LHR" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>LHR</option>
+                        <option value="ISB" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>ISB</option>
+                        <option value="RAW" style={{ background: 'var(--color-surface)', color: 'var(--color-text)' }}>RAW</option>
+                    </select>
+                </div>
+            ), 
+            width: '125px',
             render: (e: Employee) => (
-                <strong style={{ color: 'var(--color-primary)', fontFamily: 'monospace', fontSize: '13px' }}>
-                    {e.previous_employee_code || e.employee_code || '—'}
-                </strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        padding: '1.5px 5px',
+                        borderRadius: '3px',
+                        background: e.city === 'LHR' ? 'rgba(168, 85, 247, 0.12)' : 'rgba(37, 99, 235, 0.1)',
+                        color: e.city === 'LHR' ? '#7e22ce' : 'var(--color-primary)',
+                        fontFamily: 'monospace'
+                    }}>
+                        {e.city || 'KHI'}
+                    </span>
+                    <strong style={{ color: 'var(--color-primary)', fontFamily: 'monospace', fontSize: '13px' }}>
+                        {e.previous_employee_code || e.employee_code || '—'}
+                    </strong>
+                </div>
             ) 
         },
         { 
@@ -358,7 +402,42 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             ) 
         },
         { key: 'Designation', header: 'Designation', minWidth: '110px', render: (e: Employee) => e.designation_name || '—' },
-        { key: 'Department', header: 'Department / Site', minWidth: '130px', render: (e: Employee) => e.department_name || '—' },
+        { key: 'Department', header: 'Department', minWidth: '115px', render: (e: Employee) => e.department_name || 'Operations' },
+        {
+            key: 'deployed_site',
+            header: 'Deployed Site',
+            minWidth: '160px',
+            render: (e: Employee) => {
+                const siteName = e.deployed_site_name;
+                if (!siteName || siteName === 'Undeployed') {
+                    return (
+                        <span style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: '#d97706',
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            border: '1px solid rgba(245, 158, 11, 0.25)',
+                            padding: '2px 7px',
+                            borderRadius: '4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                        }}>
+                            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#d97706' }}></span>
+                            Undeployed
+                        </span>
+                    );
+                }
+                return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '6.5px', height: '6.5px', borderRadius: '50%', background: '#16a34a', flexShrink: 0 }}></span>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text)' }}>
+                            {siteName}
+                        </span>
+                    </div>
+                );
+            }
+        },
         {
             key: 'cnic_expiry',
             header: 'CNIC Expiry',
@@ -585,8 +664,47 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     })}
                 </div>
 
-                {/* Right: Search & Date Range */}
+                {/* Center / Right: Station & Search & Date Range */}
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', flex: '1 1 340px', justifyContent: 'flex-end', minWidth: '0' }}>
+                    {/* Station / City Quick Filter Pills */}
+                    <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        background: 'var(--color-surface-secondary, rgba(0,0,0,0.03))',
+                        padding: '2px 4px',
+                        borderRadius: '5px',
+                        border: '1px solid var(--color-border)',
+                        gap: '2px'
+                    }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', padding: '0 4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            <i className="bx bx-buildings" style={{ fontSize: '12px' }}></i> Station:
+                        </span>
+                        {(['ALL', 'KHI', 'LHR', 'ISB'] as const).map(city => {
+                            const isCityActive = selectedCity === city;
+                            return (
+                                <button
+                                    key={city}
+                                    type="button"
+                                    onClick={() => setSelectedCity(city)}
+                                    style={{
+                                        border: 'none',
+                                        borderRadius: '3px',
+                                        padding: '2px 7px',
+                                        fontSize: '11px',
+                                        fontWeight: isCityActive ? 700 : 500,
+                                        cursor: 'pointer',
+                                        background: isCityActive ? 'var(--color-primary)' : 'transparent',
+                                        color: isCityActive ? '#ffffff' : 'var(--color-text)',
+                                        fontFamily: 'monospace',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    {city}
+                                </button>
+                            );
+                        })}
+                    </div>
+
                     {/* Search Form */}
                     <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '6px', flex: '1 1 200px', maxWidth: '360px', minWidth: '0' }}>
                         <select

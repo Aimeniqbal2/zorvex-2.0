@@ -7,7 +7,7 @@ import { Input } from '../../../components/ui/Input';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { getEntities, deleteEntity } from '../../../modules/crm/api';
 import type { CRMEntity, PaginatedResponse } from '../../../modules/crm/types';
-import { EntityModal } from '../../../modules/crm/components/EntityModal';
+import { SecurityClientModal } from './components/SecurityClientModal';
 import { SecurityCustomerDetail } from './components/SecurityCustomerDetail';
 import { SecurityProposalsList } from './components/SecurityProposalsList';
 import { SecurityProposalDetail } from './components/SecurityProposalDetail';
@@ -17,7 +17,7 @@ import '../../../modules/crm/styles/crm.css';
 
 export const SecurityCRMModule: React.FC = () => {
     // Persistent state
-    const [activeTab, setActiveTab] = useState<'customers' | 'proposals' | 'costing_grid'>('customers');
+    const [activeTab, setActiveTab] = useState<'customers' | 'requirements' | 'costing_grid'>('customers');
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(1);
     
@@ -180,7 +180,7 @@ export const SecurityCRMModule: React.FC = () => {
             {activeTab !== 'costing_grid' && (
                 <PageHeader 
                     title="Clients & Contracts" 
-                    subtitle="Manage security clients, locations, and proposals"
+                    subtitle="Manage security clients, locations, and final service requirements"
                     actions={
                         activeTab === 'customers' && (
                             <Button variant="primary" onClick={() => setIsEntityModalOpen(true)}>
@@ -207,24 +207,27 @@ export const SecurityCRMModule: React.FC = () => {
                     }}
                     onClick={() => setActiveTab('customers')}
                 >
-                    Customers
+                    Clients
                 </button>
                 <button
                     style={{
                         padding: '8px 16px',
-                        background: activeTab === 'proposals' ? 'var(--color-primary)' : 'var(--color-background)',
-                        border: `1px solid ${activeTab === 'proposals' ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                        background: activeTab === 'requirements' ? 'var(--color-primary)' : 'var(--color-background)',
+                        border: `1px solid ${activeTab === 'requirements' ? 'var(--color-primary)' : 'var(--color-border)'}`,
                         borderRadius: '20px',
-                        color: activeTab === 'proposals' ? 'white' : 'var(--color-text-muted)',
+                        color: activeTab === 'requirements' ? 'white' : 'var(--color-text-muted)',
                         fontWeight: 500,
                         fontSize: '13.5px',
                         cursor: 'pointer',
                         transition: 'all 0.2s ease',
-                        boxShadow: activeTab === 'proposals' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none'
+                        boxShadow: activeTab === 'requirements' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
                     }}
-                    onClick={() => setActiveTab('proposals')}
+                    onClick={() => setActiveTab('requirements')}
                 >
-                    Proposals
+                    <i className='bx bx-list-check'></i> Final Requirements
                 </button>
                 <button
                     style={{
@@ -276,7 +279,7 @@ export const SecurityCRMModule: React.FC = () => {
                 </>
             )}
 
-            {activeTab === 'proposals' && (
+            {activeTab === 'requirements' && (
                 <SecurityProposalsList 
                     onOpenProposal={(id) => setSelectedProposalId(id)} 
                 />
@@ -286,13 +289,12 @@ export const SecurityCRMModule: React.FC = () => {
                 <FastCostingGridTab />
             )}
 
-            <EntityModal
+            <SecurityClientModal
                 isOpen={isEntityModalOpen}
                 onClose={() => setIsEntityModalOpen(false)}
                 onSaved={() => {
                     setRefreshTrigger(prev => prev + 1);
                 }}
-                entity={null}
             />
         </PageContainer>
     );

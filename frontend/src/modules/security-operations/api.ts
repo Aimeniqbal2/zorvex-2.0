@@ -35,7 +35,8 @@ import type {
     SecurityInventoryOverview,
     EquipmentIncident,
     SerializedEquipmentHistory,
-    UndeployedGuard
+    UndeployedGuard,
+    ActiveDeployedGuard
 } from './types';
 
 // Dashboard & Control Center
@@ -52,7 +53,7 @@ export const getControlCenterData = async (filters?: ControlCenterFilters, secti
 };
 
 // Operational Sites
-export const getOperationalSites = async (params?: { page?: number, search?: string, is_active?: boolean }): Promise<PaginatedResponse<OperationalSite>> => {
+export const getOperationalSites = async (params?: { page?: number, page_size?: number, search?: string, is_active?: boolean }): Promise<PaginatedResponse<OperationalSite>> => {
     const response = await apiClient.get('/api/operations/sites/', { params });
     return response.data;
 };
@@ -124,6 +125,17 @@ export const getUndeployedGuards = async (params?: { post?: string; background_t
     return response.data;
 };
 
+export const getActiveDeployedGuards = async (params?: {
+    exclude_site?: string;
+    site_exclude?: string;
+    post?: string;
+    background_type?: string;
+    search?: string;
+}): Promise<{ count: number; results: ActiveDeployedGuard[] }> => {
+    const response = await apiClient.get('/api/operations/deployments/active-deployed-guards/', { params });
+    return response.data;
+};
+
 export const relieveDeployment = async (id: string, payload: { relieved_date?: string, relief_reason?: string }): Promise<Deployment> => {
     const response = await apiClient.post(`/api/operations/deployments/${id}/relieve/`, payload);
     return response.data;
@@ -136,6 +148,7 @@ export const transferDeployment = async (id: string, payload: {
     new_post?: string | null,
     new_contract?: string | null,
     new_designation?: string | null,
+    new_location_monthly_salary?: number | null,
     new_start_date?: string,
     new_assignment_type?: string,
     notes?: string

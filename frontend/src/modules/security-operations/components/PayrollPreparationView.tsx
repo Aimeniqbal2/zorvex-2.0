@@ -478,7 +478,7 @@ export const PayrollPreparationView: React.FC = () => {
                     <div style={{ fontSize: '20px', fontWeight: 700, color: '#34d399', marginTop: '4px' }}>
                         {totals.ready_count}
                     </div>
-                    <span style={{ fontSize: '11px', color: '#6ee7b7' }}>Ready for Phase S-5G</span>
+                    <span style={{ fontSize: '11px', color: '#6ee7b7' }}>Ready for Payroll Run</span>
                 </div>
             </div>
 

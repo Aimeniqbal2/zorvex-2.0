@@ -37,14 +37,14 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
     }, [page, search]);
 
     const handleDelete = async (p: SecurityProposal) => {
-        if (!window.confirm(`Are you sure you want to delete proposal "${p.proposal_number}"? This action cannot be undone.`)) {
+        if (!window.confirm(`Are you sure you want to delete requirement sheet "${p.proposal_number}"? This action cannot be undone.`)) {
             return;
         }
         try {
             await deleteSecurityProposal(p.id);
             loadData();
         } catch (err: any) {
-            alert(err.message || 'Failed to delete proposal');
+            alert(err.message || 'Failed to delete requirement sheet');
         }
     };
 
@@ -55,23 +55,35 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
     const columns: Column<SecurityProposal>[] = [
         {
             key: 'proposal_number',
-            header: 'Proposal #',
+            header: 'Req #',
             render: (p) => <strong style={{ fontFamily: 'monospace' }}>{p.proposal_number}</strong>
         },
         {
             key: 'customer',
             header: 'Client',
-            render: (p) => p.customer_name || 'Unknown'
+            render: (p) => <strong>{p.customer_name || 'Unknown'}</strong>
         },
         {
             key: 'title',
-            header: 'Title',
+            header: 'Requirement Scope',
             render: (p) => p.title
         },
         {
             key: 'status',
-            header: 'Status',
-            render: (p) => p.status
+            header: 'Operations Status',
+            render: (p) => (
+                <span style={{ 
+                    padding: '3px 8px', 
+                    borderRadius: '12px', 
+                    fontSize: '11.5px', 
+                    fontWeight: 600,
+                    background: p.status === 'ACTIVE' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                    color: p.status === 'ACTIVE' ? '#10b981' : '#6366f1',
+                    border: `1px solid ${p.status === 'ACTIVE' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`
+                }}>
+                    <i className={p.status === 'ACTIVE' ? 'bx bx-check-shield' : 'bx bx-time'}></i> {p.status === 'ACTIVE' ? 'Live in Operations' : p.status}
+                </span>
+            )
         },
         {
             key: 'actions',
@@ -79,7 +91,7 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
             render: (p) => (
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <Button variant="ghost" onClick={() => onOpenProposal(p.id)}>
-                        Open
+                        <i className='bx bx-edit-alt'></i> Open Requirements
                     </Button>
                     <Button variant="danger" onClick={() => handleDelete(p)}>
                         Delete
@@ -92,7 +104,7 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
     if (hasError) {
         return (
             <ErrorState 
-                title="Failed to load proposals" 
+                title="Failed to load requirements" 
                 message="There was an error communicating with the server." 
                 onRetry={loadData} 
             />
@@ -102,9 +114,9 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
     return (
         <div>
             <Toolbar>
-                <div style={{ width: '300px' }}>
+                <div style={{ width: '320px' }}>
                     <Input 
-                        placeholder="Search proposals..." 
+                        placeholder="Search requirements by client, Req #..." 
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
@@ -116,7 +128,7 @@ export const SecurityProposalsList: React.FC<Props> = ({ onOpenProposal }) => {
                 columns={columns}
                 isLoading={isLoading}
                 keyExtractor={(row) => row.id}
-                emptyMessage="No proposals found."
+                emptyMessage="No client requirements found."
                 pagination={data ? {
                     page,
                     pageSize: 20,

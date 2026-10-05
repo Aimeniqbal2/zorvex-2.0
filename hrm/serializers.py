@@ -111,6 +111,9 @@ class EmployeeSerializer(BaseTenantSerializer):
     legacy_record = serializers.PrimaryKeyRelatedField(read_only=True)
     department_name = serializers.CharField(source='department.name', read_only=True)
     designation_name = serializers.CharField(source='designation.name', read_only=True)
+    city_display = serializers.CharField(source='get_city_display', read_only=True)
+    deployed_site_name = serializers.SerializerMethodField()
+    deployment_status = serializers.SerializerMethodField()
     joining_date = serializers.DateField(required=False, allow_null=True)
     hire_date = serializers.DateField(required=False, allow_null=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
@@ -170,6 +173,28 @@ class EmployeeSerializer(BaseTenantSerializer):
                 data['background_type'] = 'EX_ARMY'
             else:
                 data['background_type'] = 'CIVILIAN'
+
+        # Normalize city/station code
+        if 'city' in data and data['city']:
+            raw_city = str(data['city']).strip().upper()
+            if 'LAHORE' in raw_city or 'LHR' in raw_city:
+                data['city'] = 'LHR'
+            elif 'KARACHI' in raw_city or 'KHI' in raw_city:
+                data['city'] = 'KHI'
+            elif 'ISLAMABAD' in raw_city or 'ISB' in raw_city:
+                data['city'] = 'ISB'
+            elif 'RAWALPINDI' in raw_city or 'RAW' in raw_city or 'PINDI' in raw_city:
+                data['city'] = 'RAW'
+            elif 'MULTAN' in raw_city or 'MUL' in raw_city:
+                data['city'] = 'MUL'
+            elif 'FAISALABAD' in raw_city or 'FSD' in raw_city:
+                data['city'] = 'FSD'
+            elif 'PESHAWAR' in raw_city or 'PEW' in raw_city:
+                data['city'] = 'PEW'
+            elif 'QUETTA' in raw_city or 'QTA' in raw_city:
+                data['city'] = 'QTA'
+            else:
+                data['city'] = raw_city[:20]
 
         return super().to_internal_value(data)
 
@@ -270,6 +295,35 @@ class EmployeeSerializer(BaseTenantSerializer):
         except Exception:
             pass
         return None
+
+    def get_deployed_site_name(self, obj):
+        try:
+            from operations.models import Deployment, DeploymentStatus
+            dep = Deployment.objects.filter(
+                employee=obj,
+                status=DeploymentStatus.ACTIVE,
+                is_deleted=False
+            ).select_related('site', 'crm_entity').first()
+            if dep and dep.site:
+                client = dep.crm_entity.name if dep.crm_entity else ''
+                site = dep.site.name or ''
+                return f"{client} — {site}" if client and site and client != site else (site or client)
+        except Exception:
+            pass
+        return "Undeployed"
+
+    def get_deployment_status(self, obj):
+        try:
+            from operations.models import Deployment, DeploymentStatus
+            if Deployment.objects.filter(
+                employee=obj,
+                status=DeploymentStatus.ACTIVE,
+                is_deleted=False
+            ).exists():
+                return 'DEPLOYED'
+        except Exception:
+            pass
+        return 'UNDEPLOYED'
 
     def _sync_payment_destination(self, employee, validated_data):
         payment_method = validated_data.pop('payment_method', None)

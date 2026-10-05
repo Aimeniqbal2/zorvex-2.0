@@ -177,8 +177,9 @@ export const SiteManpowerModal: React.FC<SiteManpowerModalProps> = ({
             isOpen={isOpen} 
             onClose={onClose} 
             title={`Manpower & Security Posts — ${site?.name || 'Site'}`}
+            width="1000px"
         >
-            <div style={{ maxHeight: '82vh', overflowY: 'auto', padding: '8px' }}>
+            <div style={{ padding: '4px 6px' }}>
                 {error && (
                     <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', marginBottom: '14px', fontSize: '13px' }}>
                         {error}

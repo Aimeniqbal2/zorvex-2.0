@@ -102,13 +102,25 @@ def resolve_daily_rate_and_attribution(company_id, employee, duty_date, roster=N
     worked_site = roster.site if roster and roster.site else None
     worked_contract = None
 
-    # Home deployment of the working guard
+    # Resolve deployment effective on duty date (handles mid-month transfers between sites with different pay rates)
+    from django.db.models import Q
     home_dep = Deployment.objects.filter(
         company_id=company_id,
         employee=employee,
-        status='ACTIVE',
+        start_date__lte=d_date,
         is_deleted=False
-    ).select_related('site', 'post', 'service_contract', 'crm_entity').first()
+    ).filter(
+        Q(end_date__gte=d_date) | Q(end_date__isnull=True)
+    ).select_related('site', 'post', 'service_contract', 'crm_entity').order_by('-start_date').first()
+
+    # Fallback to current active deployment if no dated deployment found
+    if not home_dep:
+        home_dep = Deployment.objects.filter(
+            company_id=company_id,
+            employee=employee,
+            status='ACTIVE',
+            is_deleted=False
+        ).select_related('site', 'post', 'service_contract', 'crm_entity').first()
 
     # If roster has no site/post, fallback to home deployment
     if not worked_site and home_dep:

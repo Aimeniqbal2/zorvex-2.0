@@ -52,7 +52,12 @@ export const DeploymentRelieveModal: React.FC<DeploymentRelieveModalProps> = ({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Relieve Guard — ${employeeName || 'Deployment'}`}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={`Relieve Guard — ${employeeName || 'Deployment'}`}
+            width="580px"
+        >
             <form onSubmit={handleSubmit} style={{ padding: '8px' }}>
                 {error && (
                     <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', marginBottom: '14px', fontSize: '13px' }}>

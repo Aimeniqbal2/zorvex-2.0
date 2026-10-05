@@ -99,6 +99,10 @@ export interface Employee {
     id: string;
     employee_code: string;
     previous_employee_code?: string;
+    city?: string;
+    city_display?: string;
+    deployed_site_name?: string;
+    deployment_status?: string;
     photograph?: string | null;
     first_name: string;
     last_name: string;

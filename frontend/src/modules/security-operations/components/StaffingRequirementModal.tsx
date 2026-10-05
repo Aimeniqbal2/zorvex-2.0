@@ -127,7 +127,12 @@ export const StaffingRequirementModal: React.FC<StaffingRequirementModalProps> =
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={requirement ? 'Edit Staffing Requirement' : 'Add Staffing Requirement'}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={requirement ? 'Edit Staffing Requirement' : 'Add Staffing Requirement'}
+            width="860px"
+        >
             {error && <div style={{ color: 'red', marginBottom: '16px' }}>{error}</div>}
             
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

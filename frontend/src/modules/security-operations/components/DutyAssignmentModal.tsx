@@ -123,7 +123,12 @@ export const DutyAssignmentModal: React.FC<DutyAssignmentModalProps> = ({
     const isCompleted = assignment?.status === 'COMPLETED';
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={assignment ? 'Edit Duty Assignment' : 'New Duty Assignment'}>
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title={assignment ? 'Edit Duty Assignment' : 'New Duty Assignment'}
+            width="840px"
+        >
             <form onSubmit={handleSubmit} className="space-y-4 p-4">
                 {renderError()}
 

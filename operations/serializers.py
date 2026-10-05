@@ -32,11 +32,19 @@ class BaseModelValidatorMixin:
 
 class OperationalSiteSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     customer_name = serializers.CharField(source='crm_entity.name', read_only=True)
+    contract_codes = serializers.SerializerMethodField()
+    active_posts_count = serializers.SerializerMethodField()
 
     class Meta:
         model = OperationalSite
         fields = '__all__'
         read_only_fields = ('id', 'company', 'created_at', 'updated_at', 'is_deleted')
+
+    def get_contract_codes(self, obj):
+        return list(obj.service_contracts.filter(is_deleted=False).values_list('contract_code', flat=True))
+
+    def get_active_posts_count(self, obj):
+        return obj.security_posts.filter(is_deleted=False, is_active=True).count()
 
 
 class ServiceContractSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
@@ -215,6 +223,8 @@ class DeploymentTransferSerializer(serializers.Serializer):
     new_post = serializers.UUIDField(required=False, allow_null=True)
     new_contract = serializers.UUIDField(required=False, allow_null=True)
     new_designation = serializers.UUIDField(required=False, allow_null=True)
+    new_location_monthly_salary = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    location_monthly_salary = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     new_start_date = serializers.DateField(required=False)
     new_assignment_type = serializers.ChoiceField(choices=DeploymentAssignmentType.choices, default=DeploymentAssignmentType.PERMANENT)
     notes = serializers.CharField(required=False, allow_blank=True, default='')

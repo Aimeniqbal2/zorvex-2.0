@@ -155,14 +155,14 @@ export const PayrollRunsView: React.FC = () => {
 
     const handleFinalize = async () => {
         if (!selectedRun) return;
-        if (!window.confirm('Finalizing this run will freeze all duty pay and inputs, commit employee advance recoveries, and hand off liabilities to Finance S-4G. This action is irreversible. Proceed?')) {
+        if (!window.confirm('Finalizing this run will freeze all duty pay and inputs, commit employee advance recoveries, and hand off liabilities to Finance. This action is irreversible. Proceed?')) {
             return;
         }
         setActionLoading(true);
         setError(null);
         try {
             const res = await finalizePayrollRun(selectedRun.id);
-            setSuccessMessage(`Payroll run finalized! Settled ${res.advances_settled_count} advance(s) and created S-4G Finance liability.`);
+            setSuccessMessage(`Payroll run finalized! Settled ${res.advances_settled_count} advance(s) and created Finance liability.`);
             await handleOpenDetail(res.run);
             await fetchRuns();
         } catch (err: any) {
@@ -233,7 +233,7 @@ export const PayrollRunsView: React.FC = () => {
                         Payroll Runs & Payslips
                     </h2>
                     <p style={{ margin: '4px 0 0 0', color: 'var(--color-text-muted, #64748b)', fontSize: '14px' }}>
-                        Phase S-5G: Controlled payroll execution, immutable payslip snapshots & S-4G Finance handoff.
+                        Controlled payroll execution, immutable payslip snapshots, and finance handoff.
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
@@ -591,7 +591,7 @@ export const PayrollRunsView: React.FC = () => {
                                             fontSize: '11px',
                                             fontWeight: 600
                                         }}>
-                                            <i className="bx bx-check-double"></i> S-4G Finance Integrated
+                                            <i className="bx bx-check-double"></i> Finance Integrated
                                         </span>
                                     )}
                                 </div>
@@ -721,7 +721,7 @@ export const PayrollRunsView: React.FC = () => {
                                 }}
                             >
                                 <i className="bx bx-building" style={{ marginRight: '6px' }}></i>
-                                S-4G Finance Handoff
+                                Finance Handoff
                             </button>
                         </div>
 
@@ -808,8 +808,8 @@ export const PayrollRunsView: React.FC = () => {
                                                 </div>
                                                 <div style={{ fontSize: '13px', color: '#4b5563', marginTop: '4px' }}>
                                                     {financeStatus.integrated
-                                                        ? 'On finalization, payroll liabilities are recognized in Finance S-4G. In accordance with financial separation of duties, Salary Payment Batches are NOT generated automatically. Finance explicitly creates disbursement batches selecting treasury accounts and banking channels.'
-                                                        : 'Finalize the payroll run to post payroll liabilities and enable salary disbursement in Finance S-4G.'}
+                                                        ? 'On finalization, payroll liabilities are recognized in Finance. In accordance with financial separation of duties, Salary Payment Batches are NOT generated automatically. Finance explicitly creates disbursement batches selecting treasury accounts and banking channels.'
+                                                        : 'Finalize the payroll run to post payroll liabilities and enable salary disbursement in Finance.'}
                                                 </div>
                                             </div>
 
@@ -849,7 +849,7 @@ export const PayrollRunsView: React.FC = () => {
                                             }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                                     <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>
-                                                        Salary Payment Batches (Finance S-4G)
+                                                        Salary Payment Batches (Finance)
                                                     </h4>
                                                     <span style={{ fontSize: '12px', color: '#64748b' }}>
                                                         Initiated & disbursed explicitly by Finance Treasury
