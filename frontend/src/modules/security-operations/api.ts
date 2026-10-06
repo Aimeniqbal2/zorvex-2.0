@@ -1288,6 +1288,33 @@ export const getSecurityExportCsvUrl = (reportScope: string, reportType?: string
     return `/api/operations/reports/export-csv/?${query.toString()}`;
 };
 
+// Monthly Duty Muster & Attendance Register API
+export const getMonthlyMusterGrid = async (year: number, month: number, siteId?: string): Promise<any> => {
+    const params: any = { year, month };
+    if (siteId) params.site = siteId;
+    const response = await apiClient.get('/api/operations/monthly-muster/', { params });
+    return response.data;
+};
+
+export const saveMonthlyMusterUpdates = async (year: number, month: number, updates: any[]): Promise<any> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/save/', { year, month, updates });
+    return response.data;
+};
+
+export const importMonthlyMusterExcel = async (file: File, year: number, month: number): Promise<any> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('year', String(year));
+    formData.append('month', String(month));
+    const response = await apiClient.post('/api/operations/monthly-muster/import-excel/', formData);
+    return response.data;
+};
+
+export const getGuardAttendanceLedger = async (params: { employee: string; year?: number; month?: number; date_from?: string; date_to?: string }): Promise<any> => {
+    const response = await apiClient.get('/api/operations/monthly-muster/guard-ledger/', { params });
+    return response.data;
+};
+
 // Re-export apiClient for modal components
 export { apiClient } from '../../api/client';
 

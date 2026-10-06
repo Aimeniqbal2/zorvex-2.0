@@ -4050,6 +4050,151 @@ class SecurityReportsViewSet(viewsets.ViewSet):
         )
 
 
+# ---------------------------------------------------------------------------
+# Monthly Muster & Attendance Register Views
+# ---------------------------------------------------------------------------
+
+def _resolve_company_for_api_view(request):
+    from erp_core.middleware import get_current_company
+    from companies.models import Company
+    from rest_framework.exceptions import ValidationError
+
+    company_id = (
+        get_current_company()
+        or request.META.get('HTTP_X_COMPANY_ID')
+        or getattr(request.user, 'company_id', None)
+    )
+    if not company_id and getattr(request.user, 'is_superuser', False):
+        from platform_core.views import _get_company_for_user
+        comp, _ = _get_company_for_user(request)
+        if comp:
+            company_id = comp.id
+    if not company_id:
+        raise ValidationError({'detail': 'Company context is required.'})
+    try:
+        return Company.objects.get(id=company_id)
+    except Company.DoesNotExist:
+        raise ValidationError({'detail': 'Invalid company context.'})
+
+
+class MonthlyMusterGridView(APIView):
+    """
+    GET /api/operations/monthly-muster/?year=2026&month=10&site=<id>
+    Retrieves the complete Excel-parity 31-day muster grid across all operational sites.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        company = _resolve_company_for_api_view(request)
+        now = timezone.now().date()
+        year = int(request.query_params.get('year', now.year))
+        month = int(request.query_params.get('month', now.month))
+        site_id = request.query_params.get('site')
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        data = MonthlyMusterService.get_monthly_muster_grid(
+            company=company,
+            year=year,
+            month=month,
+            site_id=site_id
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class MonthlyMusterSaveView(APIView):
+    """
+    POST /api/operations/monthly-muster/save/
+    Atomically saves grid cell updates with cross-site anti-collision validation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        company = _resolve_company_for_api_view(request)
+        now = timezone.now().date()
+        year = int(request.data.get('year', now.year))
+        month = int(request.data.get('month', now.month))
+        updates = request.data.get('updates', [])
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            result = MonthlyMusterService.save_monthly_muster_updates(
+                company=company,
+                user=request.user,
+                year=year,
+                month=month,
+                updates=updates
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MonthlyMusterExcelImportView(APIView):
+    """
+    POST /api/operations/monthly-muster/import-excel/
+    Uploads and parses a legacy monthly Excel attendance sheet into the muster database.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        company = _resolve_company_for_api_view(request)
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response({'detail': 'No Excel file provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now().date()
+        year = int(request.data.get('year', now.year))
+        month = int(request.data.get('month', now.month))
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            result = MonthlyMusterService.import_monthly_muster_excel(
+                company=company,
+                user=request.user,
+                file_obj=file_obj,
+                year=year,
+                month=month
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': f"Excel Import Failed: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MonthlyMusterGuardLedgerView(APIView):
+    """
+    GET /api/operations/monthly-muster/guard-ledger/?employee=<id>&year=2026&month=10
+    Retrieves individual guard historical duty, overtime, and wage breakdown across all sites.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        company = _resolve_company_for_api_view(request)
+        emp_id = request.query_params.get('employee')
+        if not emp_id:
+            return Response({'detail': 'Employee ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now().date()
+        year = int(request.query_params.get('year', now.year)) if request.query_params.get('year') else None
+        month = int(request.query_params.get('month', now.month)) if request.query_params.get('month') else None
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            data = MonthlyMusterService.get_guard_attendance_ledger(
+                company=company,
+                employee_id=emp_id,
+                year=year,
+                month=month,
+                date_from=date_from,
+                date_to=date_to
+            )
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 
 
 

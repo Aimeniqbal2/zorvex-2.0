@@ -19,11 +19,15 @@ import { TemporaryServicesView } from './components/TemporaryServicesView';
 import { QAInspectionsView } from './components/QAInspectionsView';
 import { CorrectiveActionsView } from './components/CorrectiveActionsView';
 import { SecurityReportsWorkspace } from './components/SecurityReportsWorkspace';
+import { MonthlyMusterSheetTab } from './components/MonthlyMusterSheetTab';
+import { AttendanceRegisterView } from './components/AttendanceRegisterView';
 import './styles/securityOperations.css';
 
-type Tab = 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
+type Tab = 'monthly_muster' | 'attendance_register' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
 
 const TABS: { id: Tab, label: string, icon: string }[] = [
+    { id: 'monthly_muster', label: 'Monthly Duty Muster', icon: 'bx-spreadsheet' },
+    { id: 'attendance_register', label: 'Attendance Register & Ledger', icon: 'bx-history' },
     { id: 'overview', label: 'Control Center', icon: 'bx-radar' },
     { id: 'advanced_ops', label: 'Advanced Ops & Dispatch', icon: 'bx-broadcast' },
     { id: 'sites', label: 'Sites', icon: 'bx-building-house' },
@@ -52,6 +56,10 @@ export const SecurityOperationsModule: React.FC = () => {
 
     const renderContent = () => {
         switch (activeTab) {
+            case 'monthly_muster':
+                return <MonthlyMusterSheetTab />;
+            case 'attendance_register':
+                return <AttendanceRegisterView />;
             case 'overview':
                 return <SecurityOverview onNavigate={(tab: Tab) => setActiveTab(tab)} />;
             case 'advanced_ops':

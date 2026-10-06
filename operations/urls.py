@@ -19,7 +19,9 @@ from .views import (
     DailyOccurrenceLogViewSet, SiteCheckpointViewSet, PatrolPlanViewSet, PatrolRunViewSet,
     GuardTourViewSet, EmergencyEventViewSet, SupervisorInspectionViewSet, OperationsEscalationViewSet,
     AdvancedOperationsViewSet, InspectionPolicyViewSet, CrossModuleIntegrationViewSet,
-    SecurityReportsViewSet
+    SecurityReportsViewSet,
+    MonthlyMusterGridView, MonthlyMusterSaveView,
+    MonthlyMusterExcelImportView, MonthlyMusterGuardLedgerView
 )
 
 router = DefaultRouter()
@@ -75,5 +77,9 @@ urlpatterns = [
     path('dashboard/', SecurityOperationsDashboardView.as_view(), name='security-dashboard'),
     path('control-center/', SecurityOperationsControlCenterView.as_view(), name='security-control-center'),
     path('staffing-coverage/', StaffingCoverageView.as_view(), name='staffing-coverage'),
+    path('monthly-muster/', MonthlyMusterGridView.as_view(), name='monthly-muster-grid'),
+    path('monthly-muster/save/', MonthlyMusterSaveView.as_view(), name='monthly-muster-save'),
+    path('monthly-muster/import-excel/', MonthlyMusterExcelImportView.as_view(), name='monthly-muster-import-excel'),
+    path('monthly-muster/guard-ledger/', MonthlyMusterGuardLedgerView.as_view(), name='monthly-muster-guard-ledger'),
     path('', include(router.urls)),
 ]
