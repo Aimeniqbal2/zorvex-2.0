@@ -122,6 +122,14 @@ export const SecurityOperationsModule: React.FC = () => {
         }
     };
 
+    // Full-screen canvas modes: completely remove sidebar, header and padding
+    if (activeTab === 'monthly_muster') {
+        return <MonthlyMusterSheetTab onBack={() => setActiveTab('overview')} />;
+    }
+    if (activeTab === 'attendance_register') {
+        return <AttendanceRegisterView onBack={() => setActiveTab('overview')} />;
+    }
+
     return (
         <div className="security-operations-module">
             <div className="security-ops-header">
