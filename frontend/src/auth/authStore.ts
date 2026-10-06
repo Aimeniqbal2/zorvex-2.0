@@ -27,6 +27,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     setAuth: (token: string) => {
         const user = parseJwt(token);
+        if (typeof window !== 'undefined' && user?.company_id) {
+            localStorage.setItem('current_company_id', String(user.company_id));
+        }
         set({
             isAuthenticated: true,
             accessToken: token,
@@ -37,6 +40,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     clearAuth: () => {
         TokenManager.clearTokens();
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('current_company_id');
+        }
         set({
             isAuthenticated: false,
             accessToken: null,
@@ -49,7 +55,9 @@ export const useAuthStore = create<AuthState>((set) => ({
         const token = TokenManager.getAccessToken();
         if (token) {
             const user = parseJwt(token);
-            // Optionally check token expiration here
+            if (typeof window !== 'undefined' && user?.company_id && !localStorage.getItem('current_company_id')) {
+                localStorage.setItem('current_company_id', String(user.company_id));
+            }
             set({
                 isAuthenticated: true,
                 accessToken: token,

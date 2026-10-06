@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { TokenManager } from '../auth/tokenManager';
+import { useAuthStore } from '../auth/authStore';
 
 export const getApiBaseUrl = (): string => {
     if (import.meta.env.VITE_API_BASE_URL) {
@@ -43,7 +44,25 @@ apiClient.interceptors.request.use((config) => {
     return Promise.reject(error);
 });
 
-// Response interceptor: handle HTML responses, 401s, and refresh tokens
+// Mutex lock and promise queue for token refreshing
+let isRefreshing = false;
+let failedQueue: Array<{
+    resolve: (token: string) => void;
+    reject: (error: any) => void;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+    failedQueue.forEach((prom) => {
+        if (error) {
+            prom.reject(error);
+        } else if (token) {
+            prom.resolve(token);
+        }
+    });
+    failedQueue = [];
+};
+
+// Response interceptor: handle HTML responses, 401s, and mutex-protected token refresh
 apiClient.interceptors.response.use(
     (response) => {
         // Prevent silent acceptance of HTML from legacy routes
@@ -55,40 +74,71 @@ apiClient.interceptors.response.use(
         return response;
     },
     async (error: AxiosError) => {
-        const originalRequest = error.config;
+        const originalRequest = error.config as any;
         
-        // If error is 401 and we haven't already retried
-        if (error.response?.status === 401 && originalRequest && !(originalRequest as any)._retry) {
-            (originalRequest as any)._retry = true;
-            
+        // If error is 401 and we haven't already retried this request
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
             const refreshToken = TokenManager.getRefreshToken();
-            if (refreshToken) {
-                try {
-                    // Try to refresh token
-                    const response = await axios.post(`${apiClient.defaults.baseURL}/api/auth/refresh/`, {
-                        refresh: refreshToken
-                    });
-                    
-                    const newAccessToken = response.data.access;
-                    if (newAccessToken) {
-                        TokenManager.setAccessToken(newAccessToken);
-                        
-                        // Update the failed request with new token and retry
+            
+            // If no refresh token exists, clear auth and redirect to login
+            if (!refreshToken) {
+                TokenManager.clearTokens();
+                useAuthStore.getState().clearAuth();
+                if (typeof window !== 'undefined') {
+                    window.location.href = '/app/login';
+                }
+                return Promise.reject(error);
+            }
+
+            // If a refresh is already in progress, queue this request
+            if (isRefreshing) {
+                return new Promise<string>((resolve, reject) => {
+                    failedQueue.push({ resolve, reject });
+                })
+                    .then((token) => {
                         if (originalRequest.headers) {
-                            originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                            originalRequest.headers.Authorization = `Bearer ${token}`;
                         }
                         return apiClient(originalRequest);
+                    })
+                    .catch((err) => {
+                        return Promise.reject(err);
+                    });
+            }
+
+            originalRequest._retry = true;
+            isRefreshing = true;
+
+            try {
+                // Try to refresh token using un-intercepted raw axios
+                const response = await axios.post(`${apiClient.defaults.baseURL}/api/auth/refresh/`, {
+                    refresh: refreshToken
+                });
+                
+                const newAccessToken = response.data?.access;
+                if (newAccessToken) {
+                    TokenManager.setAccessToken(newAccessToken);
+                    useAuthStore.getState().setAuth(newAccessToken);
+                    
+                    if (originalRequest.headers) {
+                        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
                     }
-                } catch (refreshError) {
-                    // Refresh failed, clear tokens and redirect
-                    TokenManager.clearTokens();
-                    window.location.href = '/app/login';
-                    return Promise.reject(refreshError);
+                    processQueue(null, newAccessToken);
+                    return apiClient(originalRequest);
+                } else {
+                    throw new Error('Refresh response missing access token');
                 }
-            } else {
-                // No refresh token available
+            } catch (refreshError) {
+                processQueue(refreshError, null);
+                // Refresh failed, clear tokens and auth state, then redirect
                 TokenManager.clearTokens();
-                window.location.href = '/app/login';
+                useAuthStore.getState().clearAuth();
+                if (typeof window !== 'undefined') {
+                    window.location.href = '/app/login';
+                }
+                return Promise.reject(refreshError);
+            } finally {
+                isRefreshing = false;
             }
         }
         
