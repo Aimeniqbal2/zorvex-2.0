@@ -4,6 +4,7 @@ import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { useToastStore } from '../../../../stores/toastStore';
 import { createEntity, createAddress, createContact } from '../../../../modules/crm/api';
+import { createClientLocation } from '../api';
 
 interface SecurityClientModalProps {
     isOpen: boolean;
@@ -148,6 +149,25 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
                 } catch (contErr) {
                     console.warn(`Could not save contact ${c.name}:`, contErr);
                 }
+            }
+
+            // 4. Create Initial Default Location (Head Office)
+            try {
+                const primaryCont = validContacts[0];
+                const fullAddr = [addressLine.trim(), addressCity.trim(), addressState.trim()].filter(Boolean).join(', ');
+                await createClientLocation({
+                    customer: createdEntity.id,
+                    name: 'Head Office',
+                    address: fullAddr || (name.trim() + ' Head Office'),
+                    contact_person: primaryCont?.name.trim() || undefined,
+                    designation: primaryCont?.job_title.trim() || undefined,
+                    phone: primaryCont?.phone.trim() || undefined,
+                    whatsapp: primaryCont?.whatsapp.trim() || undefined,
+                    email: primaryCont?.email.trim() || undefined,
+                    is_active: true
+                });
+            } catch (locErr) {
+                console.warn('Could not auto-register initial client location:', locErr);
             }
 
             useToastStore.getState().success(`Client "${createdEntity.name}" created successfully.`);

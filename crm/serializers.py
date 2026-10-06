@@ -99,6 +99,8 @@ class CRMEntitySerializer(serializers.ModelSerializer):
         required=False
     )
     code = serializers.CharField(required=False, allow_blank=True)
+    locations_count = serializers.SerializerMethodField()
+    primary_contact_details = serializers.SerializerMethodField()
     
     class Meta:
         model = CRMEntity
@@ -107,9 +109,48 @@ class CRMEntitySerializer(serializers.ModelSerializer):
             'notes', 'website', 'tax_number', 'registration_number', 'credit_limit',
             'payment_terms', 'preferred_currency', 'preferred_language',
             'created_by', 'owner', 'tags', 'tags_ids', 'contacts', 'addresses',
+            'locations_count', 'primary_contact_details',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'roles']
+
+    def get_locations_count(self, obj):
+        try:
+            from security_crm.models import ClientLocation
+            sec_count = ClientLocation.objects.filter(customer=obj, is_deleted=False).count()
+            if sec_count > 0:
+                return sec_count
+        except Exception:
+            pass
+        return obj.addresses.count() if hasattr(obj, 'addresses') else 0
+
+    def get_primary_contact_details(self, obj):
+        primary = obj.contacts.filter(is_primary=True).first() or obj.contacts.first()
+        if primary:
+            return {
+                'name': f"{primary.first_name} {primary.last_name}".strip() or primary.first_name,
+                'phone': primary.phone or primary.mobile or primary.whatsapp or '',
+                'email': primary.email or '',
+                'job_title': primary.job_title or ''
+            }
+        try:
+            from security_crm.models import ClientLocation
+            loc_with_contact = ClientLocation.objects.filter(
+                customer=obj,
+                is_deleted=False,
+                primary_contact__isnull=False
+            ).select_related('primary_contact').first()
+            if loc_with_contact and loc_with_contact.primary_contact:
+                c = loc_with_contact.primary_contact
+                return {
+                    'name': f"{c.first_name} {c.last_name}".strip() or c.first_name,
+                    'phone': c.phone or c.mobile or c.whatsapp or '',
+                    'email': c.email or '',
+                    'job_title': c.job_title or ''
+                }
+        except Exception:
+            pass
+        return None
 
     def get_roles(self, obj):
         return [mapping.role for mapping in obj.role_mappings.all()]

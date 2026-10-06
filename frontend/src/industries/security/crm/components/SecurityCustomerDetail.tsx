@@ -14,6 +14,7 @@ import {
     getSecurityProposals, 
     getClientLocations, 
     createSecurityProposal, 
+    createClientLocation,
     updateClientLocation, 
     deleteClientLocation, 
     deleteSecurityProposal,
@@ -47,11 +48,17 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     const [isContactModalOpen, setIsContactModalOpen] = useState(false);
     const [editingContact, setEditingContact] = useState<CRMContact | null>(null);
 
-    // Location Modal State (Edit only)
+    // Location Modal State (Add & Edit)
     const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
     const [editingLocation, setEditingLocation] = useState<ClientLocation | null>(null);
     const [locationName, setLocationName] = useState('');
     const [locationAddress, setLocationAddress] = useState('');
+    const [locationContactPerson, setLocationContactPerson] = useState('');
+    const [locationDesignation, setLocationDesignation] = useState('');
+    const [locationPhone, setLocationPhone] = useState('');
+    const [locationWhatsapp, setLocationWhatsapp] = useState('');
+    const [locationEmail, setLocationEmail] = useState('');
+    const [locationIsActive, setLocationIsActive] = useState(true);
     const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
 
     const loadData = useCallback(async () => {
@@ -170,10 +177,29 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         }
     };
 
+    const handleOpenCreateLocation = () => {
+        setEditingLocation(null);
+        setLocationName('');
+        setLocationAddress('');
+        setLocationContactPerson('');
+        setLocationDesignation('');
+        setLocationPhone('');
+        setLocationWhatsapp('');
+        setLocationEmail('');
+        setLocationIsActive(true);
+        setIsLocationModalOpen(true);
+    };
+
     const handleOpenEditLocation = (loc: ClientLocation) => {
         setEditingLocation(loc);
-        setLocationName(loc.name);
+        setLocationName(loc.name || '');
         setLocationAddress(loc.address || '');
+        setLocationContactPerson(loc.contact_person || '');
+        setLocationDesignation(loc.designation || '');
+        setLocationPhone(loc.phone || '');
+        setLocationWhatsapp(loc.whatsapp || '');
+        setLocationEmail(loc.email || '');
+        setLocationIsActive(loc.is_active ?? true);
         setIsLocationModalOpen(true);
     };
 
@@ -198,18 +224,32 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         }
         setIsSubmittingLocation(true);
         try {
+            const payload: Partial<ClientLocation> = {
+                name: locationName.trim(),
+                address: locationAddress.trim() || null,
+                contact_person: locationContactPerson.trim() || null,
+                designation: locationDesignation.trim() || null,
+                phone: locationPhone.trim() || null,
+                whatsapp: locationWhatsapp.trim() || null,
+                email: locationEmail.trim() || null,
+                is_active: locationIsActive
+            };
+
             if (editingLocation) {
-                await updateClientLocation(editingLocation.id, {
-                    name: locationName.trim(),
-                    address: locationAddress.trim() || null
-                });
+                await updateClientLocation(editingLocation.id, payload);
                 useToastStore.getState().success('Location updated successfully');
+            } else {
+                await createClientLocation({
+                    ...payload,
+                    customer: customerId
+                });
+                useToastStore.getState().success('Location created successfully');
             }
             setIsLocationModalOpen(false);
             setEditingLocation(null);
             loadData();
         } catch (error) {
-            useToastStore.getState().error('Failed to update location');
+            useToastStore.getState().error(editingLocation ? 'Failed to update location' : 'Failed to create location');
         } finally {
             setIsSubmittingLocation(false);
         }
@@ -277,14 +317,107 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     });
 
     const locColumns: Column<ClientLocation>[] = [
-        { key: 'name', header: 'Location Name', render: (loc) => <strong>{loc.name}</strong> },
-        { key: 'address', header: 'Address', render: (loc) => loc.address || <span style={{color: 'var(--color-text-muted)'}}>No address</span> },
-        { key: 'is_active', header: 'Status', render: (loc) => loc.is_active ? <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 600 }}>Active</span> : <span style={{ color: 'var(--color-text-muted)' }}>Inactive</span> },
+        { 
+            key: 'name', 
+            header: 'Location Name', 
+            render: (loc) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className='bx bx-map-pin' style={{ color: 'var(--color-primary)', fontSize: '16px' }}></i>
+                    <strong>{loc.name}</strong>
+                </div>
+            ) 
+        },
+        { 
+            key: 'address', 
+            header: 'Address', 
+            render: (loc) => (
+                <div style={{ maxWidth: '240px', whiteSpace: 'normal', fontSize: '13px' }}>
+                    {loc.address ? (
+                        <span>{loc.address}</span>
+                    ) : (
+                        <span style={{ color: 'var(--color-text-muted)' }}>No address</span>
+                    )}
+                </div>
+            ) 
+        },
+        { 
+            key: 'contact_person', 
+            header: 'Contact Person', 
+            render: (loc) => (
+                <div>
+                    <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+                        {loc.contact_person || <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>—</span>}
+                    </div>
+                    {loc.designation && (
+                        <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', marginTop: '1px' }}>
+                            {loc.designation}
+                        </div>
+                    )}
+                </div>
+            )
+        },
+        { 
+            key: 'phone', 
+            header: 'Phone / WhatsApp', 
+            render: (loc) => {
+                const phone = loc.phone;
+                const wa = loc.whatsapp;
+                if (!phone && !wa) return <span style={{ color: 'var(--color-text-muted)' }}>—</span>;
+                return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '12.5px' }}>
+                        {phone && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <i className='bx bx-phone' style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}></i>
+                                <span>{phone}</span>
+                            </div>
+                        )}
+                        {wa && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981' }}>
+                                <i className='bx bxl-whatsapp' style={{ fontSize: '13px' }}></i>
+                                <span>{wa}</span>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+        },
+        { 
+            key: 'email', 
+            header: 'Email', 
+            render: (loc) => (
+                <div style={{ fontSize: '12.5px' }}>
+                    {loc.email ? (
+                        <a href={`mailto:${loc.email}`} style={{ color: 'var(--color-primary)', textDecoration: 'none' }}>
+                            {loc.email}
+                        </a>
+                    ) : (
+                        <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                    )}
+                </div>
+            )
+        },
+        { 
+            key: 'is_active', 
+            header: 'Status', 
+            render: (loc) => (
+                <span style={{ 
+                    padding: '2px 8px', 
+                    borderRadius: '12px', 
+                    fontSize: '11.5px', 
+                    fontWeight: 600,
+                    background: loc.is_active ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                    color: loc.is_active ? '#10b981' : 'var(--color-text-muted)',
+                    border: loc.is_active ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--color-border)'
+                }}>
+                    {loc.is_active ? 'Active' : 'Inactive'}
+                </span>
+            )
+        },
         {
             key: 'actions',
             header: 'Actions',
             render: (loc) => (
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
                     <Button 
                         variant="ghost" 
                         size="sm" 
@@ -308,8 +441,34 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     ];
 
     const propColumns: Column<SecurityProposal>[] = [
-        { key: 'proposal_number', header: 'Req #', render: (p) => <strong style={{ fontFamily: 'monospace' }}>{p.proposal_number}</strong> },
-        { key: 'title', header: 'Requirement Scope', render: (p) => <div>{p.title}</div> },
+        { 
+            key: 'proposal_number', 
+            header: 'Req #', 
+            render: (p) => <strong style={{ fontFamily: 'monospace', color: 'var(--color-primary)' }}>{p.proposal_number}</strong> 
+        },
+        { 
+            key: 'title', 
+            header: 'Requirement Scope', 
+            render: (p) => {
+                const targetLoc = p.locations_summary || (locations.length > 0 ? locations.map(l => l.name).join(', ') : 'All Deployment Sites');
+                const guardText = p.guard_breakdown || (p.guard_headcount ? `${p.guard_headcount} Guards Total` : (totalGuards ? `${totalGuards} Guards Total` : 'Deployment Requirements'));
+                const headcount = p.guard_headcount ?? (totalGuards || null);
+
+                return (
+                    <div>
+                        <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <i className='bx bx-map-pin' style={{ color: 'var(--color-primary)', fontSize: '15px' }}></i>
+                            <span>{targetLoc}</span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <i className='bx bx-shield-quarter' style={{ color: '#10b981' }}></i>
+                            <span>{guardText}</span>
+                            {headcount ? <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>• {headcount} Guards</span> : null}
+                        </div>
+                    </div>
+                );
+            } 
+        },
         { 
             key: 'status', 
             header: 'Operations Status', 
@@ -331,18 +490,18 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
             key: 'actions', 
             header: 'Actions', 
             render: (p) => (
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <Button variant="ghost" size="sm" onClick={() => onOpenProposal(p.id)}>
-                        <i className='bx bx-edit-alt'></i> Open Requirements
-                    </Button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                     <Button 
                         variant="ghost" 
                         size="sm" 
                         title="Delete Requirements"
                         style={{ color: 'var(--color-danger, #ef4444)' }}
-                        onClick={() => handleDeleteProposal(p.id, p.proposal_number)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteProposal(p.id, p.proposal_number);
+                        }}
                     >
-                        <i className='bx bx-trash'></i>
+                        <i className='bx bx-trash' style={{ fontSize: '16px' }}></i>
                     </Button>
                 </div>
             )
@@ -992,17 +1151,20 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
 
             {activeTab === 'locations' && (
                 <div style={{ background: 'var(--color-surface)', padding: '24px', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
-                    <div style={{ marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                         <div style={{ color: 'var(--color-text-muted)', fontSize: '13.5px', lineHeight: '1.5' }}>
                             Registered deployment sites, headquarters, and branch locations. 
-                            <strong> Note:</strong> New locations and force allocations are created via the <strong>Fast Costing Grid</strong>. Existing sites can be reviewed, edited, or deleted below.
+                            Click Edit on any location to manage site contact and operational details.
                         </div>
+                        <Button variant="primary" onClick={handleOpenCreateLocation}>
+                            <i className='bx bx-plus'></i> Add Location
+                        </Button>
                     </div>
                     <DataTable 
                         data={locations}
                         columns={locColumns}
                         keyExtractor={(row) => row.id}
-                        emptyMessage="No locations found. Locations are registered automatically when setting requirements in the Fast Costing Grid."
+                        emptyMessage="No locations found. Click 'Add Location' or register deployment sites in the Fast Costing Grid."
                     />
                 </div>
             )}
@@ -1011,7 +1173,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                 <div style={{ background: 'var(--color-surface)', padding: '24px', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                         <div style={{ color: 'var(--color-text-muted)', fontSize: '13.5px' }}>
-                            Commercial service requirements and guard staffing for this client.
+                            Commercial service requirements and guard staffing for this client. Click any row to open requirements sheet.
                         </div>
                         <Button variant="primary" onClick={handleCreateRequirement}>
                             <i className='bx bx-plus'></i> Add Requirements
@@ -1021,6 +1183,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         data={proposals}
                         columns={propColumns}
                         keyExtractor={(row) => row.id}
+                        onRowClick={(p) => onOpenProposal(p.id)}
                         emptyMessage="No requirement sheets found. Click 'Add Requirements' to set guard staffing and rates."
                     />
                 </div>
@@ -1054,11 +1217,11 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                 contact={editingContact}
             />
 
-            {/* Edit Location Modal */}
+            {/* Add / Edit Location Modal */}
             <Modal
                 isOpen={isLocationModalOpen}
                 onClose={() => { setIsLocationModalOpen(false); setEditingLocation(null); }}
-                title="Edit Client Location / Site"
+                title={editingLocation ? 'Edit Client Location / Site' : 'Add New Client Location / Site'}
                 footer={
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                         <Button variant="ghost" onClick={() => { setIsLocationModalOpen(false); setEditingLocation(null); }}>
@@ -1069,7 +1232,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                             disabled={isSubmittingLocation || !locationName.trim()}
                             onClick={handleSaveLocation}
                         >
-                            {isSubmittingLocation ? 'Saving...' : 'Update Location'}
+                            {isSubmittingLocation ? 'Saving...' : (editingLocation ? 'Update Location' : 'Save Location')}
                         </Button>
                     </div>
                 }
@@ -1090,6 +1253,82 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                             value={locationAddress}
                             onChange={(e) => setLocationAddress(e.target.value)}
                         />
+
+                        <div style={{ 
+                            marginTop: '4px',
+                            paddingTop: '12px',
+                            borderTop: '1px solid var(--color-border)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            color: 'var(--color-primary)'
+                        }}>
+                            <i className='bx bx-user-pin'></i> Site Contact Person (Optional)
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
+                            <Input 
+                                label="Contact Person Name"
+                                placeholder="e.g. Tariq Mehmood"
+                                value={locationContactPerson}
+                                onChange={(e) => setLocationContactPerson(e.target.value)}
+                            />
+                            <Input 
+                                label="Job Title / Designation"
+                                placeholder="e.g. Admin Manager / Site Incharge"
+                                value={locationDesignation}
+                                onChange={(e) => setLocationDesignation(e.target.value)}
+                            />
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <Input 
+                                label="Phone Number"
+                                placeholder="e.g. 0300-1234567"
+                                value={locationPhone}
+                                onChange={(e) => setLocationPhone(e.target.value)}
+                            />
+                            <Input 
+                                label="WhatsApp Number"
+                                placeholder="e.g. 0300-1234567"
+                                value={locationWhatsapp}
+                                onChange={(e) => setLocationWhatsapp(e.target.value)}
+                            />
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
+                            <Input 
+                                label="Email Address"
+                                type="email"
+                                placeholder="e.g. contact@client.com"
+                                value={locationEmail}
+                                onChange={(e) => setLocationEmail(e.target.value)}
+                            />
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: 500, color: 'var(--color-text)' }}>
+                                    Site Operational Status
+                                </label>
+                                <select 
+                                    className="crm-select"
+                                    style={{
+                                        width: '100%',
+                                        padding: '9px 12px',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--color-border)',
+                                        background: 'var(--color-surface)',
+                                        color: 'var(--color-text)',
+                                        fontSize: '13.5px'
+                                    }}
+                                    value={locationIsActive ? 'active' : 'inactive'}
+                                    onChange={(e) => setLocationIsActive(e.target.value === 'active')}
+                                >
+                                    <option value="active">Active Deployment Site</option>
+                                    <option value="inactive">Inactive / Closed Site</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </Modal>

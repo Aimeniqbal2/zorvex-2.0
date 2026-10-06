@@ -9,7 +9,7 @@ from .models import (
     AssessmentAttachment, RiskLevel, ProposalAdditionalCharge,
     ProposalSignedDocument, ApprovalMethod, SignedDocumentCategory
 )
-from crm.models import CRMEntity, CRMContact
+from crm.models import CRMEntity, CRMContact, CRMAddress
 from django.utils import timezone
 
 
@@ -22,11 +22,143 @@ class SecurityServiceTypeSerializer(serializers.ModelSerializer):
 
 class ClientLocationSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='customer.name', read_only=True)
+    address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    contact_person = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    designation = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    whatsapp = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
     class Meta:
         model = ClientLocation
         fields = '__all__'
         read_only_fields = ['company', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.crm_address:
+            addr_parts = [instance.crm_address.line1]
+            if instance.crm_address.city:
+                addr_parts.append(instance.crm_address.city)
+            data['address'] = ", ".join(filter(None, addr_parts))
+        else:
+            data['address'] = instance.notes or ''
+
+        if instance.primary_contact:
+            c = instance.primary_contact
+            data['contact_person'] = f"{c.first_name} {c.last_name}".strip()
+            data['designation'] = c.job_title or ''
+            data['phone'] = c.phone or c.mobile or ''
+            data['whatsapp'] = c.whatsapp or ''
+            data['email'] = c.email or ''
+        else:
+            data['contact_person'] = ''
+            data['designation'] = ''
+            data['phone'] = ''
+            data['whatsapp'] = ''
+            data['email'] = ''
+
+        return data
+
+    def create(self, validated_data):
+        address = validated_data.pop('address', None)
+        contact_person = validated_data.pop('contact_person', None)
+        designation = validated_data.pop('designation', None)
+        phone = validated_data.pop('phone', None)
+        whatsapp = validated_data.pop('whatsapp', None)
+        email = validated_data.pop('email', None)
+
+        instance = super().create(validated_data)
+
+        if address and address.strip():
+            crm_addr = CRMAddress.objects.create(
+                company=instance.company,
+                entity=instance.customer,
+                address_type='Office',
+                line1=address.strip(),
+                country='Pakistan'
+            )
+            instance.crm_address = crm_addr
+            instance.save(update_fields=['crm_address'])
+
+        if any([contact_person, designation, phone, whatsapp, email]):
+            parts = (contact_person or '').strip().split(' ', 1)
+            first_name = parts[0] or (instance.name + ' Contact')
+            last_name = parts[1] if len(parts) > 1 else ''
+            crm_cont = CRMContact.objects.create(
+                company=instance.company,
+                entity=instance.customer,
+                first_name=first_name,
+                last_name=last_name,
+                job_title=designation.strip() if designation else '',
+                phone=phone.strip() if phone else '',
+                whatsapp=whatsapp.strip() if whatsapp else '',
+                email=email.strip() if email else ''
+            )
+            instance.primary_contact = crm_cont
+            instance.save(update_fields=['primary_contact'])
+
+        return instance
+
+    def update(self, instance, validated_data):
+        address = validated_data.pop('address', None)
+        contact_person = validated_data.pop('contact_person', None)
+        designation = validated_data.pop('designation', None)
+        phone = validated_data.pop('phone', None)
+        whatsapp = validated_data.pop('whatsapp', None)
+        email = validated_data.pop('email', None)
+
+        instance = super().update(instance, validated_data)
+
+        if address is not None:
+            if instance.crm_address:
+                instance.crm_address.line1 = address.strip()
+                instance.crm_address.save(update_fields=['line1'])
+            elif address.strip():
+                crm_addr = CRMAddress.objects.create(
+                    company=instance.company,
+                    entity=instance.customer,
+                    address_type='Office',
+                    line1=address.strip(),
+                    country='Pakistan'
+                )
+                instance.crm_address = crm_addr
+                instance.save(update_fields=['crm_address'])
+
+        if any(v is not None for v in [contact_person, designation, phone, whatsapp, email]):
+            if instance.primary_contact:
+                cont = instance.primary_contact
+                if contact_person is not None:
+                    parts = contact_person.strip().split(' ', 1)
+                    cont.first_name = parts[0] or cont.first_name
+                    cont.last_name = parts[1] if len(parts) > 1 else ''
+                if designation is not None:
+                    cont.job_title = designation.strip()
+                if phone is not None:
+                    cont.phone = phone.strip()
+                if whatsapp is not None:
+                    cont.whatsapp = whatsapp.strip()
+                if email is not None:
+                    cont.email = email.strip()
+                cont.save()
+            elif any(v and v.strip() for v in [contact_person, designation, phone, whatsapp, email] if isinstance(v, str)):
+                parts = (contact_person or '').strip().split(' ', 1)
+                first_name = parts[0] or (instance.name + ' Contact')
+                last_name = parts[1] if len(parts) > 1 else ''
+                crm_cont = CRMContact.objects.create(
+                    company=instance.company,
+                    entity=instance.customer,
+                    first_name=first_name,
+                    last_name=last_name,
+                    job_title=(designation or '').strip(),
+                    phone=(phone or '').strip(),
+                    whatsapp=(whatsapp or '').strip(),
+                    email=(email or '').strip()
+                )
+                instance.primary_contact = crm_cont
+                instance.save(update_fields=['primary_contact'])
+
+        return instance
 
 
 class MeetingParticipantSerializer(serializers.ModelSerializer):
@@ -132,11 +264,60 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
     open_follow_ups_count = serializers.SerializerMethodField()
     next_action = serializers.SerializerMethodField()
     handoff_prepared_by_name = serializers.SerializerMethodField()
+    locations_summary = serializers.SerializerMethodField()
+    guard_headcount = serializers.SerializerMethodField()
+    guard_breakdown = serializers.SerializerMethodField()
+    requirement_scope_display = serializers.SerializerMethodField()
     
     class Meta:
         model = SecurityProposal
         fields = '__all__'
         read_only_fields = ['company', 'proposal_number', 'status', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def _get_target_version(self, obj):
+        if obj.approved_version_id:
+            return obj.approved_version
+        return obj.versions.order_by('-version_number').first()
+
+    def get_locations_summary(self, obj):
+        ver = self._get_target_version(obj)
+        if not ver:
+            return ""
+        loc_names = list(ver.service_lines.filter(location__isnull=False).values_list('location__name', flat=True).distinct())
+        return ", ".join(loc_names) if loc_names else ""
+
+    def get_guard_headcount(self, obj):
+        ver = self._get_target_version(obj)
+        if not ver:
+            return 0
+        from django.db.models import Sum
+        return ver.service_lines.aggregate(total=Sum('quantity'))['total'] or 0
+
+    def get_guard_breakdown(self, obj):
+        ver = self._get_target_version(obj)
+        if not ver:
+            return ""
+        lines = ver.service_lines.select_related('service_type').all()
+        parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
+        return ", ".join(parts)
+
+    def get_requirement_scope_display(self, obj):
+        ver = self._get_target_version(obj)
+        if not ver:
+            return obj.title
+        loc_names = list(ver.service_lines.filter(location__isnull=False).values_list('location__name', flat=True).distinct())
+        loc_str = ", ".join(loc_names) if loc_names else ""
+        lines = ver.service_lines.select_related('service_type').all()
+        headcount = sum(l.quantity for l in lines)
+        if loc_str and headcount > 0:
+            guard_parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
+            return f"{loc_str} • {', '.join(guard_parts)} (Total: {headcount})"
+        elif loc_str:
+            return loc_str
+        elif headcount > 0:
+            guard_parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
+            return f"{', '.join(guard_parts)} (Total: {headcount})"
+        return obj.title
 
     def get_handoff_prepared_by_name(self, obj):
         if obj.handoff_prepared_by:

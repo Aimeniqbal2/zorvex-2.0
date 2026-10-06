@@ -77,7 +77,7 @@ class ClientLocationViewSet(TenantModelViewSet):
                 crm_entity=loc.customer,
                 name=loc.name,
                 defaults={
-                    'address': getattr(loc.crm_address, 'street_address', '') if loc.crm_address else (loc.notes or loc.name),
+                    'address': (loc.crm_address.line1 if loc.crm_address else (loc.notes or loc.name)),
                     'is_active': loc.is_active
                 }
             )

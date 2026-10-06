@@ -89,11 +89,32 @@ export const SecurityCRMModule: React.FC = () => {
             header: 'Primary Contact',
             render: (entity) => {
                 const primary = entity.contacts?.find(c => c.is_primary) || entity.contacts?.[0];
-                if (!primary) return <span style={{ color: 'var(--color-text-muted)' }}>—</span>;
+                const contactName = entity.primary_contact_details?.name || (primary ? `${primary.first_name} ${primary.last_name || ''}`.trim() : '');
+                const contactPhone = entity.primary_contact_details?.phone || (primary ? (primary.phone || primary.mobile || primary.whatsapp) : '');
+                const contactEmail = entity.primary_contact_details?.email || primary?.email || '';
+
+                if (!contactName && !contactPhone && !contactEmail) {
+                    return <span style={{ color: 'var(--color-text-muted)' }}>—</span>;
+                }
+
                 return (
                     <div>
-                        <div>{primary.first_name} {primary.last_name}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>{primary.phone || primary.email}</div>
+                        <div style={{ fontWeight: 500, color: 'var(--color-text)' }}>{contactName || 'Primary Contact'}</div>
+                        {(contactPhone || contactEmail) && (
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                                {contactPhone ? (
+                                    <>
+                                        <i className='bx bx-phone' style={{ fontSize: '12px' }}></i>
+                                        <span>{contactPhone}</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <i className='bx bx-envelope' style={{ fontSize: '12px' }}></i>
+                                        <span>{contactEmail}</span>
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
                 );
             }
@@ -102,7 +123,24 @@ export const SecurityCRMModule: React.FC = () => {
             key: 'locations',
             header: 'Locations',
             render: (entity) => {
-                return <span>{entity.addresses?.length || 0}</span>;
+                const count = entity.locations_count ?? entity.addresses?.length ?? 0;
+                return (
+                    <span style={{ 
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: '28px',
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        backgroundColor: count > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(148, 163, 184, 0.12)',
+                        color: count > 0 ? '#10b981' : 'var(--color-text-muted)',
+                        border: count > 0 ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid var(--color-border)'
+                    }}>
+                        {count}
+                    </span>
+                );
             }
         },
         {

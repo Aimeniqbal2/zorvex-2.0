@@ -73,6 +73,13 @@ export interface CRMEntity {
     tags: CRMTag[];
     contacts: CRMContact[];
     addresses: CRMAddress[];
+    locations_count?: number;
+    primary_contact_details?: {
+        name: string;
+        phone: string;
+        email?: string;
+        job_title?: string;
+    } | null;
     
     created_at: string;
     updated_at: string;

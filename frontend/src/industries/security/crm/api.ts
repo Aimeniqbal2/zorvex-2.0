@@ -23,9 +23,14 @@ export interface ClientLocation {
     id: string;
     customer: string;
     name: string;
-    address: string | null;
+    address?: string | null;
+    contact_person?: string | null;
+    designation?: string | null;
+    phone?: string | null;
+    whatsapp?: string | null;
+    email?: string | null;
     is_active: boolean;
-    company: string;
+    company?: string;
 }
 
 export interface ProposalAdditionalCharge {
@@ -182,6 +187,10 @@ export interface SecurityProposal {
     contract_status?: string | null;
     valid_until: string | null;
     notes: string;
+    locations_summary?: string;
+    guard_headcount?: number;
+    guard_breakdown?: string;
+    requirement_scope_display?: string;
 
     // Approval Fields
     approved_version?: string | null;
