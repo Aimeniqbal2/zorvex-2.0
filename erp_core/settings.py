@@ -218,11 +218,9 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/day',
-        'user': '1000/day'
+        'anon': '500/day',
     },
     'DEFAULT_PAGINATION_CLASS': 'erp_core.pagination.StandardResultsSetPagination',
     'PAGE_SIZE': 50,
