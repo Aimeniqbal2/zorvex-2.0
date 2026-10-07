@@ -64,9 +64,11 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         tax_rate: number | string;
         overhead_per_guard: number | string;
         service_charges_per_guard: number | string;
-        sales_tax_basis: 'SERVICE_CHARGES' | 'TOTAL_SALE';
+        sales_tax_basis: 'SERVICE_CHARGES' | 'TOTAL_SALE' | 'MANUAL';
+        sales_tax_override: number | string;
         withholding_tax_rate: number | string;
-        withholding_tax_basis: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT';
+        withholding_tax_basis: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT' | 'MANUAL';
+        withholding_tax_override: number | string;
         total_sessi: number | string;
         total_eobi: number | string;
         commercial_notes: string;
@@ -84,8 +86,10 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         overhead_per_guard: 6000,
         service_charges_per_guard: 3000,
         sales_tax_basis: 'SERVICE_CHARGES',
+        sales_tax_override: '',
         withholding_tax_rate: 7,
         withholding_tax_basis: 'SERVICE_CHARGES',
+        withholding_tax_override: '',
         total_sessi: 0,
         total_eobi: 0,
         commercial_notes: '',
@@ -128,9 +132,11 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                 tax_rate: activeVersion.tax_rate ?? 8,
                 overhead_per_guard: activeVersion.overhead_per_guard ?? 6000,
                 service_charges_per_guard: activeVersion.service_charges_per_guard ?? 3000,
-                sales_tax_basis: activeVersion.sales_tax_basis || 'SERVICE_CHARGES',
+                sales_tax_basis: (activeVersion.sales_tax_basis as any) || (activeVersion.sales_tax_override !== null && activeVersion.sales_tax_override !== undefined ? 'MANUAL' : 'SERVICE_CHARGES'),
+                sales_tax_override: activeVersion.sales_tax_override ?? '',
                 withholding_tax_rate: activeVersion.withholding_tax_rate ?? 7,
-                withholding_tax_basis: activeVersion.withholding_tax_basis || 'SERVICE_CHARGES',
+                withholding_tax_basis: (activeVersion.withholding_tax_basis as any) || (activeVersion.withholding_tax_override !== null && activeVersion.withholding_tax_override !== undefined ? 'MANUAL' : 'SERVICE_CHARGES'),
+                withholding_tax_override: activeVersion.withholding_tax_override ?? '',
                 total_sessi: activeVersion.total_sessi ?? 0,
                 total_eobi: activeVersion.total_eobi ?? 0,
                 commercial_notes: activeVersion.commercial_notes || '',
@@ -156,7 +162,9 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                 tax_rate: (termsState.tax_rate !== '' && termsState.tax_rate !== null && termsState.tax_rate !== undefined) ? Number(termsState.tax_rate) : 0,
                 overhead_per_guard: (termsState.overhead_per_guard !== '' && termsState.overhead_per_guard !== null && termsState.overhead_per_guard !== undefined) ? Number(termsState.overhead_per_guard) : 6000,
                 service_charges_per_guard: (termsState.service_charges_per_guard !== '' && termsState.service_charges_per_guard !== null && termsState.service_charges_per_guard !== undefined) ? Number(termsState.service_charges_per_guard) : 0,
+                sales_tax_override: termsState.sales_tax_basis === 'MANUAL' && termsState.sales_tax_override !== '' ? Number(termsState.sales_tax_override) : (termsState.sales_tax_basis === 'MANUAL' ? 0 : null),
                 withholding_tax_rate: (termsState.withholding_tax_rate !== '' && termsState.withholding_tax_rate !== null && termsState.withholding_tax_rate !== undefined) ? Number(termsState.withholding_tax_rate) : 0,
+                withholding_tax_override: termsState.withholding_tax_basis === 'MANUAL' && termsState.withholding_tax_override !== '' ? Number(termsState.withholding_tax_override) : (termsState.withholding_tax_basis === 'MANUAL' ? 0 : null),
                 total_sessi: Number(termsState.total_sessi) || 0,
                 total_eobi: Number(termsState.total_eobi) || 0,
                 proposal_validity_days: Number(termsState.proposal_validity_days) || 30,
@@ -858,7 +866,22 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     >
                                         <option value="SERVICE_CHARGES">On Service Charges</option>
                                         <option value="TOTAL_SALE">On Total Monthly Sale</option>
+                                        <option value="MANUAL">Manual Entry (From Fast Costing Grid)</option>
                                     </select>
+                                    {termsState.sales_tax_basis === 'MANUAL' && (
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="any"
+                                            disabled={isFrozen}
+                                            value={termsState.sales_tax_override}
+                                            onChange={(e) => setTermsState({ ...termsState, sales_tax_override: e.target.value })}
+                                            className="fp-input"
+                                            style={{ fontFamily: 'monospace', marginTop: '6px', borderColor: '#f59e0b', color: '#f59e0b', fontWeight: 600 }}
+                                            placeholder="Sales Tax Override (PKR)"
+                                            title="Manual Sales Tax override amount (PKR)"
+                                        />
+                                    )}
                                 </div>
                             </div>
 
@@ -891,7 +914,22 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     >
                                         <option value="SERVICE_CHARGES">On Service Charges</option>
                                         <option value="INVOICE_AMOUNT">On Invoice Amount</option>
+                                        <option value="MANUAL">Manual Entry (From Fast Costing Grid)</option>
                                     </select>
+                                    {termsState.withholding_tax_basis === 'MANUAL' && (
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="any"
+                                            disabled={isFrozen}
+                                            value={termsState.withholding_tax_override}
+                                            onChange={(e) => setTermsState({ ...termsState, withholding_tax_override: e.target.value })}
+                                            className="fp-input"
+                                            style={{ fontFamily: 'monospace', marginTop: '6px', borderColor: '#a855f7', color: 'var(--color-text)', fontWeight: 600 }}
+                                            placeholder="WHT Override (PKR)"
+                                            title="Manual Withholding Tax override amount (PKR)"
+                                        />
+                                    )}
                                 </div>
 
                                 <div className="fp-form-field">

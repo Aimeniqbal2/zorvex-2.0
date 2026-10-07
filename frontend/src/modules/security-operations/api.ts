@@ -1296,8 +1296,20 @@ export const getMonthlyMusterGrid = async (year: number, month: number, siteId?:
     return response.data;
 };
 
-export const saveMonthlyMusterUpdates = async (year: number, month: number, updates: any[]): Promise<any> => {
-    const response = await apiClient.post('/api/operations/monthly-muster/save/', { year, month, updates });
+export const saveMonthlyMusterUpdates = async (
+    year: number, 
+    month: number, 
+    updates: any[],
+    added_guards?: Array<{ site_id: string; employee_id: string }>,
+    removed_guards?: Array<{ site_id: string; employee_id: string }>
+): Promise<any> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/save/', { 
+        year, 
+        month, 
+        updates,
+        added_guards,
+        removed_guards
+    });
     return response.data;
 };
 

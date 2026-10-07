@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from erp_core.models import BaseModel
 from operations.models import (
     OperationalSite, SecurityPost, Deployment, DailyDutyPay,
-    DailyPayRateSource, DailyPayCalculationStatus
+    DailyPayRateSource, DailyPayCalculationStatus, DeploymentStatus
 )
 from hrm.models import Employee, WorkforceAttendance, AttendanceStatus, Designation
 import openpyxl
@@ -20,6 +20,52 @@ class MonthlyMusterService:
     Dedicated Service Engine for the Security Operations Monthly Muster Grid,
     Excel Import, Cross-Location Anti-Cheating Validation, and Guard History Ledger.
     """
+
+    @staticmethod
+    def get_site_overtime_rate(site, desig=None):
+        """
+        Resolves the explicit client overtime rate configured in CRM proposal data for this site.
+        If not set or 0, returns Decimal('0.00').
+        """
+        if not site:
+            return Decimal('0.00')
+        company = site.company
+        from security_crm.models import ProposalServiceLine
+
+        # 1. Match lines by location name
+        lines = ProposalServiceLine.objects.filter(
+            company=company,
+            location__name__iexact=site.name,
+            is_deleted=False
+        ).select_related('service_type')
+
+        # 2. Fallback to matching by client entity if location name not found
+        if not lines.exists() and site.crm_entity:
+            lines = ProposalServiceLine.objects.filter(
+                company=company,
+                location__customer=site.crm_entity,
+                is_deleted=False
+            ).select_related('service_type')
+
+        if not lines.exists():
+            return Decimal('0.00')
+
+        # If designation is provided, try to find a matching line first
+        if desig:
+            desig_name = (desig.name if hasattr(desig, 'name') else str(desig)).lower()
+            for l in lines:
+                st_name = (l.service_type.name if l.service_type else '').lower()
+                if (desig_name in st_name or st_name in desig_name) and (l.single_ot_rate or l.double_ot_rate):
+                    return l.single_ot_rate or l.double_ot_rate or Decimal('0.00')
+
+        # Otherwise return the highest configured OT rate for this location
+        best_ot = Decimal('0.00')
+        for l in lines:
+            ot = l.single_ot_rate or l.double_ot_rate or Decimal('0.00')
+            if ot and ot > best_ot:
+                best_ot = ot
+
+        return best_ot
 
     @staticmethod
     def get_monthly_muster_grid(company, year: int, month: int, site_id=None):
@@ -123,7 +169,7 @@ class MonthlyMusterService:
             supervisors_sal = Decimal('0.00')
             guards_req = 0
             guards_sal = Decimal('0.00')
-            overtime_rate = Decimal('0.00')
+            overtime_rate = MonthlyMusterService.get_site_overtime_rate(site)
 
             for p in posts:
                 desig_name = p.required_designation.name.lower() if p.required_designation else ''
@@ -135,11 +181,6 @@ class MonthlyMusterService:
                     guards_req += p.required_headcount
                     if p.monthly_pay_rate and p.monthly_pay_rate > guards_sal:
                         guards_sal = p.monthly_pay_rate
-                    if p.daily_pay_rate and p.daily_pay_rate > overtime_rate:
-                        overtime_rate = p.daily_pay_rate
-
-            if overtime_rate == Decimal('0.00') and guards_sal > 0:
-                overtime_rate = (guards_sal / Decimal(str(days_in_month))).quantize(Decimal('0.01'))
 
             # Find all employees who belong to this site for this month
             # 1. From Deployments
@@ -228,19 +269,19 @@ class MonthlyMusterService:
                         is_ds = site_duty.get('is_ds', False)
 
                         if is_ds:
-                            code = 'WO+OT'
+                            code = 'D'
                             count_ds += 1
                             daily_totals[d] += 1
                         elif is_ot:
-                            code = 'OT'
+                            code = 'O'
                             count_ot += 1
                             daily_totals[d] += 1
                         elif status in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
-                            code = '1'
+                            code = 'P'
                             count_p += 1
                             daily_totals[d] += 1
                         elif status in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO']:
-                            code = 'WO'
+                            code = 'W'
                             count_wo += 1
                             daily_vacations[d] += 1
                         elif status in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
@@ -307,12 +348,16 @@ class MonthlyMusterService:
         }
 
     @staticmethod
-    def save_monthly_muster_updates(company, user, year: int, month: int, updates: list):
+    def save_monthly_muster_updates(company, user, year: int, month: int, updates: list, added_guards: list = None, removed_guards: list = None):
         """
         Atomically saves cell updates into WorkforceAttendance and DailyDutyPay.
         Enforces strict cross-location validation (No duplicate Present on same day).
+        Handles newly added guards (persisting deployments) and removed guards (wiping monthly duties & deployments).
         """
         days_in_month = calendar.monthrange(year, month)[1]
+        updates = updates or []
+        added_guards = added_guards or []
+        removed_guards = removed_guards or []
 
         # Group updates by (employee_id, day) to detect internal duplicates in the payload
         emp_day_payload = {}
@@ -326,16 +371,80 @@ class MonthlyMusterService:
                     emp = Employee.objects.filter(id=emp_id).first()
                     emp_name = f"{emp.first_name} ({emp.employee_code})" if emp else emp_id
                     raise ValidationError(
-                        f"Guard {emp_name} cannot be marked Present (P) at two different locations on Day {day}. Mark Overtime (OT) for the second location."
+                        f"Guard {emp_name} cannot be marked Present (P) at two different locations on Day {day}. Mark Overtime (O) for the second location."
                     )
                 emp_day_payload[key] = up.get('site_id')
 
         with transaction.atomic():
+            start_date = date(year, month, 1)
+            end_date = date(year, month, days_in_month)
+
+            # 1. Process Removed Guards: clean up duty pays, attendances, and deployments for this site in this month
+            for rm in removed_guards:
+                rm_site_id = rm.get('site_id')
+                rm_emp_id = rm.get('employee_id')
+                if rm_site_id and rm_emp_id:
+                    DailyDutyPay.objects.filter(
+                        company=company,
+                        site_id=rm_site_id,
+                        employee_id=rm_emp_id,
+                        duty_date__gte=start_date,
+                        duty_date__lte=end_date
+                    ).delete()
+
+                    WorkforceAttendance.objects.filter(
+                        company=company,
+                        site_id=rm_site_id,
+                        employee_id=rm_emp_id,
+                        date__gte=start_date,
+                        date__lte=end_date
+                    ).delete()
+
+                    Deployment.objects.filter(
+                        company=company,
+                        site_id=rm_site_id,
+                        employee_id=rm_emp_id,
+                        is_deleted=False
+                    ).update(is_deleted=True)
+
+            # 2. Process Added Guards: ensure active Deployment exists for this site so guard remains on muster
+            for add_item in added_guards:
+                add_site_id = add_item.get('site_id')
+                add_emp_id = add_item.get('employee_id')
+                if add_site_id and add_emp_id:
+                    site_obj = OperationalSite.objects.filter(id=add_site_id, company=company).first()
+                    emp_obj = Employee.objects.filter(id=add_emp_id, company=company).first()
+                    if site_obj and emp_obj:
+                        post_obj = SecurityPost.objects.filter(site=site_obj, is_active=True, is_deleted=False).first()
+                        contract_obj = post_obj.service_contract if post_obj else None
+                        desig_obj = emp_obj.designation or (post_obj.required_designation if post_obj else None)
+                        if not desig_obj:
+                            desig_obj = Designation.objects.filter(company=company, is_deleted=False).first()
+
+                        dep, created = Deployment.objects.get_or_create(
+                            company=company,
+                            site=site_obj,
+                            employee=emp_obj,
+                            is_deleted=False,
+                            defaults={
+                                'start_date': start_date,
+                                'status': DeploymentStatus.ACTIVE,
+                                'post': post_obj,
+                                'service_contract': contract_obj,
+                                'designation': desig_obj,
+                                'assigned_by': user if (user and user.is_authenticated) else None
+                            }
+                        )
+                        if not created and dep.status != DeploymentStatus.ACTIVE:
+                            dep.status = DeploymentStatus.ACTIVE
+                            dep.save(update_fields=['status'])
+
+            # 3. Process Cell Updates
             for up in updates:
                 site_id = up.get('site_id')
                 emp_id = up.get('employee_id')
                 day = int(up.get('day'))
-                code = str(up.get('code', '')).strip().upper()
+                raw_code = str(up.get('code', '')).strip().upper()
                 target_date = date(year, month, day)
 
                 site = OperationalSite.objects.filter(id=site_id, company=company).first()
@@ -347,9 +456,24 @@ class MonthlyMusterService:
                 post = SecurityPost.objects.filter(site=site, is_active=True, is_deleted=False).first()
                 site_monthly_sal = post.monthly_pay_rate if (post and post.monthly_pay_rate) else Decimal('35000.00')
                 daily_rate = (site_monthly_sal / Decimal(str(days_in_month))).quantize(Decimal('0.01'))
-                ot_rate = post.daily_pay_rate if (post and post.daily_pay_rate) else daily_rate
+                ot_rate = MonthlyMusterService.get_site_overtime_rate(site, desig=emp.designation)
 
-                if code in ['1', 'P']:
+                # Canonicalize duty code
+                code = raw_code
+                if code in ['P', '1']:
+                    code = 'P'
+                elif code in ['O', 'OT']:
+                    code = 'O'
+                elif code in ['D', 'WO+OT', 'DS', '2']:
+                    code = 'D'
+                elif code in ['W', 'WO', 'OFF']:
+                    code = 'W'
+                elif code == 'A':
+                    code = 'A'
+                elif code in ['L', 'PL', 'SL']:
+                    code = 'L'
+
+                if code == 'P':
                     # Check database for collision with another site on this same date
                     existing_att = WorkforceAttendance.objects.filter(
                         company=company,
@@ -361,7 +485,7 @@ class MonthlyMusterService:
 
                     if existing_att and existing_att.site:
                         raise ValidationError(
-                            f"Guard {emp.first_name} ({emp.employee_code}) is already marked Present at '{existing_att.site.name}' on Day {day}. You can only mark Overtime (OT) at '{site.name}'."
+                            f"Guard {emp.first_name} ({emp.employee_code}) is already marked Present at '{existing_att.site.name}' on Day {day}. You can only mark Overtime (O) at '{site.name}'."
                         )
 
                     # 1. Update/Create primary WorkforceAttendance
@@ -395,7 +519,7 @@ class MonthlyMusterService:
                         }
                     )
 
-                elif code == 'OT':
+                elif code == 'O':
                     # Overtime duty at this site
                     DailyDutyPay.objects.update_or_create(
                         company=company,
@@ -414,8 +538,9 @@ class MonthlyMusterService:
                         }
                     )
 
-                elif code in ['WO+OT', 'DS']:
-                    # Double Shift on Paid Off Day: Earns paid off allowance + 1 full day duty pay
+                elif code == 'D':
+                    # Double Shift on Paid Off Day: Earns paid off allowance + duty pay
+                    double_rate = ot_rate if ot_rate > Decimal('0.00') else daily_rate
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
@@ -435,15 +560,15 @@ class MonthlyMusterService:
                         defaults={
                             'attendance_status': 'DOUBLE_SHIFT',
                             'client': site.crm_entity,
-                            'daily_payable_rate': daily_rate,
+                            'daily_payable_rate': double_rate,
                             'payable_percentage': Decimal('100.00'),
-                            'payable_amount': daily_rate,
+                            'payable_amount': double_rate,
                             'calculation_status': DailyPayCalculationStatus.CALCULATED,
                             'notes': f'Muster: Double Shift on Weekly Off at {site.name}'
                         }
                     )
 
-                elif code == 'WO':
+                elif code == 'W':
                     # Scheduled Weekly Off
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
@@ -501,7 +626,7 @@ class MonthlyMusterService:
                         company=company, employee=emp, date=target_date, site=site
                     ).delete()
 
-        return {'status': 'success', 'saved_updates': len(updates)}
+        return {'status': 'success', 'saved_updates': len(updates), 'added_guards': len(added_guards), 'removed_guards': len(removed_guards)}
 
     @staticmethod
     def import_monthly_muster_excel(company, user, file_obj, year: int, month: int):

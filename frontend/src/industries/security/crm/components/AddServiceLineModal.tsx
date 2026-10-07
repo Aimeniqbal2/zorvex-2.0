@@ -29,8 +29,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
     const [guardSalary, setGuardSalary] = useState<number | string>(0);
     const [weaponType, setWeaponType] = useState<string>('UNARMED');
     const [shiftHours, setShiftHours] = useState<string>('12_HOURS');
-    const [singleOtRate, setSingleOtRate] = useState<number | string>(0);
-    const [doubleOtRate, setDoubleOtRate] = useState<number | string>(0);
+    const [otRate, setOtRate] = useState<number | string>(0);
     const [notes, setNotes] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -49,8 +48,8 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
             setGuardSalary(editingLine.guard_salary ?? 0);
             setWeaponType(editingLine.weapon_type || 'UNARMED');
             setShiftHours(editingLine.shift_hours || '12_HOURS');
-            setSingleOtRate(editingLine.single_ot_rate ?? (editingLine as any).single_ot_billing_rate ?? 0);
-            setDoubleOtRate(editingLine.double_ot_rate ?? (editingLine as any).double_ot_billing_rate ?? 0);
+            const initialOt = editingLine.single_ot_rate ?? editingLine.double_ot_rate ?? (editingLine as any).ot_rate ?? 0;
+            setOtRate(initialOt);
             setNotes(editingLine.notes || '');
         } else {
             setLocation(locations[0]?.id || '');
@@ -60,8 +59,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
             setGuardSalary(0);
             setWeaponType('UNARMED');
             setShiftHours('12_HOURS');
-            setSingleOtRate(0);
-            setDoubleOtRate(0);
+            setOtRate(0);
             setNotes('');
         }
         setError(null);
@@ -92,8 +90,9 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                 guard_salary: salRate,
                 weapon_type: weaponType,
                 shift_hours: shiftHours,
-                single_ot_rate: Number(singleOtRate) || 0,
-                double_ot_rate: Number(doubleOtRate) || 0,
+                single_ot_rate: Number(otRate) || 0,
+                double_ot_rate: Number(otRate) || 0,
+                ot_rate: Number(otRate) || 0,
                 notes
             });
             onClose();
@@ -537,66 +536,46 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                                     </div>
                                 </div>
 
-                                {/* Overtime Billing Rates */}
+                                {/* Overtime Billing Rate */}
                                 <div style={{
                                     padding: '12px 14px',
                                     borderRadius: '10px',
                                     background: 'var(--color-surface)',
                                     border: '1px solid var(--color-border)'
                                 }}>
-                                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '8px', textTransform: 'uppercase' }}>
-                                        Client Overtime Billing Rates (Optional)
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                            Client Overtime Billing Rate (OT)
+                                        </span>
+                                        <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>Hourly Billing</span>
                                     </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                        <div>
-                                            <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-                                                Single OT / Hr (PKR)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="any"
-                                                value={singleOtRate}
-                                                onChange={(e) => setSingleOtRate(e.target.value)}
-                                                placeholder="0.00"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 10px',
-                                                    borderRadius: '6px',
-                                                    fontSize: '13px',
-                                                    fontFamily: 'monospace',
-                                                    background: 'var(--color-surface)',
-                                                    border: '1px solid var(--color-border)',
-                                                    color: 'var(--color-text)',
-                                                    outline: 'none'
-                                                }}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-                                                Double OT / Hr (PKR)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="any"
-                                                value={doubleOtRate}
-                                                onChange={(e) => setDoubleOtRate(e.target.value)}
-                                                placeholder="0.00"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 10px',
-                                                    borderRadius: '6px',
-                                                    fontSize: '13px',
-                                                    fontFamily: 'monospace',
-                                                    background: 'var(--color-surface)',
-                                                    border: '1px solid var(--color-border)',
-                                                    color: 'var(--color-text)',
-                                                    outline: 'none'
-                                                }}
-                                            />
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                                            OT / Hr (PKR)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="any"
+                                            value={otRate}
+                                            onChange={(e) => setOtRate(e.target.value)}
+                                            placeholder="0.00"
+                                            style={{
+                                                width: '100%',
+                                                height: '36px',
+                                                padding: '0 12px',
+                                                borderRadius: '6px',
+                                                fontSize: '13px',
+                                                fontFamily: 'monospace',
+                                                background: 'var(--color-surface)',
+                                                border: '1px solid var(--color-border)',
+                                                color: 'var(--color-text)',
+                                                outline: 'none',
+                                                fontWeight: 600
+                                            }}
+                                        />
+                                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                            Client overtime rate charged per hour when guard works week-off or extra shifts.
                                         </div>
                                     </div>
                                 </div>

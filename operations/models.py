@@ -416,7 +416,8 @@ class Deployment(BaseModel):
             if emp_status and emp_status != 'ACTIVE':
                 raise ValidationError({'employee': f'Only ACTIVE employees can receive an ACTIVE deployment (current status: {emp_status}).'})
 
-        # Phase S-5B Rule: Prevent overlapping conflicting active deployments for the same employee
+        # Phase S-5B Rule: Prevent overlapping conflicting active deployments for the same employee at the same site
+        # (Guards are permitted to be deployed across multiple distinct sites)
         if self.status == DeploymentStatus.ACTIVE and self.employee_id and self.start_date:
             start_a = self.start_date
             end_a = self.end_date
@@ -424,6 +425,7 @@ class Deployment(BaseModel):
             conflict_qs = Deployment.objects.filter(
                 company_id=self.company_id,
                 employee_id=self.employee_id,
+                site_id=self.site_id,
                 status=DeploymentStatus.ACTIVE,
                 is_deleted=False
             )
@@ -440,9 +442,9 @@ class Deployment(BaseModel):
                     overlap = False
                 if overlap:
                     emp_display = getattr(self.employee, 'full_name', '') or getattr(self.employee, 'first_name', 'Employee')
-                    site_name = getattr(other.site, 'name', 'another site')
+                    site_name = getattr(other.site, 'name', 'this site')
                     raise ValidationError({
-                        'employee': f"Employee {emp_display} already has an active deployment at {site_name} ({other.start_date} to {other.end_date or 'ongoing'}). Relieve the existing deployment before creating a new active deployment."
+                        'employee': f"Employee {emp_display} already has an active deployment at {site_name} ({other.start_date} to {other.end_date or 'ongoing'})."
                     })
 
         if self.pk:

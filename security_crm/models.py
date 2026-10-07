@@ -207,8 +207,8 @@ class ProposalVersion(BaseModel):
     )
     sales_tax_basis = models.CharField(
         max_length=30, default='SERVICE_CHARGES',
-        choices=[('SERVICE_CHARGES', 'Service Charges'), ('TOTAL_SALE', 'Total Sale')],
-        help_text="Sales tax calculation basis (service charges vs total sale)"
+        choices=[('SERVICE_CHARGES', 'Service Charges'), ('TOTAL_SALE', 'Total Sale'), ('MANUAL', 'Manual Entry')],
+        help_text="Sales tax calculation basis (service charges vs total sale vs manual entry)"
     )
     withholding_tax_rate = models.DecimalField(
         max_digits=5, decimal_places=2, default=7,
@@ -216,7 +216,7 @@ class ProposalVersion(BaseModel):
     )
     withholding_tax_basis = models.CharField(
         max_length=30, default='SERVICE_CHARGES',
-        choices=[('SERVICE_CHARGES', 'Service Charges'), ('INVOICE_AMOUNT', 'Invoice Amount')],
+        choices=[('SERVICE_CHARGES', 'Service Charges'), ('INVOICE_AMOUNT', 'Invoice Amount'), ('MANUAL', 'Manual Entry')],
         help_text="Withholding tax calculation basis"
     )
     sales_tax_override = models.DecimalField(
@@ -281,6 +281,8 @@ class ProposalVersion(BaseModel):
     def sales_tax_amount(self):
         """Col AH: Sales Tax (8%) computed on Service Charges or Total Sale, or manual override."""
         from decimal import Decimal
+        if getattr(self, 'sales_tax_basis', 'SERVICE_CHARGES') == 'MANUAL':
+            return Decimal(str(self.sales_tax_override or 0)).quantize(Decimal('0.01'))
         if self.sales_tax_override is not None:
             return Decimal(str(self.sales_tax_override)).quantize(Decimal('0.01'))
         rate = Decimal(str(self.tax_rate if self.tax_rate is not None else 0)) / Decimal('100.00')
@@ -297,6 +299,8 @@ class ProposalVersion(BaseModel):
     def withholding_tax_amount(self):
         """Col AC: WHT / Income Tax (7%) on Service Charges or Invoice Amount, or manual override."""
         from decimal import Decimal
+        if getattr(self, 'withholding_tax_basis', 'SERVICE_CHARGES') == 'MANUAL':
+            return Decimal(str(self.withholding_tax_override or 0)).quantize(Decimal('0.01'))
         if self.withholding_tax_override is not None:
             return Decimal(str(self.withholding_tax_override)).quantize(Decimal('0.01'))
         rate = Decimal(str(self.withholding_tax_rate if self.withholding_tax_rate is not None else 0)) / Decimal('100.00')
@@ -558,6 +562,11 @@ class ProposalServiceLine(BaseModel):
         """Per-head margin for this line item = client_rate - guard_salary."""
         from decimal import Decimal
         return self.client_rate - Decimal(str(self.guard_salary or 0))
+
+    @property
+    def ot_rate(self):
+        """Unified overtime billing rate per hour."""
+        return self.single_ot_rate or self.double_ot_rate or 0
 
     def clean(self):
         super().clean()

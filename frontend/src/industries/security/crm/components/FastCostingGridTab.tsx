@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { useToastStore } from '../../../../stores/toastStore';
-import { fetchCostingGrid, syncCostingGrid, importCostingExcel } from '../api';
+import { fetchCostingGrid, syncCostingGrid, importCostingExcel, getClientLocations } from '../api';
 import type { CostingGridRow } from '../api';
 import { getEntities } from '../../../../modules/crm/api';
 import type { CRMEntity } from '../../../../modules/crm/types';
@@ -120,22 +120,27 @@ const ROLE_COLUMNS: RoleColDef[] = [
 export const FastCostingGridTab: React.FC = () => {
     const [rows, setRows] = useState<CostingGridRow[]>([]);
     const [existingCustomers, setExistingCustomers] = useState<CRMEntity[]>([]);
+    const [existingLocations, setExistingLocations] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [search, setSearch] = useState('');
+    const [selectedClientFilter, setSelectedClientFilter] = useState<string>('ALL');
+    const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('ALL');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
 
     const loadGrid = async () => {
         setIsLoading(true);
         try {
-            const [gridData, customersRes] = await Promise.all([
+            const [gridData, customersRes, locationsRes] = await Promise.all([
                 fetchCostingGrid(),
-                getEntities({ entity_type: 'CUSTOMER' }).catch(() => ({ results: [] }))
+                getEntities({ entity_type: 'CUSTOMER' }).catch(() => ({ results: [] })),
+                getClientLocations().catch(() => ({ results: [] }))
             ]);
             setRows(gridData);
             setExistingCustomers(customersRes.results || []);
+            setExistingLocations((locationsRes as any)?.results || locationsRes || []);
         } catch (err: any) {
             useToastStore.getState().error('Failed to load costing grid.');
         } finally {
@@ -162,21 +167,21 @@ export const FastCostingGridTab: React.FC = () => {
             monthlySalary += qty * sal;
         });
 
-        const overheadPerGuard = r.overhead_per_guard !== undefined && r.overhead_per_guard !== null ? Number(r.overhead_per_guard) : 6000;
-        const serviceCharges = r.service_charges_per_guard !== undefined && r.service_charges_per_guard !== null ? Number(r.service_charges_per_guard) : 3000; // Col AG (Flat monthly)
-        const taxWhtRate = r.tax_wht_rate !== undefined && r.tax_wht_rate !== null ? Number(r.tax_wht_rate) : 7;
-        const salesTaxRate = r.sales_tax_rate !== undefined && r.sales_tax_rate !== null ? Number(r.sales_tax_rate) : 8;
+        const overheadPerGuard = r.overhead_per_guard !== undefined && r.overhead_per_guard !== null && r.overhead_per_guard !== '' ? Number(r.overhead_per_guard) : 6000;
+        const serviceCharges = (r.service_charges_per_guard !== undefined && r.service_charges_per_guard !== null && r.service_charges_per_guard !== '') ? Number(r.service_charges_per_guard) : 3000; // Col AG (Flat monthly)
+        const taxWhtRate = (r.tax_wht_rate !== undefined && r.tax_wht_rate !== null && r.tax_wht_rate !== '') ? Number(r.tax_wht_rate) : 7;
+        const salesTaxRate = (r.sales_tax_rate !== undefined && r.sales_tax_rate !== null && r.sales_tax_rate !== '') ? Number(r.sales_tax_rate) : 8;
         const sessi = Number(r.sessi) || 0;
         const eobi = Number(r.eobi) || 0;
 
         const expense = totalStrength * overheadPerGuard; // Col AB
 
         // Check for manual overrides or compute formula default
-        const salesTax = (r.sales_tax_override !== undefined && r.sales_tax_override !== null)
+        const salesTax = (r.sales_tax_override !== undefined && r.sales_tax_override !== null && r.sales_tax_override !== '')
             ? Number(r.sales_tax_override)
             : (serviceCharges * (salesTaxRate / 100)); // Col AH
 
-        const wht = (r.withholding_tax_override !== undefined && r.withholding_tax_override !== null)
+        const wht = (r.withholding_tax_override !== undefined && r.withholding_tax_override !== null && r.withholding_tax_override !== '')
             ? Number(r.withholding_tax_override)
             : (serviceCharges * (taxWhtRate / 100)); // Col AC
 
@@ -254,6 +259,27 @@ export const FastCostingGridTab: React.FC = () => {
         };
     }, [rows]);
 
+    const clientLocationsMap = useMemo(() => {
+        const map: Record<string, string[]> = {};
+        const locList = Array.isArray(existingLocations) ? existingLocations : (existingLocations as any)?.results || [];
+        locList.forEach((loc: any) => {
+            const custId = typeof loc.customer === 'object' ? loc.customer?.id : loc.customer;
+            const cust = existingCustomers.find(c => String(c.id) === String(custId));
+            const custNameKey = cust ? cust.name.toLowerCase().trim() : '';
+            if (custNameKey && loc.name) {
+                if (!map[custNameKey]) map[custNameKey] = [];
+                if (!map[custNameKey].includes(loc.name)) map[custNameKey].push(loc.name);
+            }
+        });
+        return map;
+    }, [existingLocations, existingCustomers]);
+
+    const allLocationNames = useMemo(() => {
+        const locList = Array.isArray(existingLocations) ? existingLocations : (existingLocations as any)?.results || [];
+        const names = locList.map((l: any) => l.name).filter(Boolean);
+        return Array.from(new Set(names)) as string[];
+    }, [existingLocations]);
+
     const handleAddBlankRow = () => {
         const newRow: CostingGridRow = {
             id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -266,6 +292,7 @@ export const FastCostingGridTab: React.FC = () => {
             sales_tax_rate: 0,
             sessi: 0,
             eobi: 0,
+            ot_rate: 0,
             sup_civ_qty: 0, sup_civ_rate: 0, sup_civ_sal: 0,
             sup_ex_qty: 0, sup_ex_rate: 0, sup_ex_sal: 0,
             sr_sup_civ_qty: 0, sr_sup_civ_rate: 0, sr_sup_civ_sal: 0,
@@ -285,24 +312,23 @@ export const FastCostingGridTab: React.FC = () => {
         setRows([newRow, ...rows]);
     };
 
-    const handleUpdateRow = (index: number, field: keyof CostingGridRow, value: any) => {
-        const updated = [...rows];
-        const currentRow = { ...updated[index] };
-
-        // If updating client_name, check if it matches an existing customer to auto-link client_id
-        if (field === 'client_name') {
-            const matched = existingCustomers.find(c => c.name.toLowerCase() === String(value).trim().toLowerCase());
-            currentRow.client_id = matched ? matched.id : null;
-        }
-
-        currentRow[field] = value as never;
-        updated[index] = currentRow;
-        setRows(updated);
+    const handleUpdateRow = (targetRow: CostingGridRow, field: keyof CostingGridRow, value: any) => {
+        setRows(prevRows => prevRows.map(r => {
+            if (r === targetRow || (r.id && r.id === targetRow.id)) {
+                const updated = { ...r };
+                if (field === 'client_name') {
+                    const matched = existingCustomers.find(c => c.name.toLowerCase() === String(value).trim().toLowerCase());
+                    updated.client_id = matched ? matched.id : null;
+                }
+                updated[field] = value as never;
+                return updated;
+            }
+            return r;
+        }));
     };
 
-    const handleDeleteRow = (index: number) => {
-        const updated = rows.filter((_, i) => i !== index);
-        setRows(updated);
+    const handleDeleteRow = (targetRow: CostingGridRow) => {
+        setRows(prevRows => prevRows.filter(r => r !== targetRow && (!r.id || r.id !== targetRow.id)));
     };
 
     const handleSaveSync = async () => {
@@ -319,7 +345,17 @@ export const FastCostingGridTab: React.FC = () => {
 
         setIsSaving(true);
         try {
-            const res = await syncCostingGrid(rows);
+            const preparedRows = rows.map(r => ({
+                ...r,
+                overhead_per_guard: (r.overhead_per_guard !== '' && r.overhead_per_guard !== null && r.overhead_per_guard !== undefined) ? Number(r.overhead_per_guard) : 6000,
+                service_charges_per_guard: (r.service_charges_per_guard !== '' && r.service_charges_per_guard !== null && r.service_charges_per_guard !== undefined) ? Number(r.service_charges_per_guard) : 3000,
+                sales_tax_override: (r.sales_tax_override !== '' && r.sales_tax_override !== null && r.sales_tax_override !== undefined) ? Number(r.sales_tax_override) : null,
+                withholding_tax_override: (r.withholding_tax_override !== '' && r.withholding_tax_override !== null && r.withholding_tax_override !== undefined) ? Number(r.withholding_tax_override) : null,
+                sessi: (r.sessi !== '' && r.sessi !== null && r.sessi !== undefined) ? Number(r.sessi) : 0,
+                eobi: (r.eobi !== '' && r.eobi !== null && r.eobi !== undefined) ? Number(r.eobi) : 0,
+                ot_rate: (r.ot_rate !== '' && r.ot_rate !== null && r.ot_rate !== undefined) ? Number(r.ot_rate) : 0,
+            }));
+            const res = await syncCostingGrid(preparedRows as any);
             useToastStore.getState().success(res.message || 'Costing grid synced to CRM successfully!');
             await loadGrid();
         } catch (err: any) {
@@ -348,14 +384,54 @@ export const FastCostingGridTab: React.FC = () => {
         }
     };
 
+    const uniqueClients = useMemo(() => {
+        const set = new Set<string>();
+        rows.forEach(r => {
+            const name = (r.client_name || '').trim();
+            if (name) set.add(name);
+        });
+        existingCustomers.forEach(c => {
+            const name = (c.name || '').trim();
+            if (name) set.add(name);
+        });
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [rows, existingCustomers]);
+
+    const clientLocationsForFilter = useMemo(() => {
+        if (!selectedClientFilter || selectedClientFilter === 'ALL') return [];
+        const locSet = new Set<string>();
+        const targetClient = selectedClientFilter.toLowerCase().trim();
+        rows.forEach(r => {
+            if ((r.client_name || '').toLowerCase().trim() === targetClient) {
+                const locName = (r.location_name || '').trim();
+                if (locName) locSet.add(locName);
+            }
+        });
+        if (clientLocationsMap[targetClient]) {
+            clientLocationsMap[targetClient].forEach(loc => locSet.add(loc));
+        }
+        return Array.from(locSet).sort((a, b) => a.localeCompare(b));
+    }, [rows, selectedClientFilter, clientLocationsMap]);
+
     const filteredRows = useMemo(() => {
-        if (!search.trim()) return rows;
-        const q = search.toLowerCase();
-        return rows.filter(r => 
-            r.client_name?.toLowerCase().includes(q) ||
-            r.location_name?.toLowerCase().includes(q)
-        );
-    }, [rows, search]);
+        let result = rows;
+        if (selectedClientFilter && selectedClientFilter !== 'ALL') {
+            const cKey = selectedClientFilter.toLowerCase().trim();
+            result = result.filter(r => (r.client_name || '').toLowerCase().trim() === cKey);
+        }
+        if (selectedLocationFilter && selectedLocationFilter !== 'ALL') {
+            const lKey = selectedLocationFilter.toLowerCase().trim();
+            result = result.filter(r => (r.location_name || '').toLowerCase().trim() === lKey);
+        }
+        if (search.trim()) {
+            const q = search.toLowerCase();
+            result = result.filter(r => 
+                r.client_name?.toLowerCase().includes(q) ||
+                r.location_name?.toLowerCase().includes(q)
+            );
+        }
+        return result;
+    }, [rows, selectedClientFilter, selectedLocationFilter, search]);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', flex: 1, minHeight: 0 }}>
@@ -513,14 +589,92 @@ export const FastCostingGridTab: React.FC = () => {
                     </Button>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '250px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {/* Client Filter Dropdown */}
+                    <select
+                        value={selectedClientFilter}
+                        onChange={(e) => {
+                            setSelectedClientFilter(e.target.value);
+                            setSelectedLocationFilter('ALL');
+                        }}
+                        style={{
+                            height: '36px',
+                            padding: '0 8px',
+                            fontSize: '12.5px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--color-border)',
+                            background: 'var(--color-surface)',
+                            color: 'var(--color-text)',
+                            fontWeight: selectedClientFilter !== 'ALL' ? 700 : 500,
+                            maxWidth: '190px'
+                        }}
+                        title="Filter by Client"
+                    >
+                        <option value="ALL">All Clients ({uniqueClients.length})</option>
+                        {uniqueClients.map(cName => (
+                            <option key={cName} value={cName}>{cName}</option>
+                        ))}
+                    </select>
+
+                    {/* Location Filter Dropdown (contextual when client selected) */}
+                    {selectedClientFilter !== 'ALL' && clientLocationsForFilter.length > 0 && (
+                        <select
+                            value={selectedLocationFilter}
+                            onChange={(e) => setSelectedLocationFilter(e.target.value)}
+                            style={{
+                                height: '36px',
+                                padding: '0 8px',
+                                fontSize: '12.5px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                color: 'var(--color-text)',
+                                fontWeight: selectedLocationFilter !== 'ALL' ? 700 : 500,
+                                maxWidth: '170px'
+                            }}
+                            title="Filter by Location"
+                        >
+                            <option value="ALL">All Sites ({clientLocationsForFilter.length})</option>
+                            {clientLocationsForFilter.map(lName => (
+                                <option key={lName} value={lName}>{lName}</option>
+                            ))}
+                        </select>
+                    )}
+
+                    <div style={{ width: '210px' }}>
                         <Input 
                             placeholder="Filter by client or location..." 
                             value={search} 
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
+
+                    {(selectedClientFilter !== 'ALL' || selectedLocationFilter !== 'ALL' || search.trim()) && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSelectedClientFilter('ALL');
+                                setSelectedLocationFilter('ALL');
+                                setSearch('');
+                            }}
+                            style={{
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                color: '#dc2626',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '11.5px',
+                                fontWeight: 600,
+                                padding: '4px 8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                            }}
+                            title="Clear all filters"
+                        >
+                            ✕ Clear
+                        </button>
+                    )}
 
                     <Button 
                         variant="primary"
@@ -618,7 +772,7 @@ export const FastCostingGridTab: React.FC = () => {
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={12} style={{ 
+                            <th colSpan={13} style={{ 
                                 padding: '10px 16px', 
                                 textAlign: 'center', 
                                 backgroundColor: 'var(--color-surface)',
@@ -626,7 +780,7 @@ export const FastCostingGridTab: React.FC = () => {
                                 color: 'var(--color-text)',
                                 borderBottom: '1px solid var(--color-border)', 
                                 fontWeight: 700, 
-                                minWidth: '1260px', 
+                                minWidth: '1355px', 
                                 position: 'sticky', 
                                 top: 0, 
                                 zIndex: 35, 
@@ -658,6 +812,7 @@ export const FastCostingGridTab: React.FC = () => {
                             <th style={{ padding: '9px 10px', width: '120px', minWidth: '120px', textAlign: 'right', color: '#fbbf24', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Direct Salary</th>
                             <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', color: 'var(--color-text)', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Strength</th>
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overhead Exp</th>
+                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>OT / Hr</th>
                             <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Service Charges</th>
                             <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#fbbf24', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Sales Tax</th>
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Tax</th>
@@ -672,7 +827,7 @@ export const FastCostingGridTab: React.FC = () => {
                     <tbody>
                         {filteredRows.length === 0 ? (
                             <tr>
-                                <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 13} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 14} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                                     {isLoading ? 'Loading costing matrix...' : 'No client locations found. Click "+ Add Client / Location Row" or "Import Excel Sheet" to begin.'}
                                 </td>
                             </tr>
@@ -717,7 +872,7 @@ export const FastCostingGridTab: React.FC = () => {
                                                 type="text"
                                                 list="existing-clients-list"
                                                 value={row.client_name}
-                                                onChange={(e) => handleUpdateRow(idx, 'client_name', e.target.value)}
+                                                onChange={(e) => handleUpdateRow(row, 'client_name', e.target.value)}
                                                 placeholder="e.g. KatKom (Gharo & M9)"
                                                 style={{
                                                     width: '100%',
@@ -746,8 +901,9 @@ export const FastCostingGridTab: React.FC = () => {
                                         }}>
                                             <input 
                                                 type="text"
+                                                list={`existing-locations-${row.id || idx}`}
                                                 value={row.location_name}
-                                                onChange={(e) => handleUpdateRow(idx, 'location_name', e.target.value)}
+                                                onChange={(e) => handleUpdateRow(row, 'location_name', e.target.value)}
                                                 placeholder="e.g. Gharo Site"
                                                 style={{
                                                     width: '100%',
@@ -757,9 +913,20 @@ export const FastCostingGridTab: React.FC = () => {
                                                     borderRadius: '6px',
                                                     border: '1px solid var(--color-border)',
                                                     background: 'var(--color-surface)',
-                                                    color: 'var(--color-text)'
+                                                    color: 'var(--color-text)',
+                                                    fontWeight: 600
                                                 }}
                                             />
+                                            <datalist id={`existing-locations-${row.id || idx}`}>
+                                                {(() => {
+                                                    const clientKey = (row.client_name || '').toLowerCase().trim();
+                                                    const clientLocs = clientKey && clientLocationsMap[clientKey];
+                                                    const suggestions = (clientLocs && clientLocs.length > 0) ? clientLocs : allLocationNames;
+                                                    return suggestions.map((locName, lIdx) => (
+                                                        <option key={lIdx} value={locName} />
+                                                    ));
+                                                })()}
+                                            </datalist>
                                         </td>
 
                                         {/* 7 Roles Side-by-Side (Rate, Salary, Qty) */}
@@ -774,8 +941,8 @@ export const FastCostingGridTab: React.FC = () => {
                                                         <input 
                                                             type="number"
                                                             step="any"
-                                                            value={row[role.rateKey] || ''}
-                                                            onChange={(e) => handleUpdateRow(idx, role.rateKey, parseFloat(e.target.value) || 0)}
+                                                            value={row[role.rateKey] !== undefined && row[role.rateKey] !== null ? (row[role.rateKey] as string | number) : ''}
+                                                            onChange={(e) => handleUpdateRow(row, role.rateKey, e.target.value)}
                                                             placeholder="0"
                                                             style={{
                                                                 width: '100%',
@@ -797,8 +964,8 @@ export const FastCostingGridTab: React.FC = () => {
                                                         <input 
                                                             type="number"
                                                             step="any"
-                                                            value={row[role.salKey] || ''}
-                                                            onChange={(e) => handleUpdateRow(idx, role.salKey, parseFloat(e.target.value) || 0)}
+                                                            value={row[role.salKey] !== undefined && row[role.salKey] !== null ? (row[role.salKey] as string | number) : ''}
+                                                            onChange={(e) => handleUpdateRow(row, role.salKey, e.target.value)}
                                                             placeholder="0"
                                                             style={{
                                                                 width: '100%',
@@ -820,8 +987,8 @@ export const FastCostingGridTab: React.FC = () => {
                                                         <input 
                                                             type="number"
                                                             min="0"
-                                                            value={row[role.qtyKey] || ''}
-                                                            onChange={(e) => handleUpdateRow(idx, role.qtyKey, parseInt(e.target.value) || 0)}
+                                                            value={row[role.qtyKey] !== undefined && row[role.qtyKey] !== null ? (row[role.qtyKey] as string | number) : ''}
+                                                            onChange={(e) => handleUpdateRow(row, role.qtyKey, e.target.value)}
                                                             placeholder="0"
                                                             style={{
                                                                 width: '100%',
@@ -861,16 +1028,37 @@ export const FastCostingGridTab: React.FC = () => {
                                             {calc.expense.toLocaleString()}
                                         </td>
 
+                                        {/* Col OT: Overtime Hourly Billing Rate */}
+                                        <td style={{ padding: '6px 4px' }}>
+                                            <input 
+                                                type="number"
+                                                step="any"
+                                                value={row.ot_rate !== undefined && row.ot_rate !== null ? row.ot_rate : ''}
+                                                onChange={(e) => handleUpdateRow(row, 'ot_rate', e.target.value)}
+                                                placeholder="0"
+                                                title="Overtime Hourly Billing Rate in PKR"
+                                                style={{
+                                                    width: '100%',
+                                                    height: '34px',
+                                                    padding: '0 8px',
+                                                    fontSize: '12px',
+                                                    textAlign: 'right',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-surface)',
+                                                    color: '#10b981',
+                                                    fontWeight: 700
+                                                }}
+                                            />
+                                        </td>
+
                                         {/* Col AG: Service Charges (Editable inline cell, flat monthly) */}
                                         <td style={{ padding: '6px 4px' }}>
                                             <input 
                                                 type="number"
                                                 step="any"
                                                 value={row.service_charges_per_guard !== undefined && row.service_charges_per_guard !== null ? row.service_charges_per_guard : ''}
-                                                onChange={(e) => {
-                                                    const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                                                    handleUpdateRow(idx, 'service_charges_per_guard', val);
-                                                }}
+                                                onChange={(e) => handleUpdateRow(row, 'service_charges_per_guard', e.target.value)}
                                                 placeholder="3000"
                                                 title="Service Charges in PKR (Flat monthly, enter 0 to waive)"
                                                 style={{
@@ -894,12 +1082,9 @@ export const FastCostingGridTab: React.FC = () => {
                                                 type="number"
                                                 step="any"
                                                 value={row.sales_tax_override !== undefined && row.sales_tax_override !== null ? row.sales_tax_override : (calc.salesTax !== undefined ? Math.round(calc.salesTax) : '')}
-                                                onChange={(e) => {
-                                                    const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                                                    handleUpdateRow(idx, 'sales_tax_override', val);
-                                                }}
+                                                onChange={(e) => handleUpdateRow(row, 'sales_tax_override', e.target.value)}
                                                 placeholder="240"
-                                                title="Sales Tax in PKR (Auto-calculates from formula, or enter 0 / custom amount)"
+                                                title="Sales Tax in PKR (Auto-calculates from formula, or enter custom amount)"
                                                 style={{
                                                     width: '100%',
                                                     height: '34px',
@@ -907,8 +1092,8 @@ export const FastCostingGridTab: React.FC = () => {
                                                     fontSize: '12px',
                                                     textAlign: 'right',
                                                     borderRadius: '6px',
-                                                    border: row.sales_tax_override !== undefined && row.sales_tax_override !== null ? '1.5px solid #f59e0b' : '1px solid var(--color-border)',
-                                                    background: row.sales_tax_override !== undefined && row.sales_tax_override !== null ? 'rgba(245, 158, 11, 0.08)' : 'var(--color-surface)',
+                                                    border: (row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? '1.5px solid #f59e0b' : '1px solid var(--color-border)',
+                                                    background: (row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? 'rgba(245, 158, 11, 0.08)' : 'var(--color-surface)',
                                                     color: '#f59e0b',
                                                     fontWeight: 700
                                                 }}
@@ -921,12 +1106,9 @@ export const FastCostingGridTab: React.FC = () => {
                                                 type="number"
                                                 step="any"
                                                 value={row.withholding_tax_override !== undefined && row.withholding_tax_override !== null ? row.withholding_tax_override : (calc.wht !== undefined ? Math.round(calc.wht) : '')}
-                                                onChange={(e) => {
-                                                    const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                                                    handleUpdateRow(idx, 'withholding_tax_override', val);
-                                                }}
+                                                onChange={(e) => handleUpdateRow(row, 'withholding_tax_override', e.target.value)}
                                                 placeholder="210"
-                                                title="Income Tax / WHT in PKR (Auto-calculates from formula, or enter 0 / custom amount)"
+                                                title="Income Tax / WHT in PKR (Auto-calculates from formula, or enter custom amount)"
                                                 style={{
                                                     width: '100%',
                                                     height: '34px',
@@ -934,8 +1116,8 @@ export const FastCostingGridTab: React.FC = () => {
                                                     fontSize: '12px',
                                                     textAlign: 'right',
                                                     borderRadius: '6px',
-                                                    border: row.withholding_tax_override !== undefined && row.withholding_tax_override !== null ? '1.5px solid #a855f7' : '1px solid var(--color-border)',
-                                                    background: row.withholding_tax_override !== undefined && row.withholding_tax_override !== null ? 'rgba(168, 85, 247, 0.08)' : 'var(--color-surface)',
+                                                    border: (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '') ? '1.5px solid #a855f7' : '1px solid var(--color-border)',
+                                                    background: (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '') ? 'rgba(168, 85, 247, 0.08)' : 'var(--color-surface)',
                                                     color: 'var(--color-text)',
                                                     fontWeight: 700
                                                 }}
@@ -947,8 +1129,8 @@ export const FastCostingGridTab: React.FC = () => {
                                             <input 
                                                 type="number"
                                                 step="any"
-                                                value={row.sessi || ''}
-                                                onChange={(e) => handleUpdateRow(idx, 'sessi', parseFloat(e.target.value) || 0)}
+                                                value={row.sessi !== undefined && row.sessi !== null ? row.sessi : ''}
+                                                onChange={(e) => handleUpdateRow(row, 'sessi', e.target.value)}
                                                 placeholder="0"
                                                 style={{
                                                     width: '100%',
@@ -969,8 +1151,8 @@ export const FastCostingGridTab: React.FC = () => {
                                             <input 
                                                 type="number"
                                                 step="any"
-                                                value={row.eobi || ''}
-                                                onChange={(e) => handleUpdateRow(idx, 'eobi', parseFloat(e.target.value) || 0)}
+                                                value={row.eobi !== undefined && row.eobi !== null ? row.eobi : ''}
+                                                onChange={(e) => handleUpdateRow(row, 'eobi', e.target.value)}
                                                 placeholder="0"
                                                 style={{
                                                     width: '100%',
@@ -1015,7 +1197,7 @@ export const FastCostingGridTab: React.FC = () => {
                                         <td style={{ padding: '6px 4px', textAlign: 'center' }}>
                                             <button
                                                 type="button"
-                                                onClick={() => handleDeleteRow(idx)}
+                                                onClick={() => handleDeleteRow(row)}
                                                 style={{
                                                     background: 'none',
                                                     border: 'none',
@@ -1092,6 +1274,9 @@ export const FastCostingGridTab: React.FC = () => {
                                 </td>
                                 <td style={{ padding: '14px 10px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
                                     PKR {summary.totalExpense.toLocaleString()}
+                                </td>
+                                <td style={{ padding: '14px 8px', textAlign: 'right', color: '#10b981', fontWeight: 800 }}>
+                                    -
                                 </td>
                                 <td style={{ padding: '14px 10px', textAlign: 'right', color: '#60a5fa', fontWeight: 800 }}>
                                     PKR {Math.round(summary.totalServiceCharges).toLocaleString()}

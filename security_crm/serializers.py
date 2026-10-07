@@ -410,13 +410,14 @@ class ProposalServiceLineSerializer(serializers.ModelSerializer):
     line_salary = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     line_difference = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     difference_per_head = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    ot_rate = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     
     class Meta:
         model = ProposalServiceLine
         fields = '__all__'
         read_only_fields = [
             'company', 'created_at', 'updated_at', 'created_by', 'updated_by',
-            'total', 'line_total', 'line_sale', 'line_salary', 'line_difference', 'difference_per_head'
+            'total', 'line_total', 'line_sale', 'line_salary', 'line_difference', 'difference_per_head', 'ot_rate'
         ]
 
 

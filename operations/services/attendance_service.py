@@ -663,16 +663,22 @@ def get_daily_attendance_workspace(
             state = persistent_states.get(emp_id)
             if state and state.current_state == 'ABSENT' and d >= state.effective_from:
                 eff_status = AttendanceStatus.ABSENT
+                is_materialized = True
+                source = 'PERSISTENT_DEFAULT'
             else:
-                eff_status = AttendanceStatus.PRESENT
-            is_materialized = False
+                eff_status = None
+                is_materialized = False
+                source = 'UNMARKED'
             notes = ''
-            source = 'PERSISTENT_DEFAULT'
             recorded_by_name = ''
             finalized_at = None
 
-        if status_filter and eff_status != status_filter:
-            continue
+        if status_filter:
+            if status_filter == 'UNMARKED':
+                if is_materialized:
+                    continue
+            elif eff_status != status_filter:
+                continue
 
         # Check replacement coverage for DIRECT staff
         has_replacement = False
@@ -704,50 +710,40 @@ def get_daily_attendance_workspace(
 
         daily_rate = (loc_monthly_salary / Decimal(str(days_in_month))).quantize(Decimal('0.01')) if loc_monthly_salary > Decimal('0.00') else Decimal('0.00')
 
-        if eff_status in [AttendanceStatus.PRESENT, AttendanceStatus.PAID_LEAVE]:
+        if is_materialized and eff_status in [AttendanceStatus.PRESENT, AttendanceStatus.PAID_LEAVE]:
             today_earned = daily_rate
-        elif eff_status == AttendanceStatus.HALF_DAY:
+        elif is_materialized and eff_status == AttendanceStatus.HALF_DAY:
             today_earned = (daily_rate / Decimal('2.00')).quantize(Decimal('0.01'))
         else:
             today_earned = Decimal('0.00')
 
+        # Month Muster Summary: strictly consume actual materialized attendance records for the month
         present_days_mtd = month_present_counts.get(emp_id, Decimal('0.00'))
-        if not att and eff_status in [AttendanceStatus.PRESENT, AttendanceStatus.PAID_LEAVE]:
-            present_days_mtd += Decimal('1.00')
-        elif not att and eff_status == AttendanceStatus.HALF_DAY:
-            present_days_mtd += Decimal('0.50')
-
         absent_days_mtd = month_absent_counts.get(emp_id, Decimal('0.00'))
-        if not att and eff_status in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]:
-            absent_days_mtd += Decimal('1.00')
 
         month_earned = (daily_rate * present_days_mtd).quantize(Decimal('0.01'))
         month_cut = (daily_rate * absent_days_mtd).quantize(Decimal('0.01'))
 
-        # Update summary counts
+        # Update summary counts (ONLY count materialized/recorded attendance towards Present/Absent/Leaves)
         totals['total_workforce'] += 1
-        if eff_status == AttendanceStatus.PRESENT:
-            totals['present'] += 1
-        elif eff_status == AttendanceStatus.ABSENT:
-            totals['absent'] += 1
-            if emp.classification == 'DIRECT' and not has_replacement:
-                totals['uncovered_absences'] += 1
-        elif eff_status == AttendanceStatus.PAID_LEAVE:
-            totals['paid_leave'] += 1
-        elif eff_status == AttendanceStatus.UNPAID_LEAVE:
-            totals['unpaid_leave'] += 1
-        elif eff_status == AttendanceStatus.HOLIDAY:
-            totals['holiday'] += 1
-        elif eff_status == AttendanceStatus.WEEKLY_OFF:
-            totals['weekly_off'] += 1
-        elif eff_status == AttendanceStatus.HALF_DAY:
-            totals['half_day'] += 1
-
-        if emp.employment_status == 'JUMP':
-            totals['jump_active'] += 1
-
         if is_materialized:
             totals['materialized'] += 1
+            if eff_status == AttendanceStatus.PRESENT:
+                totals['present'] += 1
+            elif eff_status == AttendanceStatus.ABSENT:
+                totals['absent'] += 1
+                if emp.classification == 'DIRECT' and not has_replacement:
+                    totals['uncovered_absences'] += 1
+            elif eff_status == AttendanceStatus.PAID_LEAVE:
+                totals['paid_leave'] += 1
+            elif eff_status == AttendanceStatus.UNPAID_LEAVE:
+                totals['unpaid_leave'] += 1
+            elif eff_status == AttendanceStatus.HOLIDAY:
+                totals['holiday'] += 1
+            elif eff_status == AttendanceStatus.WEEKLY_OFF:
+                totals['weekly_off'] += 1
+            elif eff_status == AttendanceStatus.HALF_DAY:
+                totals['half_day'] += 1
         else:
             totals['unfinalized'] += 1
 

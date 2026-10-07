@@ -21,9 +21,10 @@ import { CorrectiveActionsView } from './components/CorrectiveActionsView';
 import { SecurityReportsWorkspace } from './components/SecurityReportsWorkspace';
 import { MonthlyMusterSheetTab } from './components/MonthlyMusterSheetTab';
 import { AttendanceRegisterView } from './components/AttendanceRegisterView';
+import { EmployeeInfoView } from './components/EmployeeInfoView';
 import './styles/securityOperations.css';
 
-type Tab = 'monthly_muster' | 'attendance_register' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
+type Tab = 'monthly_muster' | 'attendance_register' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'employee_info' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
 
 const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'monthly_muster', label: 'Monthly Duty Muster', icon: 'bx-spreadsheet' },
@@ -32,6 +33,7 @@ const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'advanced_ops', label: 'Advanced Ops & Dispatch', icon: 'bx-broadcast' },
     { id: 'sites', label: 'Sites', icon: 'bx-building-house' },
     { id: 'deployments', label: 'Deployments', icon: 'bx-map-pin' },
+    { id: 'employee_info', label: 'Employee Info', icon: 'bx-id-card' },
     { id: 'duties', label: 'Duty Assignments', icon: 'bx-clipboard' },
     { id: 'roster', label: 'Roster', icon: 'bx-calendar' },
     { id: 'attendance', label: 'Attendance', icon: 'bx-time-five' },
@@ -84,6 +86,8 @@ export const SecurityOperationsModule: React.FC = () => {
                 );
             case 'deployments':
                 return <DeploymentsView />;
+            case 'employee_info':
+                return <EmployeeInfoView />;
             case 'duties':
                 return <DutyAssignmentsView />;
             case 'roster':

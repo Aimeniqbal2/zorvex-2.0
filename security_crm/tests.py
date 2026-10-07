@@ -1132,6 +1132,36 @@ class SecurityCRMTests(TestCase):
         # Grand Total: 316,000 + 31,600 = 347,600
         self.assertEqual(version.grand_total, Decimal('347600.00'))
 
+    def test_manual_tax_basis_and_ot_rate(self):
+        """Test MANUAL tax basis overrides and ot_rate property on service lines."""
+        loc = ClientLocation.objects.create(company=self.company, customer=self.customer, name='Branch Manual Tax')
+        proposal = SecurityProposal.objects.create(company=self.company, customer=self.customer, status='FINAL_PROPOSAL')
+        version = ProposalVersion.objects.create(
+            company=self.company,
+            proposal=proposal,
+            version_number=1,
+            version_type='Final Proposal',
+            status=SecurityProposalStatus.FINAL_PROPOSAL,
+            sales_tax_basis='MANUAL',
+            sales_tax_override=Decimal('1500.00'),
+            withholding_tax_basis='MANUAL',
+            withholding_tax_override=Decimal('850.00')
+        )
+        line = ProposalServiceLine.objects.create(
+            company=self.company,
+            proposal_version=version,
+            location=loc,
+            service_type=self.service_type,
+            quantity=2,
+            client_rate=Decimal('60000.00'),
+            single_ot_rate=Decimal('450.00'),
+            double_ot_rate=Decimal('450.00')
+        )
+        self.assertEqual(line.ot_rate, Decimal('450.00'))
+        self.assertEqual(version.sales_tax_amount, Decimal('1500.00'))
+        self.assertEqual(version.withholding_tax_amount, Decimal('850.00'))
+
+
     def test_one_security_costing_formulas(self):
         """Test exact One Security Sheet 1 formulas (AA, Y, Z, AB, AG, AH, AI, AC, AE, AF, AJ, AK, AD)."""
         loc1 = ClientLocation.objects.create(company=self.company, customer=self.customer, name='Location Alpha')

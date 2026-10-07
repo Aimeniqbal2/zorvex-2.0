@@ -170,7 +170,7 @@ class PhaseS5BDeploymentTests(APITestCase):
             status=DeploymentStatus.ACTIVE
         )
 
-        # New active deployment for same employee at another site
+        # Multi-site deployment: same employee at another site is allowed
         site2 = OperationalSite.objects.create(
             company=self.company, crm_entity=self.client_entity, name='Apex Tower 2', address='Sector F-7'
         )
@@ -179,8 +179,18 @@ class PhaseS5BDeploymentTests(APITestCase):
             designation=self.desig_guard, start_date=date(2026, 9, 5),
             status=DeploymentStatus.ACTIVE
         )
+        # Should not raise: multi-site deployment is permitted
+        dep2.clean()
+        dep2.save()
+
+        # Overlapping deployment for same employee at the SAME site must be rejected
+        dep3 = Deployment(
+            company=self.company, employee=self.emp_guard1, site=self.site,
+            designation=self.desig_guard, start_date=date(2026, 9, 10),
+            status=DeploymentStatus.ACTIVE
+        )
         with self.assertRaises(ValidationError) as ctx:
-            dep2.clean()
+            dep3.clean()
         self.assertIn('already has an active deployment', str(ctx.exception))
 
     def test_05_transfer_preserves_history(self):

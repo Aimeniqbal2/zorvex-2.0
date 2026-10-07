@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getOperationalSites, getGuardAttendanceLedger, apiClient } from '../api';
 import { useToastStore } from '../../../stores/toastStore';
 
@@ -8,52 +8,104 @@ interface AttendanceRegisterViewProps {
 
 export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ onBack }) => {
     const { addToast } = useToastStore();
-    const today = new Date();
+    
+    // Timezone-safe local date formatting (prevents UTC offset date-shift rollbacks)
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const localToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const localFirstOfMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
 
     const [activeSubTab, setActiveSubTab] = useState<'location' | 'guard_ledger'>('location');
 
     // SubTab 1: Location Register State
     const [sites, setSites] = useState<any[]>([]);
+    const [siteSearch, setSiteSearch] = useState<string>('');
     const [selectedSiteId, setSelectedSiteId] = useState<string>('');
-    const [dateFrom, setDateFrom] = useState<string>(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]);
-    const [dateTo, setDateTo] = useState<string>(today.toISOString().split('T')[0]);
+    const [dateFrom, setDateFrom] = useState<string>(localFirstOfMonth);
+    const [dateTo, setDateTo] = useState<string>(localToday);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const [recordSearch, setRecordSearch] = useState<string>('');
     const [locationRecords, setLocationRecords] = useState<any[]>([]);
     const [loadingLocation, setLoadingLocation] = useState<boolean>(false);
 
     // SubTab 2: Guard Duty Ledger State
     const [allEmployees, setAllEmployees] = useState<any[]>([]);
+    const [employeeSearch, setEmployeeSearch] = useState<string>('');
     const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
-    const [ledgerYear, setLedgerYear] = useState<number>(today.getFullYear());
-    const [ledgerMonth, setLedgerMonth] = useState<number>(today.getMonth() + 1);
+    const [ledgerYear, setLedgerYear] = useState<number>(now.getFullYear());
+    const [ledgerMonth, setLedgerMonth] = useState<number>(now.getMonth() + 1);
     const [guardLedger, setGuardLedger] = useState<any | null>(null);
     const [loadingLedger, setLoadingLedger] = useState<boolean>(false);
 
-    // Preload sites & workforce
+    // Decoupled preloading for Sites and Employees
     useEffect(() => {
-        const initData = async () => {
-            try {
-                const [sitesRes, empsRes] = await Promise.all([
-                    getOperationalSites({ page_size: 500 }),
-                    apiClient.get('/api/hrm/employees/?page_size=1000&status=ACTIVE')
-                ]);
-                const siteList = sitesRes.results || sitesRes || [];
-                setSites(siteList);
-                if (siteList.length > 0) {
-                    setSelectedSiteId(siteList[0].id);
-                }
+        let isMounted = true;
 
-                const empList = empsRes.data?.results || empsRes.data || [];
-                setAllEmployees(empList);
-                if (empList.length > 0) {
-                    setSelectedEmployeeId(String(empList[0].id));
+        const loadSites = async () => {
+            try {
+                const sitesRes = await getOperationalSites({ page_size: 500 });
+                const siteList = sitesRes.results || sitesRes || [];
+                if (isMounted) {
+                    setSites(siteList);
+                    if (siteList.length > 0) {
+                        // Default to site with "ahmer" in name if available, otherwise first site
+                        const defaultSite = siteList.find((s: any) => 
+                            (s.name || '').toLowerCase().includes('ahmer')
+                        ) || siteList[0];
+                        setSelectedSiteId(String(defaultSite.id));
+                    }
                 }
             } catch (err) {
-                console.error('Failed to init attendance register data:', err);
+                console.error('Failed to load operational sites:', err);
+                addToast('error', 'Failed to load operational sites.');
             }
         };
-        initData();
+
+        const loadEmployees = async () => {
+            try {
+                const empsRes = await apiClient.get('/api/hrm/employees/?page_size=1000&status=ACTIVE');
+                const empList = empsRes.data?.results || empsRes.data || [];
+                if (isMounted) {
+                    setAllEmployees(empList);
+                    if (empList.length > 0) {
+                        setSelectedEmployeeId(String(empList[0].id));
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to load active employee workforce:', err);
+            }
+        };
+
+        loadSites();
+        loadEmployees();
+
+        return () => {
+            isMounted = false;
+        };
     }, []);
+
+    // Filter sites by search
+    const filteredSites = useMemo(() => {
+        if (!siteSearch.trim()) return sites;
+        const q = siteSearch.toLowerCase();
+        return sites.filter(s => 
+            (s.name && s.name.toLowerCase().includes(q)) ||
+            (s.crm_entity?.name && s.crm_entity.name.toLowerCase().includes(q)) ||
+            (s.code && s.code.toLowerCase().includes(q))
+        );
+    }, [sites, siteSearch]);
+
+    // Filter employees by search
+    const filteredEmployees = useMemo(() => {
+        if (!employeeSearch.trim()) return allEmployees;
+        const q = employeeSearch.toLowerCase();
+        return allEmployees.filter(emp => {
+            const fullName = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
+            const code = (emp.employee_code || '').toLowerCase();
+            const desig = (emp.designation_name || emp.designation?.name || '').toLowerCase();
+            return fullName.includes(q) || code.includes(q) || desig.includes(q);
+        });
+    }, [allEmployees, employeeSearch]);
 
     // Fetch Location Attendance Records
     const fetchLocationAttendance = async () => {
@@ -85,6 +137,46 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
         }
     }, [selectedSiteId, dateFrom, dateTo, statusFilter]);
 
+    // Filter records by client search
+    const displayedRecords = useMemo(() => {
+        if (!recordSearch.trim()) return locationRecords;
+        const q = recordSearch.toLowerCase();
+        return locationRecords.filter(rec => {
+            const name = (rec.employee_name || `${rec.employee?.first_name || ''} ${rec.employee?.last_name || ''}`).toLowerCase();
+            const code = (rec.employee_code || rec.employee?.employee_code || '').toLowerCase();
+            const desig = (rec.designation_name || rec.employee?.designation?.name || '').toLowerCase();
+            return name.includes(q) || code.includes(q) || desig.includes(q);
+        });
+    }, [locationRecords, recordSearch]);
+
+    // Location stats
+    const locationStats = useMemo(() => {
+        let presentCount = 0;
+        let absentCount = 0;
+        let leaveCount = 0;
+        let weeklyOffCount = 0;
+        let totalPayable = 0;
+
+        locationRecords.forEach(r => {
+            const st = (r.status || 'PRESENT').toUpperCase();
+            if (st === 'PRESENT' || st === 'DUTY') presentCount++;
+            else if (st === 'ABSENT') absentCount++;
+            else if (st === 'LEAVE') leaveCount++;
+            else if (st === 'WEEKLY_OFF' || st === 'OFF') weeklyOffCount++;
+
+            if (r.payable_amount) totalPayable += Number(r.payable_amount);
+        });
+
+        return {
+            total: locationRecords.length,
+            present: presentCount,
+            absent: absentCount,
+            leave: leaveCount,
+            weeklyOff: weeklyOffCount,
+            totalPayable
+        };
+    }, [locationRecords]);
+
     // Fetch Guard Duty & Overtime Ledger
     const fetchGuardLedger = async () => {
         if (!selectedEmployeeId) return;
@@ -113,7 +205,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
     // Export Location Table to CSV
     const exportLocationCsv = () => {
         const header = ['Date', 'Employee Code', 'Guard Name', 'Designation', 'Status', 'Notes'];
-        const rows = locationRecords.map(r => [
+        const rows = displayedRecords.map(r => [
             r.date || '',
             r.employee_code || r.employee?.employee_code || '',
             r.employee_name || `${r.employee?.first_name || ''} ${r.employee?.last_name || ''}`.trim(),
@@ -135,7 +227,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
     const exportGuardLedgerCsv = () => {
         if (!guardLedger) return;
         const header = ['Date', 'Operational Site', 'Client', 'Duty Type', 'Earned Amount (PKR)', 'Notes'];
-        const rows = guardLedger.records.map((r: any) => [
+        const rows = (guardLedger.records || []).map((r: any) => [
             r.date,
             r.site_name,
             r.customer_name,
@@ -152,6 +244,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
         link.click();
         document.body.removeChild(link);
     };
+
+    const selectedSiteObj = sites.find(s => String(s.id) === String(selectedSiteId));
 
     return (
         <div style={{ 
@@ -260,34 +354,61 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                     <div style={{ 
                         display: 'flex', 
                         flexWrap: 'wrap', 
-                        alignItems: 'center', 
+                        alignItems: 'flex-end', 
                         gap: '14px', 
                         background: 'var(--color-surface, #ffffff)', 
                         padding: '16px 20px', 
                         borderRadius: '10px', 
                         border: '1px solid var(--color-border, #e2e8f0)', 
                         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                        marginBottom: '20px' 
+                        marginBottom: '16px' 
                     }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '240px' }}>
-                            <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>Operational Site:</label>
-                            <select
-                                value={selectedSiteId}
-                                onChange={(e) => setSelectedSiteId(e.target.value)}
-                                style={{ 
-                                    padding: '8px 12px', 
-                                    borderRadius: '8px', 
-                                    background: 'var(--color-surface, #ffffff)', 
-                                    color: 'var(--color-text, #0f172a)', 
-                                    border: '1px solid var(--color-border, #cbd5e1)', 
-                                    fontWeight: 600,
-                                    fontSize: '0.88rem'
+                        {/* Site Filter with quick search */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '260px', flex: '1 1 260px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>Operational Site:</label>
+                                <span style={{ fontSize: '0.72rem', color: '#0284c7', fontWeight: 600 }}>{filteredSites.length} sites</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                                <select
+                                    value={selectedSiteId}
+                                    onChange={(e) => setSelectedSiteId(e.target.value)}
+                                    style={{ 
+                                        flex: 1,
+                                        padding: '8px 12px', 
+                                        borderRadius: '8px', 
+                                        background: 'var(--color-surface, #ffffff)', 
+                                        color: 'var(--color-text, #0f172a)', 
+                                        border: '1px solid var(--color-border, #cbd5e1)', 
+                                        fontWeight: 600,
+                                        fontSize: '0.88rem'
+                                    }}
+                                >
+                                    {filteredSites.length === 0 ? (
+                                        <option value="">No sites matching search</option>
+                                    ) : (
+                                        filteredSites.map(s => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.name} ({s.crm_entity?.name || 'Direct'})
+                                            </option>
+                                        ))
+                                    )}
+                                </select>
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="🔍 Filter site list..."
+                                value={siteSearch}
+                                onChange={(e) => setSiteSearch(e.target.value)}
+                                style={{
+                                    padding: '5px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    fontSize: '0.76rem',
+                                    background: 'var(--color-bg, #f8fafc)',
+                                    color: 'var(--color-text, #0f172a)'
                                 }}
-                            >
-                                {sites.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name} ({s.crm_entity?.name || 'Direct'})</option>
-                                ))}
-                            </select>
+                            />
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -302,7 +423,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                     background: 'var(--color-surface, #ffffff)', 
                                     color: 'var(--color-text, #0f172a)', 
                                     border: '1px solid var(--color-border, #cbd5e1)',
-                                    fontSize: '0.88rem'
+                                    fontSize: '0.88rem',
+                                    fontWeight: 600
                                 }}
                             />
                         </div>
@@ -319,12 +441,13 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                     background: 'var(--color-surface, #ffffff)', 
                                     color: 'var(--color-text, #0f172a)', 
                                     border: '1px solid var(--color-border, #cbd5e1)',
-                                    fontSize: '0.88rem'
+                                    fontSize: '0.88rem',
+                                    fontWeight: 600
                                 }}
                             />
                         </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '150px' }}>
                             <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>Status Filter:</label>
                             <select
                                 value={statusFilter}
@@ -347,10 +470,48 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                             </select>
                         </div>
 
+                        {/* Search in records */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '200px' }}>
+                            <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>Search Guard:</label>
+                            <input
+                                type="text"
+                                placeholder="Guard name or code..."
+                                value={recordSearch}
+                                onChange={(e) => setRecordSearch(e.target.value)}
+                                style={{ 
+                                    padding: '8px 12px', 
+                                    borderRadius: '8px', 
+                                    background: 'var(--color-surface, #ffffff)', 
+                                    color: 'var(--color-text, #0f172a)', 
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    fontSize: '0.88rem'
+                                }}
+                            />
+                        </div>
+
                         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <button
+                                onClick={fetchLocationAttendance}
+                                title="Refresh"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '8px 14px',
+                                    borderRadius: '8px',
+                                    background: 'var(--color-bg, #f1f5f9)',
+                                    color: 'var(--color-text, #0f172a)',
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    fontWeight: 700,
+                                    fontSize: '0.88rem',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <i className={`bx bx-refresh ${loadingLocation ? 'bx-spin' : ''}`}></i>
+                            </button>
+                            <button
                                 onClick={exportLocationCsv}
-                                disabled={locationRecords.length === 0}
+                                disabled={displayedRecords.length === 0}
                                 style={{ 
                                     display: 'flex', 
                                     alignItems: 'center', 
@@ -362,12 +523,62 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                     border: '1px solid var(--color-border, #cbd5e1)', 
                                     fontWeight: 700, 
                                     fontSize: '0.88rem',
-                                    cursor: locationRecords.length === 0 ? 'default' : 'pointer' 
+                                    cursor: displayedRecords.length === 0 ? 'default' : 'pointer' 
                                 }}
                             >
                                 <i className='bx bx-export'></i> Export CSV
                             </button>
                         </div>
+                    </div>
+
+                    {/* Stats Summary Bar */}
+                    <div style={{ 
+                        display: 'flex', 
+                        flexWrap: 'wrap', 
+                        gap: '12px', 
+                        marginBottom: '16px' 
+                    }}>
+                        <div style={{ background: 'var(--color-surface, #ffffff)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--color-border, #e2e8f0)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#0284c7' }} />
+                            <div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>TOTAL ENTRIES</div>
+                                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#0284c7' }}>{locationStats.total}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ background: 'var(--color-surface, #ffffff)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--color-border, #e2e8f0)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#15803d' }} />
+                            <div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>PRESENT / DUTY</div>
+                                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#15803d' }}>{locationStats.present}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ background: 'var(--color-surface, #ffffff)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--color-border, #e2e8f0)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#64748b' }} />
+                            <div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>WEEKLY OFF</div>
+                                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#64748b' }}>{locationStats.weeklyOff}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ background: 'var(--color-surface, #ffffff)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--color-border, #e2e8f0)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#b91c1c' }} />
+                            <div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>ABSENT</div>
+                                <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#b91c1c' }}>{locationStats.absent}</div>
+                            </div>
+                        </div>
+
+                        {locationStats.totalPayable > 0 && (
+                            <div style={{ background: 'var(--color-surface, #ffffff)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--color-border, #e2e8f0)', display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto' }}>
+                                <i className='bx bx-wallet' style={{ fontSize: '1.3rem', color: '#047857' }} />
+                                <div>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>TOTAL DISBURSED DUTY PAY</div>
+                                    <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#047857' }}>PKR {locationStats.totalPayable.toLocaleString()}</div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Table View */}
@@ -377,11 +588,13 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                 <i className='bx bx-loader-alt bx-spin' style={{ fontSize: '2.5rem', color: '#0284c7' }}></i>
                                 <p style={{ marginTop: '10px', fontWeight: 600 }}>Loading location attendance records...</p>
                             </div>
-                        ) : locationRecords.length === 0 ? (
+                        ) : displayedRecords.length === 0 ? (
                             <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--color-text-muted, #64748b)' }}>
                                 <i className='bx bx-info-circle' style={{ fontSize: '2.5rem', color: '#94a3b8', marginBottom: '8px' }}></i>
-                                <h3>No Attendance Records Found</h3>
-                                <p>No attendance recorded for this location in the selected date range ({dateFrom} to {dateTo}).</p>
+                                <h3 style={{ margin: '4px 0', fontWeight: 800 }}>No Attendance Records Found</h3>
+                                <p style={{ color: 'var(--color-text-muted, #64748b)', margin: 0 }}>
+                                    {selectedSiteObj ? `No records found for ${selectedSiteObj.name} in date range (${dateFrom} to ${dateTo}).` : 'Please select an operational site.'}
+                                </p>
                             </div>
                         ) : (
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', textAlign: 'left' }}>
@@ -392,12 +605,13 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                         <th style={{ padding: '12px 18px', fontWeight: 700 }}>Guard Name</th>
                                         <th style={{ padding: '12px 18px', fontWeight: 700 }}>Designation</th>
                                         <th style={{ padding: '12px 18px', fontWeight: 700 }}>Status</th>
+                                        <th style={{ padding: '12px 18px', fontWeight: 700 }}>Payable Amount</th>
                                         <th style={{ padding: '12px 18px', fontWeight: 700 }}>Notes / Attribution</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {locationRecords.map((rec, i) => {
-                                        const st = rec.status || 'PRESENT';
+                                    {displayedRecords.map((rec, i) => {
+                                        const st = (rec.status || 'PRESENT').toUpperCase();
                                         let badgeBg = '#dcfce7';
                                         let badgeColor = '#15803d';
                                         let badgeBorder = '#bbf7d0';
@@ -405,7 +619,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                             badgeBg = '#fee2e2';
                                             badgeColor = '#b91c1c';
                                             badgeBorder = '#fecaca';
-                                        } else if (st === 'WEEKLY_OFF') {
+                                        } else if (st === 'WEEKLY_OFF' || st === 'OFF') {
                                             badgeBg = '#f1f5f9';
                                             badgeColor = '#64748b';
                                             badgeBorder = '#e2e8f0';
@@ -426,6 +640,9 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                                         {st}
                                                     </span>
                                                 </td>
+                                                <td style={{ padding: '12px 18px', fontWeight: 700, color: rec.payable_amount ? '#15803d' : 'var(--color-text-muted, #64748b)' }}>
+                                                    {rec.payable_amount ? `PKR ${Number(rec.payable_amount).toLocaleString()}` : '-'}
+                                                </td>
                                                 <td style={{ padding: '12px 18px', color: 'var(--color-text, #0f172a)' }}>{rec.notes || '-'}</td>
                                             </tr>
                                         );
@@ -444,7 +661,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                     <div style={{ 
                         display: 'flex', 
                         flexWrap: 'wrap', 
-                        alignItems: 'center', 
+                        alignItems: 'flex-end', 
                         gap: '16px', 
                         background: 'var(--color-surface, #ffffff)', 
                         padding: '16px 20px', 
@@ -453,8 +670,11 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                         marginBottom: '20px' 
                     }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '320px' }}>
-                            <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>Select Guard / Employee:</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '320px', flex: '1 1 320px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <label style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700 }}>Select Guard / Employee:</label>
+                                <span style={{ fontSize: '0.72rem', color: '#0284c7', fontWeight: 600 }}>{filteredEmployees.length} guards</span>
+                            </div>
                             <select
                                 value={selectedEmployeeId}
                                 onChange={(e) => setSelectedEmployeeId(e.target.value)}
@@ -468,12 +688,30 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                     fontSize: '0.88rem'
                                 }}
                             >
-                                {allEmployees.map(emp => (
-                                    <option key={emp.id} value={emp.id}>
-                                        {emp.first_name} {emp.last_name} (Code: {emp.employee_code || 'N/A'}) - {emp.designation_name || emp.designation?.name || 'Guard'}
-                                    </option>
-                                ))}
+                                {filteredEmployees.length === 0 ? (
+                                    <option value="">No guards found matching search</option>
+                                ) : (
+                                    filteredEmployees.map(emp => (
+                                        <option key={emp.id} value={emp.id}>
+                                            {emp.first_name} {emp.last_name || ''} ({emp.employee_code || 'N/A'}) — {emp.designation_name || emp.designation?.name || 'Guard'}
+                                        </option>
+                                    ))
+                                )}
                             </select>
+                            <input
+                                type="text"
+                                placeholder="🔍 Filter guard by name or code..."
+                                value={employeeSearch}
+                                onChange={(e) => setEmployeeSearch(e.target.value)}
+                                style={{
+                                    padding: '5px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    fontSize: '0.76rem',
+                                    background: 'var(--color-bg, #f8fafc)',
+                                    color: 'var(--color-text, #0f172a)'
+                                }}
+                            />
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -527,10 +765,29 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                             </select>
                         </div>
 
-                        <div style={{ marginLeft: 'auto' }}>
+                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <button
+                                onClick={fetchGuardLedger}
+                                title="Refresh"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '8px 14px',
+                                    borderRadius: '8px',
+                                    background: 'var(--color-bg, #f1f5f9)',
+                                    color: 'var(--color-text, #0f172a)',
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    fontWeight: 700,
+                                    fontSize: '0.88rem',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <i className={`bx bx-refresh ${loadingLedger ? 'bx-spin' : ''}`}></i>
+                            </button>
                             <button
                                 onClick={exportGuardLedgerCsv}
-                                disabled={!guardLedger || guardLedger.records.length === 0}
+                                disabled={!guardLedger || (guardLedger.records || []).length === 0}
                                 style={{ 
                                     display: 'flex', 
                                     alignItems: 'center', 
@@ -542,7 +799,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                     border: '1px solid var(--color-border, #cbd5e1)', 
                                     fontWeight: 700, 
                                     fontSize: '0.88rem',
-                                    cursor: !guardLedger || guardLedger.records.length === 0 ? 'default' : 'pointer' 
+                                    cursor: !guardLedger || (guardLedger.records || []).length === 0 ? 'default' : 'pointer' 
                                 }}
                             >
                                 <i className='bx bx-export'></i> Export Ledger CSV
@@ -555,22 +812,22 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                             <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                                 <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Total Days Worked</div>
-                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#15803d' }}>{guardLedger.total_days_worked} Days</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#15803d' }}>{guardLedger.total_days_worked || 0} Days</div>
                             </div>
 
                             <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                                 <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Overtime Shifts (OT)</div>
-                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#1d4ed8' }}>{guardLedger.total_ot_shifts} Shifts</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#1d4ed8' }}>{guardLedger.total_ot_shifts || 0} Shifts</div>
                             </div>
 
                             <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                                 <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Double Shifts (WO+OT)</div>
-                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#b45309' }}>{guardLedger.total_double_shifts} Shifts</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#b45309' }}>{guardLedger.total_double_shifts || 0} Shifts</div>
                             </div>
 
                             <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                                 <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Total Duty Pay Earned</div>
-                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#047857' }}>PKR {guardLedger.total_earned_pkr.toLocaleString()}</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#047857' }}>PKR {(guardLedger.total_earned_pkr || 0).toLocaleString()}</div>
                             </div>
                         </div>
                     )}
@@ -582,11 +839,11 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                 <i className='bx bx-loader-alt bx-spin' style={{ fontSize: '2.5rem', color: '#0284c7' }}></i>
                                 <p style={{ marginTop: '10px', fontWeight: 600 }}>Loading guard duty and overtime ledger...</p>
                             </div>
-                        ) : !guardLedger || guardLedger.records.length === 0 ? (
+                        ) : !guardLedger || (guardLedger.records || []).length === 0 ? (
                             <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--color-text-muted, #64748b)' }}>
                                 <i className='bx bx-info-circle' style={{ fontSize: '2.5rem', color: '#94a3b8', marginBottom: '8px' }}></i>
-                                <h3>No Duty Records Found</h3>
-                                <p>No duty records recorded for this guard in {ledgerMonth}/{ledgerYear}.</p>
+                                <h3 style={{ margin: '4px 0', fontWeight: 800 }}>No Duty Records Found</h3>
+                                <p style={{ color: 'var(--color-text-muted, #64748b)', margin: 0 }}>No duty records recorded for this guard in {ledgerMonth}/{ledgerYear}.</p>
                             </div>
                         ) : (
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', textAlign: 'left' }}>
@@ -601,7 +858,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {guardLedger.records.map((r: any, idx: number) => {
+                                    {(guardLedger.records || []).map((r: any, idx: number) => {
                                         let badgeBg = '#dcfce7';
                                         let badgeColor = '#15803d';
                                         let badgeBorder = '#bbf7d0';
@@ -634,7 +891,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                                     </span>
                                                 </td>
                                                 <td style={{ padding: '12px 18px', fontWeight: 800, color: r.amount > 0 ? '#15803d' : '#94a3b8' }}>
-                                                    {r.amount > 0 ? `PKR ${r.amount.toLocaleString()}` : '-'}
+                                                    {r.amount > 0 ? `PKR ${Number(r.amount).toLocaleString()}` : '-'}
                                                 </td>
                                                 <td style={{ padding: '12px 18px', color: 'var(--color-text, #0f172a)' }}>{r.notes || '-'}</td>
                                             </tr>

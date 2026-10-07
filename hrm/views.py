@@ -176,18 +176,21 @@ class EmployeeViewSet(TenantModelViewSet):
             ).order_by('cnic_expiry_date')
         site_id = self.request.query_params.get('site_id') or self.request.query_params.get('location_id')
         client_id = self.request.query_params.get('client_id')
-        if site_id or client_id:
+        deployment_status = self.request.query_params.get('deployment_status')
+        if deployment_status:
             try:
-                from operations.models import Deployment
-                dep_qs = Deployment.objects.filter(is_deleted=False)
-                if site_id:
-                    dep_qs = dep_qs.filter(site_id=site_id)
-                if client_id:
-                    dep_qs = dep_qs.filter(site__client_id=client_id)
-                matched_emp_ids = dep_qs.values_list('employee_id', flat=True).distinct()
-                qs = qs.filter(id__in=matched_emp_ids)
+                from operations.models import Deployment, DeploymentStatus
+                active_dep_emp_ids = Deployment.objects.filter(
+                    status=DeploymentStatus.ACTIVE,
+                    is_deleted=False
+                ).values_list('employee_id', flat=True).distinct()
+                if str(deployment_status).upper() == 'DEPLOYED':
+                    qs = qs.filter(id__in=active_dep_emp_ids)
+                elif str(deployment_status).upper() == 'UNDEPLOYED':
+                    qs = qs.exclude(id__in=active_dep_emp_ids)
             except Exception:
                 pass
+
         search = self.request.query_params.get('search')
         search_field = (self.request.query_params.get('search_field') or 'ALL').upper()
         if search:

@@ -11,6 +11,9 @@ import { useIndustry, useAppStore } from '../../../stores/appStore';
 
 interface EmployeeListProps {
     isSecurity?: boolean;
+    isReadOnly?: boolean;
+    title?: string;
+    subtitle?: string;
 }
 
 const EmployeePhotoAvatar: React.FC<{ employee: Employee }> = ({ employee }) => {
@@ -81,7 +84,12 @@ const EmployeePhotoAvatar: React.FC<{ employee: Employee }> = ({ employee }) => 
     );
 };
 
-export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSecurity }) => {
+export const EmployeeList: React.FC<EmployeeListProps> = ({ 
+    isSecurity: propIsSecurity,
+    isReadOnly = false,
+    title,
+    subtitle
+}) => {
     const { isSecurity: storeIsSecurity } = useIndustry();
     const isSecurity = propIsSecurity !== undefined ? propIsSecurity : storeIsSecurity;
     const { company } = useAppStore();
@@ -116,6 +124,8 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
         setLoading(true);
         try {
             const params = new URLSearchParams();
+            if (filterTab === 'DEPLOYED') params.append('deployment_status', 'DEPLOYED');
+            if (filterTab === 'UNDEPLOYED') params.append('deployment_status', 'UNDEPLOYED');
             if (filterTab === 'DIRECT') params.append('classification', 'DIRECT');
             if (filterTab === 'INDIRECT') params.append('classification', 'INDIRECT');
             if (filterTab === 'JUMP') params.append('employment_status', 'JUMP');
@@ -206,6 +216,8 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
 
     const handleExportCSV = () => {
         const params = new URLSearchParams();
+        if (filterTab === 'DEPLOYED') params.append('deployment_status', 'DEPLOYED');
+        if (filterTab === 'UNDEPLOYED') params.append('deployment_status', 'UNDEPLOYED');
         if (filterTab === 'DIRECT') params.append('classification', 'DIRECT');
         if (filterTab === 'INDIRECT') params.append('classification', 'INDIRECT');
         if (filterTab === 'JUMP') params.append('employment_status', 'JUMP');
@@ -545,8 +557,11 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     </span>
                 );
             } 
-        },
-        { 
+        }
+    ];
+
+    if (!isReadOnly) {
+        columns.push({
             key: 'actions', 
             header: 'Action',
             width: '115px',
@@ -567,8 +582,8 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     <span>View / Edit</span>
                 </button>
             )
-        }
-    ];
+        });
+    }
 
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const startIndex = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
@@ -580,10 +595,10 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                     <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
-                        {isSecurity ? 'One Security Workforce Register' : 'Employee Register'}
+                        {title || (isSecurity ? 'One Security Workforce Register' : 'Employee Register')}
                     </h2>
                     <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: 'var(--color-text-muted)' }}>
-                        {totalCount > 0 ? `Showing ${startIndex}–${endIndex} of ${totalCount} employees` : '0 employees found'} • Preserves legacy codes with leading zeros (e.g. 000014)
+                        {subtitle || (totalCount > 0 ? `Showing ${startIndex}–${endIndex} of ${totalCount} employees` : '0 employees found')} • Preserves legacy codes with leading zeros (e.g. 000014)
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -593,12 +608,16 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     <Button variant="secondary" size="sm" onClick={handleExportCSV}>
                         <i className="bx bx-download"></i> Export CSV
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={() => setIsImportModalOpen(true)}>
-                        <i className="bx bx-import"></i> Import Legacy Data
-                    </Button>
-                    <Button variant="primary" size="sm" onClick={() => { setSelectedEmployee(null); setIsModalOpen(true); }}>
-                        <i className="bx bx-user-plus"></i> {isSecurity ? 'Register Guard / Staff' : 'Add Employee'}
-                    </Button>
+                    {!isReadOnly && (
+                        <>
+                            <Button variant="secondary" size="sm" onClick={() => setIsImportModalOpen(true)}>
+                                <i className="bx bx-import"></i> Import Legacy Data
+                            </Button>
+                            <Button variant="primary" size="sm" onClick={() => { setSelectedEmployee(null); setIsModalOpen(true); }}>
+                                <i className="bx bx-user-plus"></i> {isSecurity ? 'Register Guard / Staff' : 'Add Employee'}
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -618,9 +637,20 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
             }}>
                 {/* Left: Tabs */}
                 <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {['ALL', 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
+                    {['ALL', ...(isSecurity ? ['DEPLOYED', 'UNDEPLOYED'] : []), 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
                         const isAlertsTab = t === 'CNIC_ALERTS';
                         const isSelected = filterTab === t;
+                        let tabLabel = t;
+                        if (t === 'CNIC_ALERTS') tabLabel = 'CNIC Alerts';
+                        else if (t === 'DEPLOYED') tabLabel = 'Deployed';
+                        else if (t === 'UNDEPLOYED') tabLabel = 'Undeployed';
+                        else if (t === 'DIRECT') tabLabel = 'Direct (Guard)';
+                        else if (t === 'INDIRECT') tabLabel = 'Indirect (Staff)';
+                        else if (t === 'JUMP') tabLabel = 'Jump / AWOL';
+                        else if (t === 'ACTIVE') tabLabel = 'Active';
+                        else if (t === 'INACTIVE') tabLabel = 'Inactive';
+                        else if (t === 'ALL') tabLabel = 'All Workforce';
+
                         return (
                             <button
                                 key={t}
@@ -645,7 +675,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                                 }}
                             >
                                 {isAlertsTab && <i className="bx bx-bell" style={{ fontSize: '12px' }}></i>}
-                                <span>{isAlertsTab ? 'CNIC Alerts' : t}</span>
+                                <span>{tabLabel}</span>
                                 {isAlertsTab && (cnicAlerts?.total_alerts !== undefined && cnicAlerts.total_alerts > 0) && (
                                     <span style={{
                                         background: isSelected ? '#fff' : '#ef4444',
@@ -856,7 +886,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                         data={employees}
                         keyExtractor={(e) => e.id}
                         emptyMessage="No employees found matching the current filters."
-                        onRowClick={(e) => {
+                        onRowClick={isReadOnly ? undefined : (e) => {
                             setSelectedEmployee(e);
                             setIsModalOpen(true);
                         }}
@@ -950,8 +980,10 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                 </>
             )}
 
-            {/* Employee Registration / Edit Modal */}
-            <EmployeeModal
+            {/* Modals are only active when not read-only */}
+            {!isReadOnly && (
+                <>
+                    <EmployeeModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 employee={selectedEmployee}
@@ -1081,6 +1113,8 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({ isSecurity: propIsSe
                     )}
                 </div>
             </Modal>
+                </>
+            )}
         </div>
     );
 };

@@ -123,14 +123,8 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
             setFollowUps(Array.isArray(followUpsRes) ? followUpsRes : []);
             setAssessments(Array.isArray(assessRes) ? assessRes : []);
 
-            // Auto-navigate to relevant tab based on stage if still on initial services tab
-            if (['APPROVED', 'SIGNING', 'SIGNED', 'ACTIVE'].includes(prop.status)) {
-                setActiveTab(prev => (prev === 'final_proposal' ? 'signing' : prev));
-            } else if (prop.status === 'SITE_ASSESSMENT') {
-                setActiveTab(prev => (prev === 'final_proposal' ? 'assessments' : prev));
-            } else if (prop.status === 'MEETING') {
-                setActiveTab(prev => (prev === 'final_proposal' ? 'meetings' : prev));
-            }
+            // Always default to 'final_proposal' (Service & Staffing Requirements) as requested by user
+            // User can manually switch to Contract & Signed Agreement, Handoff, etc.
             
         } catch (error: any) {
             console.error("Failed to load proposal", error);

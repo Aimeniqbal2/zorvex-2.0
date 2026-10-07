@@ -55,6 +55,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Dirty updates tracker: key is `${site_id}_${employee_id}_${day}` -> { site_id, employee_id, day, code }
     const [dirtyUpdates, setDirtyUpdates] = useState<Map<string, { site_id: string; employee_id: string; day: number; code: string }>>(new Map());
+    const [addedGuards, setAddedGuards] = useState<Array<{ site_id: string; employee_id: string }>>([]);
+    const [removedGuards, setRemovedGuards] = useState<Array<{ site_id: string; employee_id: string }>>([]);
 
     // Add Guard Modal state
     const [activeAddSiteId, setActiveAddSiteId] = useState<string | null>(null);
@@ -74,6 +76,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             setDaysInMonth(res.days_in_month || 31);
             setTodayDay(res.today_day || today.getDate());
             setDirtyUpdates(new Map());
+            setAddedGuards([]);
+            setRemovedGuards([]);
         } catch (err: any) {
             console.error('Failed to load monthly muster grid:', err);
             addToast('error', err.response?.data?.detail || 'Failed to load Monthly Muster Grid.');
@@ -124,28 +128,40 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Fast inline cell edit with anti-cheating cross-location duplicate check
     const handleCellChange = (siteId: string, employeeId: string, day: number, rawValue: string) => {
-        let val = rawValue.trim().toUpperCase();
+        const raw = rawValue.trim().toUpperCase();
+        let val = '';
 
-        // Normalization: allow typing '1' or 'P' for Present
-        if (val === 'P') val = '1';
-        if (val === 'OFF') val = 'WO';
-        if (val === 'DS') val = 'WO+OT';
-
-        // Check if value is valid
-        const validValues = ['', '1', 'OT', 'WO', 'WO+OT', 'A', 'L', 'PL', 'SL'];
-        if (!validValues.includes(val)) {
-            addToast('warning', `Invalid duty code "${val}". Allowed: 1 (Present), OT (Overtime), WO+OT (Double Shift), WO (Off), A (Absent), L (Leave).`);
-            return;
+        // Single letter mapping and aliases
+        if (['P', '1'].includes(raw)) val = 'P';
+        else if (['O', 'OT'].includes(raw)) val = 'O';
+        else if (['D', 'DS', 'WO+OT', '2'].includes(raw)) val = 'D';
+        else if (['W', 'WO', 'OFF'].includes(raw)) val = 'W';
+        else if (raw === 'A') val = 'A';
+        else if (['L', 'PL', 'SL'].includes(raw)) val = 'L';
+        else if (raw === '') val = '';
+        else {
+            // Check last typed character as fallback
+            const lastChar = raw.charAt(raw.length - 1);
+            if (['P', '1'].includes(lastChar)) val = 'P';
+            else if (lastChar === 'O') val = 'O';
+            else if (lastChar === 'D') val = 'D';
+            else if (lastChar === 'W') val = 'W';
+            else if (lastChar === 'A') val = 'A';
+            else if (lastChar === 'L') val = 'L';
+            else {
+                addToast('warning', `Use single-letter shortcuts: P (Present), O (Overtime), D (Double Shift), W (Weekly Off), A (Absent), L (Leave).`);
+                return;
+            }
         }
 
         // Anti-Cheating Cross-Location Check:
-        // If typing '1', verify guard is NOT already marked '1' at another site on this day!
-        if (val === '1') {
+        // If typing 'P', verify guard is NOT already marked 'P' at another site on this day!
+        if (val === 'P') {
             for (const otherSite of sitesData) {
                 if (otherSite.site_id === siteId) continue;
                 const guardAtOtherSite = otherSite.guards.find(g => g.employee_id === employeeId);
-                if (guardAtOtherSite && guardAtOtherSite.days[String(day)] === '1') {
-                    addToast('error', `⚠️ Duplicate Prevented: Guard ${guardAtOtherSite.name} (${guardAtOtherSite.employee_code}) is already marked Present (1) at "${otherSite.site_name}" on Day ${day}. Only "OT" (Overtime) can be marked here!`);
+                if (guardAtOtherSite && (guardAtOtherSite.days[String(day)] === 'P' || guardAtOtherSite.days[String(day)] === '1')) {
+                    addToast('error', `⚠️ Duplicate Prevented: Guard ${guardAtOtherSite.name} (${guardAtOtherSite.employee_code}) is already marked Present (P) at "${otherSite.site_name}" on Day ${day}. Only "O" (Overtime) can be marked here!`);
                     return;
                 }
             }
@@ -161,10 +177,10 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 // Recompute counts for this guard
                 let p = 0, ot = 0, wo = 0, ds = 0, a = 0, l = 0;
                 Object.values(updatedDays).forEach(c => {
-                    if (c === '1') p++;
-                    else if (c === 'OT') ot++;
-                    else if (c === 'WO') wo++;
-                    else if (c === 'WO+OT') ds++;
+                    if (c === 'P' || c === '1') p++;
+                    else if (c === 'O' || c === 'OT') ot++;
+                    else if (c === 'W' || c === 'WO') wo++;
+                    else if (c === 'D' || c === 'WO+OT' || c === 'DS') ds++;
                     else if (c === 'A') a++;
                     else if (['L', 'PL', 'SL'].includes(c)) l++;
                 });
@@ -190,8 +206,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 let dVac = 0;
                 updatedGuards.forEach(g => {
                     const c = g.days[String(d)];
-                    if (['1', 'OT', 'WO+OT'].includes(c)) dTot++;
-                    if (['WO', 'L', 'PL', 'SL'].includes(c)) dVac++;
+                    if (['P', '1', 'O', 'OT', 'D', 'WO+OT', 'DS'].includes(c)) dTot++;
+                    if (['W', 'WO', 'L', 'PL', 'SL'].includes(c)) dVac++;
                 });
                 newDailyTotals[String(d)] = dTot;
                 newDailyVacations[String(d)] = dVac;
@@ -221,7 +237,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Save changes to backend
     const handleSaveChanges = async () => {
-        if (dirtyUpdates.size === 0) {
+        const totalChanges = dirtyUpdates.size + addedGuards.length + removedGuards.length;
+        if (totalChanges === 0) {
             addToast('info', 'No pending changes to save.');
             return;
         }
@@ -229,9 +246,12 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         try {
             setSaving(true);
             const updatesArray = Array.from(dirtyUpdates.values());
-            await saveMonthlyMusterUpdates(year, month, updatesArray);
-            addToast('success', `Successfully saved ${updatesArray.length} duty updates to attendance & payroll.`);
+            await saveMonthlyMusterUpdates(year, month, updatesArray, addedGuards, removedGuards);
+            addToast('success', `Successfully saved changes! Roster & duty calculations updated.`);
             setDirtyUpdates(new Map());
+            setAddedGuards([]);
+            setRemovedGuards([]);
+            await loadMusterData();
         } catch (err: any) {
             console.error('Failed to save muster updates:', err);
             addToast('error', err.response?.data?.detail || 'Failed to save muster updates.');
@@ -287,14 +307,15 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             };
         }));
 
-        addToast('success', `Added ${newRow.name} (${newRow.employee_code}) to ${targetSite?.site_name}.`);
+        setAddedGuards(prev => [...prev, { site_id: activeAddSiteId, employee_id: String(emp.id) }]);
+        addToast('success', `Added ${newRow.name} (${newRow.employee_code}) to ${targetSite?.site_name}. Click "Save Changes" to persist.`);
         setActiveAddSiteId(null);
         setGuardSearch('');
     };
 
     // Remove Guard from Site Block
     const handleRemoveGuard = (siteId: string, employeeId: string, guardName: string) => {
-        if (!window.confirm(`Are you sure you want to remove ${guardName} from this location block?`)) return;
+        if (!window.confirm(`Are you sure you want to remove ${guardName} from this location block? Clicking Save will wipe this guard's duty pay and attendance records for this month.`)) return;
 
         setSitesData(prev => prev.map(s => {
             if (s.site_id !== siteId) return s;
@@ -303,7 +324,23 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 guards: s.guards.filter(g => g.employee_id !== employeeId)
             };
         }));
-        addToast('info', `Removed ${guardName} from location sheet.`);
+
+        // Track as removed so backend cleans up duties, attendance, and deployment
+        setRemovedGuards(prev => [...prev, { site_id: siteId, employee_id: employeeId }]);
+
+        // Remove any pending dirty updates for this guard
+        setDirtyUpdates(prev => {
+            const next = new Map(prev);
+            for (let d = 1; d <= daysInMonth; d++) {
+                next.delete(`${siteId}_${employeeId}_${d}`);
+            }
+            return next;
+        });
+
+        // If it was added during the same session, remove it from addedGuards list
+        setAddedGuards(prev => prev.filter(g => !(g.site_id === siteId && g.employee_id === employeeId)));
+
+        addToast('info', `Removed ${guardName} from location sheet. Click "Save Changes" to finalize removal.`);
     };
 
     // Excel file import submission
@@ -564,24 +601,24 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     {/* Save Changes Button */}
                     <button
                         onClick={handleSaveChanges}
-                        disabled={saving || dirtyUpdates.size === 0}
+                        disabled={saving || (dirtyUpdates.size === 0 && addedGuards.length === 0 && removedGuards.length === 0)}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '6px',
                             padding: '8px 18px',
                             borderRadius: '8px',
-                            background: dirtyUpdates.size > 0 ? '#10b981' : '#94a3b8',
+                            background: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#10b981' : '#94a3b8',
                             color: '#ffffff',
                             border: 'none',
                             fontWeight: 700,
                             fontSize: '0.88rem',
-                            cursor: dirtyUpdates.size > 0 ? 'pointer' : 'default',
-                            boxShadow: dirtyUpdates.size > 0 ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none'
+                            cursor: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? 'pointer' : 'default',
+                            boxShadow: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none'
                         }}
                     >
                         <i className='bx bx-save'></i>
-                        {saving ? 'Saving...' : `Save Changes ${dirtyUpdates.size > 0 ? `(${dirtyUpdates.size})` : ''}`}
+                        {saving ? 'Saving...' : `Save Changes ${(dirtyUpdates.size + addedGuards.length + removedGuards.length) > 0 ? `(${dirtyUpdates.size + addedGuards.length + removedGuards.length})` : ''}`}
                     </button>
                 </div>
             </div>
@@ -605,25 +642,28 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         📅 {daysInMonth} Days in Month
                     </span>
                     <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
-                        <strong>Keystroke Shortcuts:</strong> Type <code>1</code> for Present, <code>OT</code> for Overtime, <code>WO+OT</code> for Double Shift, <code>WO</code> for Weekly Off, <code>A</code> for Absent, <code>L</code> for Leave.
+                        <strong>Keystroke Shortcuts:</strong> Type <code>P</code> for Present, <code>O</code> for Overtime, <code>D</code> for Double Shift, <code>W</code> for Weekly Off, <code>A</code> for Absent, <code>L</code> for Leave.
                     </span>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dcfce7', border: '1px solid #16a34a' }}></span> <strong>1</strong> Present
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dcfce7', border: '1px solid #16a34a' }}></span> <strong>P</strong> Present
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dbeafe', border: '1px solid #2563eb' }}></span> <strong>OT</strong> Overtime
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dbeafe', border: '1px solid #2563eb' }}></span> <strong>O</strong> Overtime
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fef3c7', border: '1px solid #d97706' }}></span> <strong>WO+OT</strong> Double Shift
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fef3c7', border: '1px solid #d97706' }}></span> <strong>D</strong> Double Shift
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f1f5f9', border: '1px solid #94a3b8' }}></span> <strong>WO</strong> Weekly Off
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f1f5f9', border: '1px solid #94a3b8' }}></span> <strong>W</strong> Weekly Off
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fee2e2', border: '1px solid #dc2626' }}></span> <strong>A</strong> Absent
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f3e8ff', border: '1px solid #7e22ce' }}></span> <strong>L</strong> Leave
                     </span>
                 </div>
             </div>
@@ -684,11 +724,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                             </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <div style={{ fontSize: '0.85rem', background: 'rgba(0, 0, 0, 0.2)', padding: '6px 14px', borderRadius: '6px', fontWeight: 600 }}>
                                 <span>Requirements: </span>
                                 <strong>{site.supervisors_req > 0 ? `${site.supervisors_req} SUP ` : ''}{site.guards_req} GD</strong>
-                                {site.overtime_rate > 0 && <span style={{ marginLeft: '10px', borderLeft: '1px solid rgba(255,255,255,0.4)', paddingLeft: '10px' }}>OT Rate: Rs. {site.overtime_rate.toLocaleString()}</span>}
+                                <span style={{ marginLeft: '10px', borderLeft: '1px solid rgba(255,255,255,0.4)', paddingLeft: '10px' }}>OT Rate: Rs. {(site.overtime_rate || 0).toLocaleString()}</span>
                             </div>
 
                             <button
@@ -709,6 +749,30 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                 }}
                             >
                                 <i className='bx bx-user-plus'></i> Add Guard
+                            </button>
+
+                            {/* Location Header Direct Save Button */}
+                            <button
+                                onClick={handleSaveChanges}
+                                disabled={saving || (dirtyUpdates.size === 0 && addedGuards.length === 0 && removedGuards.length === 0)}
+                                style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '6px', 
+                                    background: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#ffffff' : 'rgba(255, 255, 255, 0.25)', 
+                                    color: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#059669' : 'rgba(255, 255, 255, 0.7)', 
+                                    border: 'none', 
+                                    padding: '7px 16px', 
+                                    borderRadius: '6px', 
+                                    fontWeight: 800, 
+                                    fontSize: '0.88rem', 
+                                    cursor: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? 'pointer' : 'default', 
+                                    boxShadow: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
+                                    transition: 'all 0.15s ease'
+                                }}
+                                title="Save changes across all locations"
+                            >
+                                <i className='bx bx-save'></i> {saving ? 'Saving...' : 'Save Changes'}
                             </button>
                         </div>
                     </div>
@@ -743,17 +807,18 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                         );
                                     })}
 
-                                    <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '2px solid #cbd5e1', background: '#f8fafc', color: '#059669', fontWeight: 800 }}>P</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }}>OT</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 800 }}>Off/L</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '55px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#d97706', fontWeight: 800 }}>Pay Days</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '2px solid #cbd5e1', background: '#f8fafc', color: '#059669', fontWeight: 800 }}>P</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }}>O</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#d97706', fontWeight: 800 }}>D</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 800 }}>W/L</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '55px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#059669', fontWeight: 800 }}>Pay Days</th>
                                     <th style={{ padding: '8px 6px', width: '36px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc' }}>Act</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {site.guards.length === 0 ? (
                                     <tr>
-                                        <td colSpan={daysInMonth + 9} style={{ padding: '24px', color: '#94a3b8', textAlign: 'center', background: '#ffffff' }}>
+                                        <td colSpan={daysInMonth + 10} style={{ padding: '24px', color: '#94a3b8', textAlign: 'center', background: '#ffffff' }}>
                                             No guards currently deployed at this site for {month}/{year}. Click <strong>[ + Add Guard ]</strong> above to assign personnel.
                                         </td>
                                     </tr>
@@ -791,16 +856,16 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                 let cellColor = '#334155';
                                                 let borderStyle = '1px solid #e2e8f0';
 
-                                                if (cellVal === '1') {
+                                                if (cellVal === 'P' || cellVal === '1') {
                                                     cellBg = '#dcfce7';
                                                     cellColor = '#15803d';
-                                                } else if (cellVal === 'OT') {
+                                                } else if (cellVal === 'O' || cellVal === 'OT') {
                                                     cellBg = '#dbeafe';
                                                     cellColor = '#1d4ed8';
-                                                } else if (cellVal === 'WO+OT') {
+                                                } else if (cellVal === 'D' || cellVal === 'WO+OT' || cellVal === 'DS') {
                                                     cellBg = '#fef3c7';
                                                     cellColor = '#b45309';
-                                                } else if (cellVal === 'WO') {
+                                                } else if (cellVal === 'W' || cellVal === 'WO') {
                                                     cellBg = '#f1f5f9';
                                                     cellColor = '#64748b';
                                                 } else if (cellVal === 'A') {
@@ -844,8 +909,9 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                                             <td style={{ padding: '6px 4px', borderLeft: '2px solid #cbd5e1', fontWeight: 800, color: '#15803d', background: '#f0fdf4' }}>{guard.total_present}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#2563eb', background: '#eff6ff' }}>{guard.total_ot}</td>
+                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#b45309', background: '#fffbeb' }}>{guard.total_ds}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 700, color: '#64748b' }}>{guard.total_wo + guard.total_leave}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#b45309', background: '#fffbeb' }}>{guard.payable_days}</td>
+                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#059669', background: '#ecfdf5' }}>{guard.payable_days}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0' }}>
                                                 <button
                                                     onClick={() => handleRemoveGuard(site.site_id, guard.employee_id, guard.name)}
@@ -869,7 +935,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             {site.daily_vacations[String(d)] || 0}
                                         </td>
                                     ))}
-                                    <td colSpan={5} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
+                                    <td colSpan={6} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
                                 </tr>
 
                                 {/* Daily Deployed Total Row (Matching Screenshot) */}
@@ -882,7 +948,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             {site.daily_totals[String(d)] || 0}
                                         </td>
                                     ))}
-                                    <td colSpan={5} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
+                                    <td colSpan={6} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
                                 </tr>
                             </tbody>
                         </table>

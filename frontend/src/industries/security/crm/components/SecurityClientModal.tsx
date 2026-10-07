@@ -4,7 +4,7 @@ import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { useToastStore } from '../../../../stores/toastStore';
 import { createEntity, createAddress, createContact } from '../../../../modules/crm/api';
-import { createClientLocation } from '../api';
+import { createClientLocation, createSecurityProposal } from '../api';
 
 interface SecurityClientModalProps {
     isOpen: boolean;
@@ -19,6 +19,17 @@ interface InlineContactLine {
     email: string;
     phone: string;
     whatsapp: string;
+}
+
+interface InlineLocationLine {
+    id: string;
+    name: string;
+    address: string;
+    contact_person: string;
+    designation: string;
+    phone: string;
+    whatsapp: string;
+    email: string;
 }
 
 export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen, onClose, onSaved }) => {
@@ -63,6 +74,31 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
         setContacts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
     };
 
+    // Dynamic Operational Location Lines
+    const [locations, setLocations] = useState<InlineLocationLine[]>([
+        { id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }
+    ]);
+
+    const handleAddLocationLine = () => {
+        setLocations(prev => [
+            ...prev,
+            { id: `loc-${Date.now()}-${Math.random()}`, name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }
+        ]);
+    };
+
+    const handleRemoveLocationLine = (id: string) => {
+        setLocations(prev => {
+            if (prev.length <= 1) {
+                return [{ id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }];
+            }
+            return prev.filter(l => l.id !== id);
+        });
+    };
+
+    const handleLocationChange = (id: string, field: keyof InlineLocationLine, value: string) => {
+        setLocations(prev => prev.map(l => l.id === id ? { ...l, [field]: value } : l));
+    };
+
     const resetForm = () => {
         setName('');
         setCode('');
@@ -74,6 +110,7 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
         setAddressState('');
         setAddressCountry('Pakistan');
         setContacts([{ id: 'c-1', name: '', job_title: '', email: '', phone: '', whatsapp: '' }]);
+        setLocations([{ id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }]);
         setErrors({});
     };
 
@@ -151,23 +188,56 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
                 }
             }
 
-            // 4. Create Initial Default Location (Head Office)
+            // 4. Create Operational Locations
+            const validLocations = locations.filter(l => l.name.trim().length > 0);
+            if (validLocations.length > 0) {
+                for (const loc of validLocations) {
+                    try {
+                        await createClientLocation({
+                            customer: createdEntity.id,
+                            name: loc.name.trim(),
+                            address: loc.address.trim() || undefined,
+                            contact_person: loc.contact_person.trim() || undefined,
+                            designation: loc.designation.trim() || undefined,
+                            phone: loc.phone.trim() || undefined,
+                            whatsapp: loc.whatsapp.trim() || undefined,
+                            email: loc.email.trim() || undefined,
+                            is_active: true
+                        });
+                    } catch (locErr) {
+                        console.warn(`Could not save location ${loc.name}:`, locErr);
+                    }
+                }
+            } else {
+                // Fallback: Create Initial Default Location (Head Office)
+                try {
+                    const primaryCont = validContacts[0];
+                    const fullAddr = [addressLine.trim(), addressCity.trim(), addressState.trim()].filter(Boolean).join(', ');
+                    await createClientLocation({
+                        customer: createdEntity.id,
+                        name: 'Head Office',
+                        address: fullAddr || (name.trim() + ' Head Office'),
+                        contact_person: primaryCont?.name.trim() || undefined,
+                        designation: primaryCont?.job_title.trim() || undefined,
+                        phone: primaryCont?.phone.trim() || undefined,
+                        whatsapp: primaryCont?.whatsapp.trim() || undefined,
+                        email: primaryCont?.email.trim() || undefined,
+                        is_active: true
+                    });
+                } catch (locErr) {
+                    console.warn('Could not auto-register initial client location:', locErr);
+                }
+            }
+
+            // 5. Initialize Active Proposal (Final Requirements) with Empty Requirements for Fast Costing
             try {
-                const primaryCont = validContacts[0];
-                const fullAddr = [addressLine.trim(), addressCity.trim(), addressState.trim()].filter(Boolean).join(', ');
-                await createClientLocation({
+                await createSecurityProposal({
                     customer: createdEntity.id,
-                    name: 'Head Office',
-                    address: fullAddr || (name.trim() + ' Head Office'),
-                    contact_person: primaryCont?.name.trim() || undefined,
-                    designation: primaryCont?.job_title.trim() || undefined,
-                    phone: primaryCont?.phone.trim() || undefined,
-                    whatsapp: primaryCont?.whatsapp.trim() || undefined,
-                    email: primaryCont?.email.trim() || undefined,
-                    is_active: true
+                    title: `${createdEntity.name} - Final Requirements`,
+                    status: 'ACTIVE' as any
                 });
-            } catch (locErr) {
-                console.warn('Could not auto-register initial client location:', locErr);
+            } catch (propErr) {
+                console.warn('Could not auto-initialize client requirements proposal:', propErr);
             }
 
             useToastStore.getState().success(`Client "${createdEntity.name}" created successfully.`);
@@ -197,7 +267,7 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
             isOpen={isOpen}
             onClose={handleModalClose}
             title="Create Client"
-            width="980px"
+            width="1060px"
             footer={
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', width: '100%' }}>
                     <Button variant="secondary" onClick={handleModalClose} disabled={isSubmitting}>
@@ -503,6 +573,213 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
                                                 type="button"
                                                 onClick={() => handleRemoveContactLine(contact.id)}
                                                 title="Delete Line"
+                                                style={{
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    color: 'var(--color-danger, #ef4444)',
+                                                    cursor: 'pointer',
+                                                    padding: '4px',
+                                                    borderRadius: '4px',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center'
+                                                }}
+                                            >
+                                                <i className='bx bx-trash' style={{ fontSize: '16px' }}></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* SECTION 5: OPERATIONAL LOCATIONS (DYNAMIC TABLE LINES) */}
+                <div>
+                    <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        borderBottom: '1px solid var(--color-border)', 
+                        paddingBottom: '8px', 
+                        marginBottom: '12px' 
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <i className='bx bx-map' style={{ fontSize: '18px', color: 'var(--color-primary)' }}></i>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700, letterSpacing: '0.05em', color: 'var(--color-text)', textTransform: 'uppercase' }}>
+                                Operational Locations
+                            </h4>
+                        </div>
+                        <Button 
+                            type="button" 
+                            variant="secondary" 
+                            size="sm" 
+                            onClick={handleAddLocationLine}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        >
+                            <i className='bx bx-plus'></i> Add Location Line
+                        </Button>
+                    </div>
+
+                    <p style={{ margin: '0 0 12px 0', fontSize: '12.5px', color: 'var(--color-text-muted)' }}>
+                        Add operational sites, branches, or deployment locations for this client. These will be immediately available in Fast Costing and Operations.
+                    </p>
+
+                    <div style={{ 
+                        overflowX: 'auto', 
+                        border: '1px solid var(--color-border)', 
+                        borderRadius: '8px',
+                        background: 'var(--color-surface)' 
+                    }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '940px' }}>
+                            <thead>
+                                <tr style={{ background: 'var(--color-background-subtle, rgba(0,0,0,0.02))', borderBottom: '1px solid var(--color-border)' }}>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '18%' }}>Location Name *</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '20%' }}>Address</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '15%' }}>Contact Person</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '14%' }}>Job Title / Designation</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '11%' }}>Phone</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '11%' }}>WhatsApp</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '11%' }}>Email</th>
+                                    <th style={{ padding: '10px 8px', textAlign: 'center', width: '4%' }}></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {locations.map((loc, index) => (
+                                    <tr key={loc.id} style={{ borderBottom: index < locations.length - 1 ? '1px solid var(--color-border)' : 'none' }}>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder={index === 0 ? "e.g. Site A / North Hub" : "e.g. South Warehouse"}
+                                                value={loc.name}
+                                                onChange={(e) => handleLocationChange(loc.id, 'name', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    fontWeight: 600,
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. Plot 12, Sector 15, Korangi"
+                                                value={loc.address}
+                                                onChange={(e) => handleLocationChange(loc.id, 'address', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. Rashid Khan"
+                                                value={loc.contact_person}
+                                                onChange={(e) => handleLocationChange(loc.id, 'contact_person', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. Admin / Site Incharge"
+                                                value={loc.designation}
+                                                onChange={(e) => handleLocationChange(loc.id, 'designation', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="tel"
+                                                placeholder="e.g. 0300-1234567"
+                                                value={loc.phone}
+                                                onChange={(e) => handleLocationChange(loc.id, 'phone', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="tel"
+                                                placeholder="e.g. 0300-1234567"
+                                                value={loc.whatsapp}
+                                                onChange={(e) => handleLocationChange(loc.id, 'whatsapp', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="email"
+                                                placeholder="e.g. site@client.com"
+                                                value={loc.email}
+                                                onChange={(e) => handleLocationChange(loc.id, 'email', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 4px', textAlign: 'center' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveLocationLine(loc.id)}
+                                                title="Delete Location Line"
                                                 style={{
                                                     background: 'transparent',
                                                     border: 'none',

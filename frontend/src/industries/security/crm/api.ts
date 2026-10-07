@@ -78,6 +78,7 @@ export interface ProposalServiceLine {
     double_ot_rate?: string | number | null;
     single_ot_billing_rate?: string | number | null;
     double_ot_billing_rate?: string | number | null;
+    ot_rate?: string | number | null;
     notes: string;
     source_recommendation?: string | null;
     total?: number;
@@ -109,9 +110,11 @@ export interface ProposalVersion {
     tax_rate?: string | number;
     overhead_per_guard?: string | number;
     service_charges_per_guard?: string | number;
-    sales_tax_basis?: 'SERVICE_CHARGES' | 'TOTAL_SALE';
+    sales_tax_basis?: 'SERVICE_CHARGES' | 'TOTAL_SALE' | 'MANUAL';
+    sales_tax_override?: string | number | null;
     withholding_tax_rate?: string | number;
-    withholding_tax_basis?: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT';
+    withholding_tax_basis?: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT' | 'MANUAL';
+    withholding_tax_override?: string | number | null;
     total_sessi?: string | number;
     total_eobi?: string | number;
     sent_at?: string | null;
@@ -585,8 +588,8 @@ export const deleteServiceLine = async (id: string) => {
     return response.data;
 };
 
-export const getClientLocations = async (customerId?: string) => {
-    const params: any = {};
+export const getClientLocations = async (customerId?: string, pageSize: number = 1000) => {
+    const params: any = { page_size: pageSize };
     if (customerId) params.customer = customerId;
     const response = await apiClient.get('/api/security/crm/clientlocation/', { params });
     return response.data as PaginatedResponse<ClientLocation>;
@@ -1091,14 +1094,17 @@ export interface CostingGridRow {
     proposal_id?: string | null;
     proposal_version_id?: string | null;
     proposal_number?: string;
-    overhead_per_guard?: number;
-    service_charges_per_guard?: number;
-    tax_wht_rate?: number;
-    sales_tax_rate?: number;
-    sales_tax_override?: number | null;
-    withholding_tax_override?: number | null;
-    sessi?: number;
-    eobi?: number;
+    overhead_per_guard?: number | string;
+    service_charges_per_guard?: number | string | null;
+    tax_wht_rate?: number | string;
+    sales_tax_rate?: number | string;
+    sales_tax_override?: number | string | null;
+    withholding_tax_override?: number | string | null;
+    sessi?: number | string | null;
+    eobi?: number | string | null;
+    ot_rate?: number | string | null;
+    sales_tax_basis?: string;
+    withholding_tax_basis?: string;
 
     // 14 Canonical Role categories matching Sheet 1 horizontal matrix & HRM Designations
     sup_civ_qty?: number;

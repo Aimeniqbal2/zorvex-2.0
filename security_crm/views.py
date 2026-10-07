@@ -1480,6 +1480,7 @@ class CostingGridView(APIView):
                     "withholding_tax_override": float(ver.withholding_tax_override) if ver.withholding_tax_override is not None else None,
                     "sessi": float(ver.total_sessi if ver.total_sessi is not None else 0),
                     "eobi": float(ver.total_eobi if ver.total_eobi is not None else 0),
+                    "ot_rate": 0,
 
                     "sup_civ_qty": 0, "sup_civ_rate": 0, "sup_civ_sal": 0,
                     "sup_ex_qty": 0, "sup_ex_rate": 0, "sup_ex_sal": 0,
@@ -1505,6 +1506,8 @@ class CostingGridView(APIView):
                     q = l.quantity or 0
                     r = float(l.client_rate or 0)
                     s = float(l.guard_salary or 0)
+                    if l.single_ot_rate or l.double_ot_rate:
+                        row["ot_rate"] = float(l.single_ot_rate or l.double_ot_rate or 0)
 
                     is_ex = ('ex' in st_name or 'arm' in st_name or '_EX' in st_code)
                     is_ssg = ('ssg' in st_name or 'commando' in st_name or 'SSG' in st_code)
@@ -1539,6 +1542,112 @@ class CostingGridView(APIView):
                     else:
                         row["guard_civ_qty"] += q; row["guard_civ_rate"] = r; row["guard_civ_sal"] = s
 
+                data.append(row)
+
+        # Include any registered ClientLocations for active customers that don't yet have service lines
+        # so newly added clients and locations appear with empty requirements in the Fast Costing Grid
+        all_locations = ClientLocation.objects.filter(
+            company=company,
+            is_deleted=False,
+            customer__isnull=False,
+            customer__is_deleted=False
+        ).select_related('customer').order_by('-created_at')
+
+        for cloc in all_locations:
+            cust = cloc.customer
+            loc_key = (str(cust.id), str(cloc.id))
+            if loc_key in seen_customer_locations:
+                continue
+            seen_customer_locations.add(loc_key)
+
+            prop = SecurityProposal.objects.filter(company=company, customer=cust).order_by('-created_at').first()
+            ver = prop.versions.order_by('-version_number').first() if prop else None
+
+            row = {
+                "proposal_version_id": str(ver.id) if ver else None,
+                "proposal_id": str(prop.id) if prop else None,
+                "proposal_number": prop.proposal_number if (prop and prop.proposal_number) else "",
+                "client_id": str(cust.id),
+                "client_name": cust.name,
+                "location_id": str(cloc.id),
+                "location_name": cloc.name,
+                "overhead_per_guard": float(ver.overhead_per_guard if (ver and ver.overhead_per_guard is not None) else 6000),
+                "service_charges_per_guard": float(ver.service_charges_per_guard if (ver and ver.service_charges_per_guard is not None) else 3000),
+                "tax_wht_rate": float(ver.withholding_tax_rate if (ver and ver.withholding_tax_rate is not None) else 7),
+                "sales_tax_rate": float(ver.tax_rate if (ver and ver.tax_rate is not None) else 8),
+                "sales_tax_override": float(ver.sales_tax_override) if (ver and ver.sales_tax_override is not None) else None,
+                "withholding_tax_override": float(ver.withholding_tax_override) if (ver and ver.withholding_tax_override is not None) else None,
+                "sessi": float(ver.total_sessi if (ver and ver.total_sessi is not None) else 0),
+                "eobi": float(ver.total_eobi if (ver and ver.total_eobi is not None) else 0),
+                "ot_rate": 0,
+
+                "sup_civ_qty": 0, "sup_civ_rate": 0, "sup_civ_sal": 0,
+                "sup_ex_qty": 0, "sup_ex_rate": 0, "sup_ex_sal": 0,
+                "sr_sup_civ_qty": 0, "sr_sup_civ_rate": 0, "sr_sup_civ_sal": 0,
+                "sr_sup_ex_qty": 0, "sr_sup_ex_rate": 0, "sr_sup_ex_sal": 0,
+                "guard_civ_qty": 0, "guard_civ_rate": 0, "guard_civ_sal": 0,
+                "guard_ex_qty": 0, "guard_ex_rate": 0, "guard_ex_sal": 0,
+                "hd_gd_civ_qty": 0, "hd_gd_civ_rate": 0, "hd_gd_civ_sal": 0,
+                "hd_gd_ex_qty": 0, "hd_gd_ex_rate": 0, "hd_gd_ex_sal": 0,
+                "cpo_civ_qty": 0, "cpo_civ_rate": 0, "cpo_civ_sal": 0,
+                "cpo_ex_qty": 0, "cpo_ex_rate": 0, "cpo_ex_sal": 0,
+                "cpo_ssg_qty": 0, "cpo_ssg_rate": 0, "cpo_ssg_sal": 0,
+                "lady_searcher_qty": 0, "lady_searcher_rate": 0, "lady_searcher_sal": 0,
+                "cctv_op_qty": 0, "cctv_op_rate": 0, "cctv_op_sal": 0,
+                "deo_qty": 0, "deo_rate": 0, "deo_sal": 0,
+                "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
+            }
+            data.append(row)
+
+        # Also ensure active customers without any locations yet appear with default location row
+        all_customers = CRMEntity.objects.filter(
+            company=company,
+            entity_type='CUSTOMER',
+            active=True,
+            is_deleted=False
+        ).order_by('-created_at')
+
+        for cust in all_customers:
+            cust_seen = any(c_id == str(cust.id) for (c_id, _) in seen_customer_locations)
+            if not cust_seen:
+                seen_customer_locations.add((str(cust.id), 'default'))
+                prop = SecurityProposal.objects.filter(company=company, customer=cust).order_by('-created_at').first()
+                ver = prop.versions.order_by('-version_number').first() if prop else None
+
+                row = {
+                    "proposal_version_id": str(ver.id) if ver else None,
+                    "proposal_id": str(prop.id) if prop else None,
+                    "proposal_number": prop.proposal_number if (prop and prop.proposal_number) else "",
+                    "client_id": str(cust.id),
+                    "client_name": cust.name,
+                    "location_id": None,
+                    "location_name": cust.name,
+                    "overhead_per_guard": float(ver.overhead_per_guard if (ver and ver.overhead_per_guard is not None) else 6000),
+                    "service_charges_per_guard": float(ver.service_charges_per_guard if (ver and ver.service_charges_per_guard is not None) else 3000),
+                    "tax_wht_rate": float(ver.withholding_tax_rate if (ver and ver.withholding_tax_rate is not None) else 7),
+                    "sales_tax_rate": float(ver.tax_rate if (ver and ver.tax_rate is not None) else 8),
+                    "sales_tax_override": float(ver.sales_tax_override) if (ver and ver.sales_tax_override is not None) else None,
+                    "withholding_tax_override": float(ver.withholding_tax_override) if (ver and ver.withholding_tax_override is not None) else None,
+                    "sessi": float(ver.total_sessi if (ver and ver.total_sessi is not None) else 0),
+                    "eobi": float(ver.total_eobi if (ver and ver.total_eobi is not None) else 0),
+                    "ot_rate": 0,
+
+                    "sup_civ_qty": 0, "sup_civ_rate": 0, "sup_civ_sal": 0,
+                    "sup_ex_qty": 0, "sup_ex_rate": 0, "sup_ex_sal": 0,
+                    "sr_sup_civ_qty": 0, "sr_sup_civ_rate": 0, "sr_sup_civ_sal": 0,
+                    "sr_sup_ex_qty": 0, "sr_sup_ex_rate": 0, "sr_sup_ex_sal": 0,
+                    "guard_civ_qty": 0, "guard_civ_rate": 0, "guard_civ_sal": 0,
+                    "guard_ex_qty": 0, "guard_ex_rate": 0, "guard_ex_sal": 0,
+                    "hd_gd_civ_qty": 0, "hd_gd_civ_rate": 0, "hd_gd_civ_sal": 0,
+                    "hd_gd_ex_qty": 0, "hd_gd_ex_rate": 0, "hd_gd_ex_sal": 0,
+                    "cpo_civ_qty": 0, "cpo_civ_rate": 0, "cpo_civ_sal": 0,
+                    "cpo_ex_qty": 0, "cpo_ex_rate": 0, "cpo_ex_sal": 0,
+                    "cpo_ssg_qty": 0, "cpo_ssg_rate": 0, "cpo_ssg_sal": 0,
+                    "lady_searcher_qty": 0, "lady_searcher_rate": 0, "lady_searcher_sal": 0,
+                    "cctv_op_qty": 0, "cctv_op_rate": 0, "cctv_op_sal": 0,
+                    "deo_qty": 0, "deo_rate": 0, "deo_sal": 0,
+                    "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
+                }
                 data.append(row)
 
         return Response(data, status=status.HTTP_200_OK)
@@ -1677,6 +1786,10 @@ class CostingGridBatchSyncView(APIView):
                     withholding_tax_override = _parse_opt_dec(row.get('withholding_tax_override'))
                     sessi = _parse_dec(row.get('sessi'), 0)
                     eobi = _parse_dec(row.get('eobi'), 0)
+                    ot_rate_val = _parse_dec(row.get('ot_rate'), 0)
+
+                    st_basis = 'MANUAL' if sales_tax_override is not None else row.get('sales_tax_basis', 'SERVICE_CHARGES')
+                    wht_basis = 'MANUAL' if withholding_tax_override is not None else row.get('withholding_tax_basis', 'SERVICE_CHARGES')
 
                     version = ProposalVersion.objects.filter(
                         company=company,
@@ -1692,7 +1805,9 @@ class CostingGridBatchSyncView(APIView):
                             overhead_per_guard=overhead,
                             service_charges_per_guard=service_charges,
                             withholding_tax_rate=wht,
+                            withholding_tax_basis=wht_basis,
                             tax_rate=st_rate,
+                            sales_tax_basis=st_basis,
                             sales_tax_override=sales_tax_override,
                             withholding_tax_override=withholding_tax_override,
                             total_sessi=sessi,
@@ -1705,6 +1820,14 @@ class CostingGridBatchSyncView(APIView):
                         version.tax_rate = st_rate
                         version.sales_tax_override = sales_tax_override
                         version.withholding_tax_override = withholding_tax_override
+                        if sales_tax_override is not None:
+                            version.sales_tax_basis = 'MANUAL'
+                        elif row.get('sales_tax_basis'):
+                            version.sales_tax_basis = row.get('sales_tax_basis')
+                        if withholding_tax_override is not None:
+                            version.withholding_tax_basis = 'MANUAL'
+                        elif row.get('withholding_tax_basis'):
+                            version.withholding_tax_basis = row.get('withholding_tax_basis')
                         version.total_sessi = sessi
                         version.total_eobi = eobi
                         version.save()
@@ -1792,6 +1915,9 @@ class CostingGridBatchSyncView(APIView):
                                 target_line.quantity = qty
                                 target_line.client_rate = rate
                                 target_line.guard_salary = sal
+                                if ot_rate_val > 0 or row.get('ot_rate') is not None:
+                                    target_line.single_ot_rate = ot_rate_val
+                                    target_line.double_ot_rate = ot_rate_val
                                 target_line.save()
                             else:
                                 ProposalServiceLine.objects.create(
@@ -1802,6 +1928,8 @@ class CostingGridBatchSyncView(APIView):
                                     quantity=qty,
                                     client_rate=rate,
                                     guard_salary=sal,
+                                    single_ot_rate=ot_rate_val,
+                                    double_ot_rate=ot_rate_val,
                                     weapon_type=default_weapon,
                                     shift_hours='12_HOURS',
                                     billing_unit='MONTHLY'

@@ -765,9 +765,9 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({ initialSiteId })
                             {filteredRecords.map((row, idx) => {
                                 const isSelected = selectedEmployeeIds.includes(row.employee_id);
                                 const isUpdating = updatingId === row.employee_id;
-                                const isPresent = row.effective_status === 'PRESENT';
-                                const isAbsent = row.effective_status === 'ABSENT';
-                                const isOtherStatus = !isPresent && !isAbsent;
+                                const isPresent = Boolean(row.is_materialized && row.effective_status === 'PRESENT');
+                                const isAbsent = Boolean(row.is_materialized && row.effective_status === 'ABSENT');
+                                const isOtherStatus = Boolean(row.is_materialized && !isPresent && !isAbsent && row.effective_status && ['PAID_LEAVE', 'UNPAID_LEAVE', 'WEEKLY_OFF', 'HALF_DAY', 'HOLIDAY'].includes(row.effective_status));
 
                                 return (
                                     <tr
@@ -898,8 +898,10 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({ initialSiteId })
                                                     <span style={{ color: '#10b981', fontWeight: 600 }}>Earned (+)</span>
                                                 ) : isAbsent ? (
                                                     <span style={{ color: '#ef4444' }}>Deducted (-)</span>
+                                                ) : isOtherStatus ? (
+                                                    <span style={{ color: 'var(--color-text-muted)' }}>{row.effective_status?.replace('_', ' ')}</span>
                                                 ) : (
-                                                    <span style={{ color: 'var(--color-text-muted)' }}>{row.effective_status}</span>
+                                                    <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>Not Marked</span>
                                                 )}
                                             </div>
                                         </td>
@@ -907,7 +909,9 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({ initialSiteId })
                                         {/* Month Muster Summary */}
                                         <td style={{ padding: '12px 14px' }}>
                                             <div style={{ fontSize: '12.5px' }}>
-                                                <span style={{ color: '#10b981', fontWeight: 600 }}>{row.month_present_days || 0}d P</span>
+                                                <span style={{ color: Number(row.month_present_days || 0) > 0 ? '#10b981' : 'var(--color-text-muted)', fontWeight: 600 }}>
+                                                    {row.month_present_days || 0}d P
+                                                </span>
                                                 {Number(row.month_absent_days || 0) > 0 && (
                                                     <span style={{ color: '#ef4444', marginLeft: '6px', fontWeight: 600 }}>• {row.month_absent_days}d A</span>
                                                 )}

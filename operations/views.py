@@ -707,11 +707,15 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
         post_id = request.query_params.get('post')
         designation_id = request.query_params.get('designation')
 
-        active_deployed_ids = Deployment.objects.filter(
+        site_id = request.query_params.get('site_id') or request.query_params.get('site')
+        active_deployments = Deployment.objects.filter(
             company_id=company_id,
             status=DeploymentStatus.ACTIVE,
             is_deleted=False
-        ).values_list('employee_id', flat=True)
+        )
+        if site_id:
+            active_deployments = active_deployments.filter(site_id=site_id)
+        active_deployed_ids = active_deployments.values_list('employee_id', flat=True)
 
         from hrm.models import Employee
         qs = Employee.objects.filter(
@@ -1152,6 +1156,74 @@ class SecurityAttendanceViewSet(BaseSecurityOpsViewSet):
         if site_id:
             qs = qs.filter(site_id=site_id)
         return qs
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        site_id = request.query_params.get('site')
+        # If querying for a specific site, also include duties recorded in DailyDutyPay
+        if site_id:
+            company_id = self._resolve_company(request)
+            date_from = request.query_params.get('date_from')
+            date_to = request.query_params.get('date_to')
+            status_param = request.query_params.get('status')
+
+            from operations.models import DailyDutyPay
+            dp_qs = DailyDutyPay.objects.filter(
+                company_id=company_id,
+                site_id=site_id,
+                is_deleted=False
+            ).select_related('employee', 'employee__designation', 'site')
+            if date_from:
+                dp_qs = dp_qs.filter(duty_date__gte=date_from)
+            if date_to:
+                dp_qs = dp_qs.filter(duty_date__lte=date_to)
+
+            existing_results = response.data.get('results', []) if isinstance(response.data, dict) else response.data
+            existing_keys = {
+                (str(r.get('employee_id') or r.get('employee')), str(r.get('date')))
+                for r in existing_results
+            }
+
+            extra_items = []
+            for dp in dp_qs:
+                emp = dp.employee
+                if not emp:
+                    continue
+                key = (str(emp.id), str(dp.duty_date))
+                if key in existing_keys:
+                    continue
+                
+                duty_st = dp.attendance_status or 'PRESENT'
+                if status_param and status_param.upper() != duty_st.upper():
+                    continue
+
+                extra_items.append({
+                    'id': f"dp_{dp.id}",
+                    'date': str(dp.duty_date),
+                    'status': duty_st,
+                    'employee': emp.id,
+                    'employee_id': str(emp.id),
+                    'employee_name': f"{emp.first_name} {emp.last_name or ''}".strip(),
+                    'employee_code': emp.employee_code or '',
+                    'designation_name': emp.designation.name if emp.designation else 'Guard',
+                    'site': str(site_id),
+                    'site_name': dp.site.name if dp.site else '',
+                    'payable_amount': float(dp.payable_amount),
+                    'notes': dp.notes or f"Daily Duty Pay: PKR {dp.payable_amount:,.2f}",
+                    'is_finalized': True
+                })
+
+            if extra_items:
+                all_results = list(existing_results) + extra_items
+                all_results.sort(key=lambda x: str(x.get('date', '')), reverse=True)
+                if isinstance(response.data, dict):
+                    response.data['results'] = all_results
+                    response.data['count'] = len(all_results)
+                else:
+                    response.data = all_results
+
+        return response
+
 
     @action(detail=False, methods=['get'], url_path='daily-view')
     def daily_view(self, request):
@@ -4114,6 +4186,8 @@ class MonthlyMusterSaveView(APIView):
         year = int(request.data.get('year', now.year))
         month = int(request.data.get('month', now.month))
         updates = request.data.get('updates', [])
+        added_guards = request.data.get('added_guards', [])
+        removed_guards = request.data.get('removed_guards', [])
 
         from operations.services.monthly_muster_service import MonthlyMusterService
         try:
@@ -4122,7 +4196,9 @@ class MonthlyMusterSaveView(APIView):
                 user=request.user,
                 year=year,
                 month=month,
-                updates=updates
+                updates=updates,
+                added_guards=added_guards,
+                removed_guards=removed_guards
             )
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
