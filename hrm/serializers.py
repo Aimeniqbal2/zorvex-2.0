@@ -139,12 +139,22 @@ class EmployeeSerializer(BaseTenantSerializer):
     account_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
     iban = serializers.CharField(write_only=True, required=False, allow_blank=True)
     wallet_provider = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    wallet_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    system_id = serializers.CharField(read_only=True)
+    display_code = serializers.CharField(read_only=True)
 
     class Meta:
         model = Employee
         fields = '__all__'
         read_only_fields = ['id', 'company', 'employee_code', 'created_at', 'updated_at', 'is_deleted']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # Software-wide Employee Code: display company-assigned badge/code (from previous_employee_code)
+        # System ID (EMP-XXXXXX) is preserved in system_id strictly for HR profile view.
+        ret['system_id'] = instance.employee_code or ''
+        ret['display_code'] = instance.previous_employee_code or instance.employee_code or ''
+        ret['employee_code'] = instance.previous_employee_code or instance.employee_code or ''
+        return ret
 
     def to_internal_value(self, data):
         data = data.copy() if hasattr(data, 'copy') else dict(data)
@@ -422,7 +432,7 @@ from .models import (
 
 class WorkforceAttendanceSerializer(BaseTenantSerializer):
     employee_name = serializers.CharField(source='employee.full_name', read_only=True)
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     site_name = serializers.CharField(source='site.name', read_only=True)
     post_name = serializers.CharField(source='post.post_name', read_only=True)
     shift_name = serializers.CharField(source='shift.name', read_only=True)
@@ -435,7 +445,7 @@ class WorkforceAttendanceSerializer(BaseTenantSerializer):
 
 class EmployeeAttendanceStateSerializer(BaseTenantSerializer):
     employee_name = serializers.CharField(source='employee.full_name', read_only=True)
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
 
     class Meta:
         model = EmployeeAttendanceState
@@ -444,7 +454,7 @@ class EmployeeAttendanceStateSerializer(BaseTenantSerializer):
 
 class JumpRecordSerializer(BaseTenantSerializer):
     employee_name = serializers.CharField(source='employee.full_name', read_only=True)
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     reinstated_by_name = serializers.CharField(source='reinstated_by.get_full_name', read_only=True)
     resolved_by_name = serializers.CharField(source='resolved_by.get_full_name', read_only=True)
 
@@ -587,7 +597,7 @@ class PayslipLineSerializer(BaseTenantSerializer):
 
 class PayslipSerializer(BaseTenantSerializer):
     lines = PayslipLineSerializer(many=True, read_only=True)
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     previous_employee_code = serializers.CharField(source='employee.previous_employee_code', read_only=True)
     employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
     department_name = serializers.CharField(source='employee.department.name', read_only=True)

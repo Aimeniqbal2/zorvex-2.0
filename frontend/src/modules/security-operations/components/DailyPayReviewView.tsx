@@ -112,15 +112,21 @@ export const DailyPayReviewView: React.FC = () => {
     // Client-side search filtering
     const filteredRecords = useMemo(() => {
         if (!searchQuery.trim()) return records;
-        const q = searchQuery.toLowerCase();
-        return records.filter((r: DailyDutyPayItem) =>
-            r.employee_name.toLowerCase().includes(q) ||
-            r.employee_code.toLowerCase().includes(q) ||
-            (r.site_name && r.site_name.toLowerCase().includes(q)) ||
-            (r.post_name && r.post_name.toLowerCase().includes(q)) ||
-            (r.contract_code && r.contract_code.toLowerCase().includes(q)) ||
-            (r.replaced_employee_name && r.replaced_employee_name.toLowerCase().includes(q))
-        );
+        const q = searchQuery.toLowerCase().trim();
+        const qNoZero = q.replace(/^0+/, '');
+        return records.filter((r: DailyDutyPayItem) => {
+            const empCode = (r.employee_code || '').toLowerCase();
+            const empCodeNoZero = empCode.replace(/^0+/, '');
+            return (
+                r.employee_name.toLowerCase().includes(q) ||
+                empCode.includes(q) ||
+                (qNoZero && empCodeNoZero.includes(qNoZero)) ||
+                (r.site_name && r.site_name.toLowerCase().includes(q)) ||
+                (r.post_name && r.post_name.toLowerCase().includes(q)) ||
+                (r.contract_code && r.contract_code.toLowerCase().includes(q)) ||
+                (r.replaced_employee_name && r.replaced_employee_name.toLowerCase().includes(q))
+            );
+        });
     }, [records, searchQuery]);
 
     // Format currency

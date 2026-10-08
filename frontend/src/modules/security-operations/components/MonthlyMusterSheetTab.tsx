@@ -19,6 +19,17 @@ interface GuardRow {
     payable_days: number;
 }
 
+interface SiteRequirement {
+    post_id: string | null;
+    post_name: string;
+    designation_id: string | null;
+    designation_code: string;
+    designation_name: string;
+    required_headcount: number;
+    monthly_pay_rate: number;
+    overtime_rate: number;
+}
+
 interface SiteBlock {
     site_id: string;
     site_name: string;
@@ -28,6 +39,7 @@ interface SiteBlock {
     guards_req: number;
     guards_sal: number;
     overtime_rate: number;
+    requirements?: SiteRequirement[];
     guards: GuardRow[];
     daily_totals: Record<string, number>;
     daily_vacations: Record<string, number>;
@@ -55,11 +67,18 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Dirty updates tracker: key is `${site_id}_${employee_id}_${day}` -> { site_id, employee_id, day, code }
     const [dirtyUpdates, setDirtyUpdates] = useState<Map<string, { site_id: string; employee_id: string; day: number; code: string }>>(new Map());
-    const [addedGuards, setAddedGuards] = useState<Array<{ site_id: string; employee_id: string }>>([]);
+    const [addedGuards, setAddedGuards] = useState<Array<{
+        site_id: string;
+        employee_id: string;
+        post_id?: string | null;
+        designation_id?: string | null;
+        monthly_pay_rate?: number;
+    }>>([]);
     const [removedGuards, setRemovedGuards] = useState<Array<{ site_id: string; employee_id: string }>>([]);
 
     // Add Guard Modal state
     const [activeAddSiteId, setActiveAddSiteId] = useState<string | null>(null);
+    const [selectedRequirementIndex, setSelectedRequirementIndex] = useState<number>(0);
     const [allEmployees, setAllEmployees] = useState<any[]>([]);
     const [guardSearch, setGuardSearch] = useState<string>('');
 
@@ -260,8 +279,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         }
     };
 
-    // Add Guard to Site Block
-    const handleAddGuardToSite = (emp: any) => {
+    // Add Guard to Site Block with Selected Site Requirement/Position
+    const handleAddGuardToSite = (emp: any, req: SiteRequirement) => {
         if (!activeAddSiteId) return;
 
         // Check if already in this site block
@@ -271,11 +290,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             return;
         }
 
-        const desigTitle = emp.designation_name || emp.designation?.name || 'Guard';
-        let desigCode = 'GD';
-        if (desigTitle.toLowerCase().includes('supervisor')) desigCode = 'SUP';
-        else if (desigTitle.toLowerCase().includes('lady')) desigCode = 'LADY';
-        else if (desigTitle.toLowerCase().includes('cctv')) desigCode = 'CCTV';
+        const desigCode = req.designation_code || 'GD';
+        const desigTitle = req.designation_name || 'Security Guard';
 
         const initialDays: Record<string, string> = {};
         for (let d = 1; d <= daysInMonth; d++) {
@@ -284,7 +300,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
         const newRow: GuardRow = {
             employee_id: String(emp.id),
-            employee_code: emp.employee_code || '',
+            employee_code: emp.previous_employee_code || emp.display_code || emp.employee_code || '',
             name: `${emp.first_name} ${emp.last_name || ''}`.trim(),
             designation: desigCode,
             designation_full: desigTitle,
@@ -307,8 +323,15 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             };
         }));
 
-        setAddedGuards(prev => [...prev, { site_id: activeAddSiteId, employee_id: String(emp.id) }]);
-        addToast('success', `Added ${newRow.name} (${newRow.employee_code}) to ${targetSite?.site_name}. Click "Save Changes" to persist.`);
+        setAddedGuards(prev => [...prev, {
+            site_id: activeAddSiteId,
+            employee_id: String(emp.id),
+            post_id: req.post_id,
+            designation_id: req.designation_id,
+            monthly_pay_rate: req.monthly_pay_rate
+        }]);
+
+        addToast('success', `Assigned ${newRow.name} (${newRow.employee_code}) as ${desigCode} (Rs. ${req.monthly_pay_rate.toLocaleString()}/mo) to ${targetSite?.site_name}. Click "Save Changes" to persist.`);
         setActiveAddSiteId(null);
         setGuardSearch('');
     };
@@ -732,7 +755,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                             </div>
 
                             <button
-                                onClick={() => setActiveAddSiteId(site.site_id)}
+                                onClick={() => {
+                                    setActiveAddSiteId(site.site_id);
+                                    setSelectedRequirementIndex(0);
+                                    setGuardSearch('');
+                                }}
                                 style={{ 
                                     display: 'flex', 
                                     alignItems: 'center', 
@@ -833,13 +860,13 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             </td>
                                             <td style={{ padding: '6px 4px', position: 'sticky', left: '97px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2 }}>
                                                 <span style={{ 
-                                                    padding: '2px 6px', 
+                                                    padding: '2px 7px', 
                                                     borderRadius: '4px', 
                                                     fontSize: '0.72rem', 
                                                     fontWeight: 800,
-                                                    background: guard.designation === 'SUP' ? '#f3e8ff' : '#f1f5f9',
-                                                    color: guard.designation === 'SUP' ? '#7e22ce' : '#475569',
-                                                    border: '1px solid ' + (guard.designation === 'SUP' ? '#d8b4fe' : '#cbd5e1')
+                                                    background: guard.designation === 'SUP' ? '#f3e8ff' : guard.designation === 'CPO' ? '#ecfdf5' : guard.designation === 'LADY' ? '#fdf2f8' : '#f0f9ff',
+                                                    color: guard.designation === 'SUP' ? '#7e22ce' : guard.designation === 'CPO' ? '#059669' : guard.designation === 'LADY' ? '#db2777' : '#0369a1',
+                                                    border: '1px solid ' + (guard.designation === 'SUP' ? '#d8b4fe' : guard.designation === 'CPO' ? '#6ee7b7' : guard.designation === 'LADY' ? '#fbcfe8' : '#bae6fd')
                                                 }}>
                                                     {guard.designation}
                                                 </span>
@@ -957,60 +984,189 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             ))}
 
             {/* Modal: Add Guard to Site Block */}
-            {activeAddSiteId && (
-                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '20px' }}>
-                    <div style={{ background: 'var(--color-surface, #ffffff)', width: '100%', maxWidth: '520px', borderRadius: '14px', border: '1px solid var(--color-border, #cbd5e1)', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--color-text, #0f172a)', fontWeight: 800 }}>Add Guard to Site Roster</h3>
-                            <button onClick={() => setActiveAddSiteId(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
-                        </div>
+            {activeAddSiteId && (() => {
+                const activeSiteObj = sitesData.find(s => s.site_id === activeAddSiteId);
+                const reqList: SiteRequirement[] = (activeSiteObj?.requirements && activeSiteObj.requirements.length > 0)
+                    ? activeSiteObj.requirements
+                    : [
+                        {
+                            post_id: null,
+                            post_name: 'Security Guard',
+                            designation_id: null,
+                            designation_code: 'GD',
+                            designation_name: 'Security Guard',
+                            required_headcount: activeSiteObj?.guards_req || 0,
+                            monthly_pay_rate: activeSiteObj?.guards_sal || 35000,
+                            overtime_rate: activeSiteObj?.overtime_rate || 0
+                        },
+                        {
+                            post_id: null,
+                            post_name: 'Security Supervisor',
+                            designation_id: null,
+                            designation_code: 'SUP',
+                            designation_name: 'Security Supervisor',
+                            required_headcount: activeSiteObj?.supervisors_req || 0,
+                            monthly_pay_rate: activeSiteObj?.supervisors_sal || 45000,
+                            overtime_rate: activeSiteObj?.overtime_rate || 0
+                        }
+                    ];
+                const activeReq = reqList[selectedRequirementIndex] || reqList[0];
 
-                        <div style={{ marginBottom: '16px' }}>
-                            <input
-                                type="text"
-                                placeholder="Search by Employee Code or Name..."
-                                value={guardSearch}
-                                onChange={(e) => setGuardSearch(e.target.value)}
-                                autoFocus
-                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'var(--color-bg, #f8fafc)', border: '1px solid var(--color-border, #cbd5e1)', color: 'var(--color-text, #0f172a)', fontSize: '0.95rem' }}
-                            />
-                        </div>
+                return (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '20px' }}>
+                        <div style={{ background: 'var(--color-surface, #ffffff)', width: '100%', maxWidth: '620px', borderRadius: '16px', border: '1px solid var(--color-border, #cbd5e1)', padding: '24px', boxShadow: '0 25px 40px -10px rgba(0, 0, 0, 0.3)', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '90vh' }}>
+                            {/* Modal Header */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--color-text, #0f172a)', fontWeight: 800 }}>Assign Guard to Site Roster</h3>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', marginTop: '2px' }}>
+                                        Deploy personnel against client post requirements with automatic role-based compensation
+                                    </div>
+                                </div>
+                                <button onClick={() => setActiveAddSiteId(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '1.3rem', cursor: 'pointer', padding: '4px' }}>✕</button>
+                            </div>
 
-                        <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {allEmployees
-                                .filter(e => {
-                                    if (!guardSearch.trim()) return true;
-                                    const q = guardSearch.toLowerCase().trim();
-                                    return (
-                                        (e.employee_code || '').toLowerCase().includes(q) ||
-                                        (e.first_name || '').toLowerCase().includes(q) ||
-                                        (e.last_name || '').toLowerCase().includes(q)
-                                    );
-                                })
-                                .slice(0, 20)
-                                .map(emp => (
-                                    <div
-                                        key={emp.id}
-                                        onClick={() => handleAddGuardToSite(emp)}
-                                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: '8px', background: 'var(--color-bg, #f8fafc)', border: '1px solid var(--color-border, #e2e8f0)', cursor: 'pointer', transition: 'all 0.15s' }}
-                                        onMouseEnter={(e) => e.currentTarget.style.borderColor = '#10b981'}
-                                        onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)'}
-                                    >
+                            {/* Uneditable Location & Client Header Banner */}
+                            <div style={{ background: 'var(--color-bg, #f8fafc)', border: '1px solid var(--color-border, #e2e8f0)', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                <div>
+                                    <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, letterSpacing: '0.5px' }}>Operational Location</span>
+                                    <div style={{ fontWeight: 800, color: '#059669', fontSize: '1rem' }}>
+                                        📍 {activeSiteObj?.site_name}
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                    <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, letterSpacing: '0.5px' }}>Client / Company</span>
+                                    <div style={{ fontWeight: 700, color: 'var(--color-text, #0f172a)', fontSize: '0.88rem' }}>
+                                        🏢 {activeSiteObj?.customer_name}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Position / Requirement Selector Dropdown */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
+                                    Select Post / Requirement for this Assignment: <span style={{ color: '#ef4444' }}>*</span>
+                                </label>
+                                <select
+                                    value={selectedRequirementIndex}
+                                    onChange={(e) => setSelectedRequirementIndex(Number(e.target.value))}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 14px',
+                                        borderRadius: '8px',
+                                        background: 'var(--color-surface, #ffffff)',
+                                        border: '2px solid #0284c7',
+                                        color: 'var(--color-text, #0f172a)',
+                                        fontWeight: 700,
+                                        fontSize: '0.92rem',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {reqList.map((req, idx) => (
+                                        <option key={idx} value={idx}>
+                                            {req.designation_name} ({req.designation_code}) — Req: {req.required_headcount} | Salary: Rs. {req.monthly_pay_rate.toLocaleString()}/mo | OT: Rs. {req.overtime_rate.toLocaleString()}/day
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Selected Position Compensation & Details Pill (Uneditable) */}
+                            {activeReq && (
+                                <div style={{ background: activeReq.designation_code === 'SUP' ? 'rgba(126, 34, 206, 0.06)' : 'rgba(2, 132, 199, 0.06)', border: `1px solid ${activeReq.designation_code === 'SUP' ? '#d8b4fe' : '#bae6fd'}`, borderRadius: '10px', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <span style={{
+                                            padding: '4px 10px',
+                                            borderRadius: '6px',
+                                            fontWeight: 800,
+                                            fontSize: '0.82rem',
+                                            background: activeReq.designation_code === 'SUP' ? '#7e22ce' : '#0284c7',
+                                            color: '#ffffff'
+                                        }}>
+                                            {activeReq.designation_code}
+                                        </span>
                                         <div>
-                                            <strong style={{ color: 'var(--color-text, #0f172a)' }}>{emp.first_name} {emp.last_name}</strong>
-                                            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>
-                                                Code: <span style={{ color: '#0284c7', fontWeight: 700 }}>{emp.employee_code}</span> | {emp.designation_name || emp.designation?.name || 'Guard'}
+                                            <strong style={{ fontSize: '0.9rem', color: 'var(--color-text, #0f172a)' }}>{activeReq.designation_name}</strong>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)' }}>
+                                                Daily Rate: <strong>Rs. {(activeReq.monthly_pay_rate / daysInMonth).toFixed(2)}/day</strong>
                                             </div>
                                         </div>
-                                        <button style={{ background: '#10b981', color: '#ffffff', border: 'none', padding: '5px 12px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, pointerEvents: 'none' }}>
-                                            + Select
-                                        </button>
                                     </div>
-                                ))}
+                                    <div style={{ textAlign: 'right' }}>
+                                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#059669' }}>
+                                            Rs. {activeReq.monthly_pay_rate.toLocaleString()} <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>/ mo</span>
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)' }}>
+                                            OT Rate: <strong>Rs. {activeReq.overtime_rate.toLocaleString()}</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Workforce Personnel Search Input */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
+                                    Search Personnel to Assign:
+                                </label>
+                                <input
+                                    type="text"
+                                    placeholder="🔍 Search by Employee Code (e.g. 009450) or Name..."
+                                    value={guardSearch}
+                                    onChange={(e) => setGuardSearch(e.target.value)}
+                                    autoFocus
+                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'var(--color-bg, #f8fafc)', border: '1px solid var(--color-border, #cbd5e1)', color: 'var(--color-text, #0f172a)', fontSize: '0.92rem' }}
+                                />
+                            </div>
+
+                            {/* Filtered Direct Workforce Personnel List */}
+                            <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                                {allEmployees
+                                    .filter(e => {
+                                        if (!guardSearch.trim()) return true;
+                                        const q = guardSearch.toLowerCase().trim();
+                                        const qNoZero = q.replace(/^0+/, '');
+                                        const prevCode = (e.previous_employee_code || '').toLowerCase();
+                                        const prevCodeNoZero = prevCode.replace(/^0+/, '');
+                                        const dispCode = (e.display_code || '').toLowerCase();
+                                        const dispCodeNoZero = dispCode.replace(/^0+/, '');
+                                        const empCode = (e.employee_code || '').toLowerCase();
+                                        const empCodeNoZero = empCode.replace(/^0+/, '');
+                                        const nameStr = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase();
+
+                                        return (
+                                            prevCode.includes(q) ||
+                                            (qNoZero && prevCodeNoZero.includes(qNoZero)) ||
+                                            dispCode.includes(q) ||
+                                            (dispCodeNoZero && dispCodeNoZero.includes(qNoZero)) ||
+                                            empCode.includes(q) ||
+                                            (qNoZero && empCodeNoZero.includes(qNoZero)) ||
+                                            nameStr.includes(q)
+                                        );
+                                    })
+                                    .slice(0, 30)
+                                    .map(emp => (
+                                        <div
+                                            key={emp.id}
+                                            onClick={() => handleAddGuardToSite(emp, activeReq)}
+                                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: '8px', background: 'var(--color-bg, #f8fafc)', border: '1px solid var(--color-border, #e2e8f0)', cursor: 'pointer', transition: 'all 0.15s' }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#059669'; e.currentTarget.style.background = '#f0fdf4'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)'; e.currentTarget.style.background = 'var(--color-bg, #f8fafc)'; }}
+                                        >
+                                            <div>
+                                                <strong style={{ color: 'var(--color-text, #0f172a)', fontSize: '0.92rem' }}>{emp.first_name} {emp.last_name}</strong>
+                                                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', marginTop: '2px' }}>
+                                                    Code: <span style={{ color: '#0284c7', fontWeight: 800 }}>{emp.previous_employee_code || emp.display_code || emp.employee_code}</span> | Base: {emp.designation_name || emp.designation?.name || 'Guard'} | {emp.city || 'KHI'}
+                                                </div>
+                                            </div>
+                                            <button style={{ background: '#059669', color: '#ffffff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 800, pointerEvents: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                + Deploy as {activeReq?.designation_code || 'GD'}
+                                            </button>
+                                        </div>
+                                    ))}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Modal: Import Excel Sheet */}
             {showImportModal && (

@@ -494,6 +494,7 @@ def get_daily_attendance_workspace(
             Q(first_name__icontains=search) |
             Q(last_name__icontains=search) |
             Q(employee_code__icontains=search) |
+            Q(previous_employee_code__icontains=search) |
             Q(cnic_number__icontains=search)
         )
 
@@ -759,7 +760,8 @@ def get_daily_attendance_workspace(
         rows.append({
             'employee_id': emp_id,
             'employee_name': emp.full_name,
-            'employee_code': emp.employee_code,
+            'employee_code': emp.display_code,
+            'system_id': emp.system_id,
             'cnic_number': emp.cnic_number,
             'classification': emp.classification,
             'designation_name': emp.designation.name if emp.designation else '',

@@ -844,7 +844,8 @@ class CrossModuleIntegrationService:
         return {
             'employee': {
                 'id': str(employee.id),
-                'employee_code': getattr(employee, 'employee_code', ''),
+                'employee_code': getattr(employee, 'display_code', getattr(employee, 'employee_code', '')),
+                'system_id': getattr(employee, 'system_id', ''),
                 'full_name': employee.full_name,
                 'designation_name': employee.designation.name if employee.designation else '',
                 'department_name': employee.department.name if employee.department else '',

@@ -438,7 +438,8 @@ class ControlCenterService:
                     uncovered_absences_list.append({
                         'employee_id': emp_id,
                         'employee_name': emp.full_name,
-                        'employee_code': emp.employee_code,
+                        'employee_code': emp.display_code,
+                        'system_id': emp.system_id,
                         'site_id': str(roster.site_id) if roster else None,
                         'site_name': roster.site.name if roster and roster.site else 'Unassigned',
                         'post_name': roster.post.post_name if roster and roster.post else 'N/A',
@@ -451,7 +452,8 @@ class ControlCenterService:
                     approaching_jump_list.append({
                         'employee_id': emp_id,
                         'employee_name': emp.full_name,
-                        'employee_code': emp.employee_code,
+                        'employee_code': emp.display_code,
+                        'system_id': emp.system_id,
                         'consecutive_absent_days': streak,
                         'absent_since': str(streak_start) if streak_start else str(d)
                     })
@@ -479,7 +481,8 @@ class ControlCenterService:
                 'id': str(j.id),
                 'employee_id': str(j.employee_id),
                 'employee_name': j.employee.full_name,
-                'employee_code': j.employee.employee_code,
+                'employee_code': j.employee.display_code,
+                'system_id': j.employee.system_id,
                 'absent_since': str(j.absent_since),
                 'consecutive_absent_days': j.consecutive_absent_days,
                 'reason': j.reason
@@ -643,7 +646,8 @@ class ControlCenterService:
             {
                 'employee_id': str(e.id),
                 'employee_name': e.full_name,
-                'employee_code': e.employee_code,
+                'employee_code': e.display_code,
+                'system_id': e.system_id,
                 'designation_name': e.designation.name if e.designation else '',
                 'department_name': e.department.name if e.department else ''
             }
@@ -677,7 +681,8 @@ class ControlCenterService:
             {
                 'employee_id': str(e.id),
                 'employee_name': e.full_name,
-                'employee_code': e.employee_code,
+                'employee_code': e.display_code,
+                'system_id': e.system_id,
                 'designation_name': e.designation.name if e.designation else ''
             }
             for e in unassigned_direct_qs[:15]

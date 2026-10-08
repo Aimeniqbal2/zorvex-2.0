@@ -241,6 +241,19 @@ class Employee(BaseModel):
     def workforce_type(self, value):
         self.classification = value
 
+    @property
+    def display_code(self):
+        """
+        The official company employee code (from previous_employee_code / manual badge).
+        Falls back to system employee_code only if no manual code is assigned.
+        """
+        return self.previous_employee_code or self.employee_code or ''
+
+    @property
+    def system_id(self):
+        """The internal system-generated sequence code (EMP-XXXXXX). Strictly for HR."""
+        return self.employee_code or ''
+
     def clean(self):
         super().clean()
         if self.user_id and hasattr(self.user, 'company_id') and str(self.user.company_id) != str(self.company_id):

@@ -191,29 +191,53 @@ class EmployeeViewSet(TenantModelViewSet):
             except Exception:
                 pass
 
+        status_param = self.request.query_params.get('status')
+        if status_param and str(status_param).upper() != 'ALL':
+            if str(status_param).upper() == 'ACTIVE':
+                qs = qs.filter(is_active=True)
+            elif str(status_param).upper() == 'INACTIVE':
+                qs = qs.filter(is_active=False)
+            else:
+                qs = qs.filter(employment_status=str(status_param).upper())
+
+        code_param = self.request.query_params.get('employee_code') or self.request.query_params.get('code')
+        if code_param:
+            from django.db.models import Q
+            c_val = str(code_param).strip()
+            c_no_zero = c_val.lstrip('0')
+            q_code = Q(previous_employee_code__iexact=c_val) | Q(employee_code__iexact=c_val)
+            if c_no_zero:
+                q_code |= Q(previous_employee_code__iexact=c_no_zero)
+            qs = qs.filter(q_code)
+
         search = self.request.query_params.get('search')
         search_field = (self.request.query_params.get('search_field') or 'ALL').upper()
         if search:
             from django.db.models import Q
+            s_val = str(search).strip()
+            s_no_zero = s_val.lstrip('0')
+            q_code = Q(previous_employee_code__icontains=s_val) | Q(employee_code__icontains=s_val)
+            if s_no_zero:
+                q_code |= Q(previous_employee_code__icontains=s_no_zero)
+
             if search_field == 'NAME':
-                qs = qs.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search) | Q(father_name__icontains=search))
+                qs = qs.filter(Q(first_name__icontains=s_val) | Q(last_name__icontains=s_val) | Q(father_name__icontains=s_val))
             elif search_field == 'CODE':
-                qs = qs.filter(Q(employee_code__icontains=search) | Q(previous_employee_code__icontains=search))
+                qs = qs.filter(q_code)
             elif search_field == 'CNIC':
-                qs = qs.filter(cnic_number__icontains=search)
+                qs = qs.filter(cnic_number__icontains=s_val)
             elif search_field == 'PHONE':
-                qs = qs.filter(Q(phone__icontains=search) | Q(telephone_number__icontains=search))
+                qs = qs.filter(Q(phone__icontains=s_val) | Q(telephone_number__icontains=s_val))
             else:
                 qs = qs.filter(
-                    Q(first_name__icontains=search) |
-                    Q(last_name__icontains=search) |
-                    Q(father_name__icontains=search) |
-                    Q(employee_code__icontains=search) |
-                    Q(previous_employee_code__icontains=search) |
-                    Q(cnic_number__icontains=search) |
-                    Q(phone__icontains=search) |
-                    Q(telephone_number__icontains=search) |
-                    Q(caste__icontains=search)
+                    Q(first_name__icontains=s_val) |
+                    Q(last_name__icontains=s_val) |
+                    Q(father_name__icontains=s_val) |
+                    q_code |
+                    Q(cnic_number__icontains=s_val) |
+                    Q(phone__icontains=s_val) |
+                    Q(telephone_number__icontains=s_val) |
+                    Q(caste__icontains=s_val)
                 )
         return qs
 
@@ -726,7 +750,7 @@ class EmployeeViewSet(TenantModelViewSet):
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([
-            'Employee Code', 'Station / City', 'Legacy Code', 'Full Name', 'Father/Husband Name',
+            'Employee Code', 'System ID (Auto)', 'Station / City', 'Full Name', 'Father/Husband Name',
             'Gender', 'DOB', 'CNIC', 'Phone', 'Landline', 'Department', 'Designation',
             'Deployed Site', 'Workforce Type', 'Joining Date', 'Status', 'EOBI #', 'SESSI #', 'Address'
         ])
@@ -741,9 +765,9 @@ class EmployeeViewSet(TenantModelViewSet):
                 pass
 
             writer.writerow([
-                emp.employee_code,
+                emp.display_code,
+                emp.system_id,
                 emp.city or 'KHI',
-                emp.previous_employee_code,
                 emp.get_full_name(),
                 emp.father_name,
                 emp.gender,

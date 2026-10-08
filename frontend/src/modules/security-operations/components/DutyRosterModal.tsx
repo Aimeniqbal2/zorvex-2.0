@@ -206,7 +206,7 @@ export const DutyRosterModal: React.FC<DutyRosterModalProps> = ({
                     >
                         {employees.map(emp => (
                             <option key={emp.id} value={emp.id}>
-                                {emp.first_name} {emp.last_name} ({emp.employee_code || emp.id.substring(0, 8)}) - {emp.designation_name || 'Guard'}
+                                {emp.first_name} {emp.last_name} ({emp.previous_employee_code || emp.display_code || emp.employee_code || emp.id.substring(0, 8)}) - {emp.designation_name || 'Guard'}
                             </option>
                         ))}
                     </select>

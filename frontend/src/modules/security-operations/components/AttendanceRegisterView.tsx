@@ -98,14 +98,39 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
     // Filter employees by search
     const filteredEmployees = useMemo(() => {
         if (!employeeSearch.trim()) return allEmployees;
-        const q = employeeSearch.toLowerCase();
+        const q = employeeSearch.toLowerCase().trim();
+        const qNoZero = q.replace(/^0+/, '');
         return allEmployees.filter(emp => {
             const fullName = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
+            const prevCode = (emp.previous_employee_code || '').toLowerCase();
+            const prevCodeNoZero = prevCode.replace(/^0+/, '');
+            const dispCode = (emp.display_code || '').toLowerCase();
+            const dispCodeNoZero = dispCode.replace(/^0+/, '');
             const code = (emp.employee_code || '').toLowerCase();
+            const codeNoZero = code.replace(/^0+/, '');
             const desig = (emp.designation_name || emp.designation?.name || '').toLowerCase();
-            return fullName.includes(q) || code.includes(q) || desig.includes(q);
+            return (
+                fullName.includes(q) ||
+                prevCode.includes(q) ||
+                (qNoZero && prevCodeNoZero.includes(qNoZero)) ||
+                dispCode.includes(q) ||
+                (dispCodeNoZero && dispCodeNoZero.includes(qNoZero)) ||
+                code.includes(q) ||
+                (qNoZero && codeNoZero.includes(qNoZero)) ||
+                desig.includes(q)
+            );
         });
     }, [allEmployees, employeeSearch]);
+
+    // Auto-select first matching employee when search filter changes
+    useEffect(() => {
+        if (filteredEmployees.length > 0) {
+            const exists = filteredEmployees.some(e => String(e.id) === selectedEmployeeId);
+            if (!exists) {
+                setSelectedEmployeeId(String(filteredEmployees[0].id));
+            }
+        }
+    }, [filteredEmployees, selectedEmployeeId]);
 
     // Fetch Location Attendance Records
     const fetchLocationAttendance = async () => {
@@ -693,7 +718,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                 ) : (
                                     filteredEmployees.map(emp => (
                                         <option key={emp.id} value={emp.id}>
-                                            {emp.first_name} {emp.last_name || ''} ({emp.employee_code || 'N/A'}) — {emp.designation_name || emp.designation?.name || 'Guard'}
+                                            {emp.first_name} {emp.last_name || ''} ({emp.previous_employee_code || emp.display_code || emp.employee_code || 'N/A'}) — {emp.designation_name || emp.designation?.name || 'Guard'}
                                         </option>
                                     ))
                                 )}

@@ -135,12 +135,18 @@ export const PayrollPreparationView: React.FC = () => {
     // Client-side search filter
     const filteredRecords = useMemo(() => {
         if (!searchQuery.trim()) return records;
-        const q = searchQuery.toLowerCase();
-        return records.filter((r: EmployeePayrollCalculationItem) =>
-            r.employee_name.toLowerCase().includes(q) ||
-            r.employee_code.toLowerCase().includes(q) ||
-            (r.designation_name && r.designation_name.toLowerCase().includes(q))
-        );
+        const q = searchQuery.toLowerCase().trim();
+        const qNoZero = q.replace(/^0+/, '');
+        return records.filter((r: EmployeePayrollCalculationItem) => {
+            const empCode = (r.employee_code || '').toLowerCase();
+            const empCodeNoZero = empCode.replace(/^0+/, '');
+            return (
+                r.employee_name.toLowerCase().includes(q) ||
+                empCode.includes(q) ||
+                (qNoZero && empCodeNoZero.includes(qNoZero)) ||
+                (r.designation_name && r.designation_name.toLowerCase().includes(q))
+            );
+        });
     }, [records, searchQuery]);
 
     const formatCurrency = (val: string | number) => {

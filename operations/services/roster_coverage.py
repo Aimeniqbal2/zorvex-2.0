@@ -112,7 +112,7 @@ def calculate_site_shift_coverage(site_or_id, duty_date, shift_id=None):
                     'roster_id': str(r.id),
                     'employee_id': str(emp.id),
                     'employee_name': emp.full_name or f"{emp.first_name} {emp.last_name}".strip(),
-                    'employee_code': getattr(emp, 'employee_code', ''),
+                    'employee_code': getattr(emp, 'display_code', getattr(emp, 'employee_code', '')),
                     'designation_name': emp.designation.name if getattr(emp, 'designation', None) else '',
                     'is_replacement': r.is_replacement,
                     'original_employee_name': (
@@ -158,7 +158,7 @@ def calculate_site_shift_coverage(site_or_id, duty_date, shift_id=None):
                     'roster_id': str(r.id),
                     'employee_id': str(r.employee.id),
                     'employee_name': r.employee.full_name or f"{r.employee.first_name} {r.employee.last_name}".strip(),
-                    'employee_code': getattr(r.employee, 'employee_code', ''),
+                    'employee_code': getattr(r.employee, 'display_code', getattr(r.employee, 'employee_code', '')),
                     'designation_name': r.employee.designation.name if getattr(r.employee, 'designation', None) else '',
                     'is_replacement': r.is_replacement,
                     'original_employee_name': None,

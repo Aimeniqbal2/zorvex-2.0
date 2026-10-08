@@ -517,7 +517,7 @@ class ExpenseSerializer(BaseTenantSerializer):
 
 class EmployeeAdvanceSerializer(BaseTenantSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     bank_account_title = serializers.CharField(source='bank_account.account_title', read_only=True)
     voucher_number = serializers.CharField(source='voucher.voucher_number', read_only=True)
     created_by_name = serializers.SerializerMethodField()
@@ -620,7 +620,7 @@ class PurchasingAccountingIntegrationSerializer(BaseTenantSerializer):
 
 class PayrollAccountMappingSerializer(BaseTenantSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     designation_name = serializers.CharField(source='designation.name', read_only=True)
     department_name = serializers.CharField(source='department.name', read_only=True)
     salary_expense_account_code = serializers.CharField(source='salary_expense_account.account_code', read_only=True)
@@ -642,7 +642,7 @@ class PayrollAccountMappingSerializer(BaseTenantSerializer):
 
 class EmployeePaymentDestinationSerializer(BaseTenantSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
 
     class Meta:
         model = EmployeePaymentDestination
@@ -656,7 +656,7 @@ class EmployeePaymentDestinationSerializer(BaseTenantSerializer):
 
 class PayrollEmployeeFinanceSnapshotSerializer(BaseTenantSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     payslip_number = serializers.CharField(source='payslip.payslip_number', read_only=True)
     salary_expense_account_code = serializers.CharField(source='salary_expense_account.account_code', read_only=True)
     salary_expense_account_name = serializers.CharField(source='salary_expense_account.account_name', read_only=True)
@@ -689,7 +689,7 @@ class PayrollAccountingIntegrationSerializer(BaseTenantSerializer):
 
 class SalaryPaymentBatchLineSerializer(BaseTenantSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     payslip_number = serializers.CharField(source='payslip.payslip_number', read_only=True)
     reversed_by_name = serializers.SerializerMethodField()
 

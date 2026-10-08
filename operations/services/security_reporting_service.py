@@ -596,7 +596,8 @@ class SecurityReportingService:
             results = [
                 {
                     'id': str(e.id),
-                    'employee_code': e.employee_code,
+                    'employee_code': e.display_code,
+                    'system_id': e.system_id,
                     'full_name': e.full_name,
                     'classification': e.classification,
                     'designation': e.designation.name if e.designation else '',
@@ -630,7 +631,7 @@ class SecurityReportingService:
             results = [
                 {
                     'id': str(d.id),
-                    'employee_code': d.employee.employee_code if d.employee else '',
+                    'employee_code': d.employee.display_code if d.employee else '',
                     'employee_name': d.employee.full_name if d.employee else '',
                     'site_name': d.site.name if d.site else '',
                     'post_name': d.post.post_name if d.post else '',
@@ -710,7 +711,7 @@ class SecurityReportingService:
                 {
                     'id': str(a.id),
                     'date': str(a.date),
-                    'employee_code': a.employee.employee_code if a.employee else '',
+                    'employee_code': a.employee.display_code if a.employee else '',
                     'employee_name': a.employee.full_name if a.employee else '',
                     'site_name': a.site.name if a.site else '',
                     'post_name': a.post.post_name if a.post else '',
@@ -736,7 +737,8 @@ class SecurityReportingService:
             results = [
                 {
                     'id': str(e.id),
-                    'employee_code': e.employee_code,
+                    'employee_code': e.display_code,
+                    'system_id': e.system_id,
                     'full_name': e.full_name,
                     'designation': e.designation.name if e.designation else '',
                     'phone': e.phone,
@@ -795,7 +797,7 @@ class SecurityReportingService:
                 {
                     'id': str(ed.id),
                     'date': str(ed.date),
-                    'employee_code': ed.employee.employee_code if ed.employee else '',
+                    'employee_code': ed.employee.display_code if ed.employee else '',
                     'employee_name': ed.employee.full_name if ed.employee else '',
                     'site_name': ed.site.name if ed.site else '',
                     'hours': float(ed.hours),
@@ -827,7 +829,7 @@ class SecurityReportingService:
                 results = [
                     {
                         'id': str(calc.id),
-                        'employee_code': calc.employee.employee_code if calc.employee else '',
+                        'employee_code': calc.employee.display_code if calc.employee else '',
                         'employee_name': calc.employee.full_name if calc.employee else '',
                         'period': f"{calc.period_start} to {calc.period_end}",
                         'eobi_employee': float(calc.eobi_employee_amount),
@@ -842,7 +844,7 @@ class SecurityReportingService:
                 results = [
                     {
                         'id': str(calc.id),
-                        'employee_code': calc.employee.employee_code if calc.employee else '',
+                        'employee_code': calc.employee.display_code if calc.employee else '',
                         'employee_name': calc.employee.full_name if calc.employee else '',
                         'period': f"{calc.period_start} to {calc.period_end}",
                         'duty_days': calc.duty_days_count,
@@ -874,7 +876,7 @@ class SecurityReportingService:
             results = [
                 {
                     'id': str(iss.id),
-                    'employee_code': iss.employee.employee_code if iss.employee else '',
+                    'employee_code': iss.employee.display_code if iss.employee else '',
                     'employee_name': iss.employee.full_name if iss.employee else '',
                     'item_name': iss.item.name if iss.item else '',
                     'serial_number': iss.item_serial.serial_number if iss.item_serial else '',
@@ -911,7 +913,8 @@ class SecurityReportingService:
                 for ev in events:
                     results.append({
                         'employee_id': str(e.id),
-                        'employee_code': e.employee_code,
+                        'employee_code': e.display_code,
+                        'system_id': e.system_id,
                         'employee_name': e.full_name,
                         'designation': e.designation.name if e.designation else '',
                         'event': ev['event'],
@@ -1570,7 +1573,7 @@ class SecurityReportingService:
         expiring_docs_list = [
             {
                 'employee_id': str(d.employee.id),
-                'employee_code': d.employee.employee_code,
+                'employee_code': d.employee.display_code,
                 'employee_name': d.employee.full_name,
                 'document_type': d.document_type,
                 'expiry_date': str(d.expiry_date),
@@ -1662,7 +1665,7 @@ class SecurityReportingService:
         unreturned_equipment_list = [
             {
                 'id': str(iss.id),
-                'employee_code': iss.employee.employee_code if iss.employee else '',
+                'employee_code': iss.employee.display_code if iss.employee else '',
                 'employee_name': iss.employee.full_name if iss.employee else '',
                 'employee_status': iss.employee.employment_status if iss.employee else '',
                 'item_name': iss.item.name if iss.item else '',
@@ -1884,7 +1887,8 @@ class SecurityReportingService:
             return {
                 'entity_type': 'employee',
                 'id': str(emp.id),
-                'employee_code': emp.employee_code,
+                'employee_code': emp.display_code,
+                'system_id': emp.system_id,
                 'full_name': emp.full_name,
                 'classification': emp.classification,
                 'designation': emp.designation.name if emp.designation else '',

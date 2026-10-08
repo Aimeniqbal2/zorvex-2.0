@@ -165,6 +165,7 @@ class MonthlyMusterService:
             # Find posts & requirements for this site
             posts = SecurityPost.objects.filter(site=site, is_active=True, is_deleted=False).select_related('required_designation')
             
+            site_requirements = []
             supervisors_req = 0
             supervisors_sal = Decimal('0.00')
             guards_req = 0
@@ -172,15 +173,70 @@ class MonthlyMusterService:
             overtime_rate = MonthlyMusterService.get_site_overtime_rate(site)
 
             for p in posts:
-                desig_name = p.required_designation.name.lower() if p.required_designation else ''
-                if 'supervisor' in desig_name:
+                desig_obj = p.required_designation
+                desig_title = desig_obj.name if desig_obj else (p.post_name or 'Security Guard')
+                desig_code = 'GD'
+                dl = desig_title.lower()
+                if 'supervisor' in dl:
+                    desig_code = 'SUP'
                     supervisors_req += p.required_headcount
                     if p.monthly_pay_rate and p.monthly_pay_rate > supervisors_sal:
                         supervisors_sal = p.monthly_pay_rate
+                elif 'lady' in dl:
+                    desig_code = 'LADY'
+                    guards_req += p.required_headcount
+                elif 'cctv' in dl:
+                    desig_code = 'CCTV'
+                    guards_req += p.required_headcount
+                elif 'cpo' in dl:
+                    desig_code = 'CPO'
+                    guards_req += p.required_headcount
                 else:
                     guards_req += p.required_headcount
                     if p.monthly_pay_rate and p.monthly_pay_rate > guards_sal:
                         guards_sal = p.monthly_pay_rate
+
+                p_ot = MonthlyMusterService.get_site_overtime_rate(site, desig=desig_obj)
+                site_requirements.append({
+                    'post_id': str(p.id),
+                    'post_name': p.post_name,
+                    'designation_id': str(desig_obj.id) if desig_obj else None,
+                    'designation_code': desig_code,
+                    'designation_name': desig_title,
+                    'required_headcount': p.required_headcount,
+                    'monthly_pay_rate': float(p.monthly_pay_rate or Decimal('35000.00')),
+                    'overtime_rate': float(p_ot if p_ot > Decimal('0.00') else overtime_rate)
+                })
+
+            # If no posts are defined yet for this site, provide default selectable requirements:
+            if not site_requirements:
+                sup_desig = Designation.objects.filter(company=company, name__icontains='supervisor', is_deleted=False).first()
+                gd_desig = Designation.objects.filter(company=company, name__icontains='guard', is_deleted=False).first()
+                if not gd_desig:
+                    gd_desig = Designation.objects.filter(company=company, is_deleted=False).first()
+
+                site_requirements = [
+                    {
+                        'post_id': None,
+                        'post_name': 'General Security Guard',
+                        'designation_id': str(gd_desig.id) if gd_desig else None,
+                        'designation_code': 'GD',
+                        'designation_name': gd_desig.name if gd_desig else 'Security Guard',
+                        'required_headcount': guards_req or 0,
+                        'monthly_pay_rate': float(guards_sal or Decimal('35000.00')),
+                        'overtime_rate': float(overtime_rate)
+                    },
+                    {
+                        'post_id': None,
+                        'post_name': 'Site Supervisor',
+                        'designation_id': str(sup_desig.id) if sup_desig else None,
+                        'designation_code': 'SUP',
+                        'designation_name': sup_desig.name if sup_desig else 'Security Supervisor',
+                        'required_headcount': supervisors_req or 0,
+                        'monthly_pay_rate': float(supervisors_sal or Decimal('45000.00')),
+                        'overtime_rate': float(overtime_rate)
+                    }
+                ]
 
             # Find all employees who belong to this site for this month
             # 1. From Deployments
@@ -191,7 +247,7 @@ class MonthlyMusterService:
                 start_date__lte=end_date
             ).filter(
                 Q(end_date__isnull=True) | Q(end_date__gte=start_date)
-            ).select_related('employee', 'employee__designation')
+            ).select_related('employee', 'employee__designation', 'designation', 'post', 'post__required_designation')
 
             employee_dict = {}
             for dep in site_deployments:
@@ -224,21 +280,35 @@ class MonthlyMusterService:
             daily_totals = {d: 0 for d in range(1, days_in_month + 1)}
             daily_vacations = {d: 0 for d in range(1, days_in_month + 1)}
 
-            # Sort employees: Supervisors first, then by code
-            sorted_emps = sorted(
-                employee_dict.values(),
-                key=lambda x: (
-                    0 if 'supervisor' in (x['employee'].designation.name.lower() if x['employee'].designation else '') else 1,
-                    x['employee'].employee_code or ''
-                )
-            )
+            # Sort employees: Supervisors first (based on site deployment role), then by code
+            def get_sort_key(x):
+                dep = x.get('deployment')
+                role_str = ''
+                if dep and dep.designation:
+                    role_str = dep.designation.name.lower()
+                elif dep and dep.post and dep.post.required_designation:
+                    role_str = dep.post.required_designation.name.lower()
+                elif x['employee'].designation:
+                    role_str = x['employee'].designation.name.lower()
+                is_sup = 0 if 'supervisor' in role_str else 1
+                return (is_sup, x['employee'].display_code or '')
+
+            sorted_emps = sorted(employee_dict.values(), key=get_sort_key)
 
             for item in sorted_emps:
                 emp = item['employee']
                 emp_id_str = str(emp.id)
-                desig_title = emp.designation.name if emp.designation else 'Guard'
+                dep = item.get('deployment')
                 
-                # Abbreviate designation for compact table header
+                # PREFER DEPLOYMENT DESIGNATION/ROLE AT THIS SPECIFIC SITE
+                if dep and dep.designation:
+                    desig_title = dep.designation.name
+                elif dep and dep.post and dep.post.required_designation:
+                    desig_title = dep.post.required_designation.name
+                else:
+                    desig_title = emp.designation.name if emp.designation else 'Guard'
+                
+                # Abbreviate designation for compact table badge
                 desig_code = 'GD'
                 desig_lower = desig_title.lower()
                 if 'supervisor' in desig_lower:
@@ -287,7 +357,7 @@ class MonthlyMusterService:
                         elif status in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
                             code = 'A'
                             count_a += 1
-                        elif status in ['LEAVE', 'PAID_LEAVE', 'SICK_LEAVE', 'L', 'PL']:
+                        elif status in ['LEAVE', 'PAID_LEAVE', 'SICK_LEAVE', 'L', 'PL', AttendanceStatus.ON_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.UNPAID_LEAVE]:
                             code = 'L'
                             count_l += 1
                             daily_vacations[d] += 1
@@ -310,10 +380,13 @@ class MonthlyMusterService:
 
                 guards_data.append({
                     'employee_id': emp_id_str,
-                    'employee_code': emp.employee_code or '',
+                    'employee_code': emp.display_code,
+                    'system_id': emp.system_id,
                     'name': f"{emp.first_name} {emp.last_name}".strip(),
                     'designation': desig_code,
                     'designation_full': desig_title,
+                    'post_id': str(dep.post_id) if dep and dep.post_id else None,
+                    'designation_id': str(dep.designation_id) if dep and dep.designation_id else None,
                     'is_primary': item['is_primary'],
                     'days': days_map,
                     'total_present': count_p,
@@ -334,6 +407,7 @@ class MonthlyMusterService:
                 'guards_req': guards_req,
                 'guards_sal': float(guards_sal),
                 'overtime_rate': float(overtime_rate),
+                'requirements': site_requirements,
                 'guards': guards_data,
                 'daily_totals': {str(k): v for k, v in daily_totals.items()},
                 'daily_vacations': {str(k): v for k, v in daily_vacations.items()},
@@ -352,7 +426,7 @@ class MonthlyMusterService:
         """
         Atomically saves cell updates into WorkforceAttendance and DailyDutyPay.
         Enforces strict cross-location validation (No duplicate Present on same day).
-        Handles newly added guards (persisting deployments) and removed guards (wiping monthly duties & deployments).
+        Handles newly added guards (persisting deployments with specific post/designation roles) and removed guards.
         """
         days_in_month = calendar.monthrange(year, month)[1]
         updates = updates or []
@@ -369,7 +443,7 @@ class MonthlyMusterService:
                 key = (emp_id, day)
                 if key in emp_day_payload and emp_day_payload[key] != up.get('site_id'):
                     emp = Employee.objects.filter(id=emp_id).first()
-                    emp_name = f"{emp.first_name} ({emp.employee_code})" if emp else emp_id
+                    emp_name = f"{emp.first_name} ({emp.display_code})" if emp else emp_id
                     raise ValidationError(
                         f"Guard {emp_name} cannot be marked Present (P) at two different locations on Day {day}. Mark Overtime (O) for the second location."
                     )
@@ -407,19 +481,37 @@ class MonthlyMusterService:
                         is_deleted=False
                     ).update(is_deleted=True)
 
-            # 2. Process Added Guards: ensure active Deployment exists for this site so guard remains on muster
+            # 2. Process Added Guards: ensure active Deployment exists for this site with chosen post and role
             for add_item in added_guards:
                 add_site_id = add_item.get('site_id')
                 add_emp_id = add_item.get('employee_id')
+                add_post_id = add_item.get('post_id')
+                add_desig_id = add_item.get('designation_id')
+                add_pay_rate = add_item.get('monthly_pay_rate')
+
                 if add_site_id and add_emp_id:
                     site_obj = OperationalSite.objects.filter(id=add_site_id, company=company).first()
                     emp_obj = Employee.objects.filter(id=add_emp_id, company=company).first()
                     if site_obj and emp_obj:
-                        post_obj = SecurityPost.objects.filter(site=site_obj, is_active=True, is_deleted=False).first()
+                        post_obj = None
+                        if add_post_id:
+                            post_obj = SecurityPost.objects.filter(id=add_post_id, site=site_obj, is_deleted=False).first()
+                        if not post_obj:
+                            post_obj = SecurityPost.objects.filter(site=site_obj, is_active=True, is_deleted=False).first()
+
                         contract_obj = post_obj.service_contract if post_obj else None
-                        desig_obj = emp_obj.designation or (post_obj.required_designation if post_obj else None)
+                        
+                        desig_obj = None
+                        if add_desig_id:
+                            desig_obj = Designation.objects.filter(id=add_desig_id, company=company, is_deleted=False).first()
+                        if not desig_obj and post_obj and post_obj.required_designation:
+                            desig_obj = post_obj.required_designation
                         if not desig_obj:
-                            desig_obj = Designation.objects.filter(company=company, is_deleted=False).first()
+                            desig_obj = emp_obj.designation or Designation.objects.filter(company=company, is_deleted=False).first()
+
+                        monthly_sal = Decimal(str(add_pay_rate)) if add_pay_rate else (
+                            post_obj.monthly_pay_rate if (post_obj and post_obj.monthly_pay_rate) else None
+                        )
 
                         dep, created = Deployment.objects.get_or_create(
                             company=company,
@@ -432,12 +524,23 @@ class MonthlyMusterService:
                                 'post': post_obj,
                                 'service_contract': contract_obj,
                                 'designation': desig_obj,
+                                'location_monthly_salary': monthly_sal,
                                 'assigned_by': user if (user and user.is_authenticated) else None
                             }
                         )
-                        if not created and dep.status != DeploymentStatus.ACTIVE:
+                        if not created:
                             dep.status = DeploymentStatus.ACTIVE
-                            dep.save(update_fields=['status'])
+                            update_cols = ['status']
+                            if post_obj:
+                                dep.post = post_obj
+                                update_cols.append('post')
+                            if desig_obj:
+                                dep.designation = desig_obj
+                                update_cols.append('designation')
+                            if monthly_sal:
+                                dep.location_monthly_salary = monthly_sal
+                                update_cols.append('location_monthly_salary')
+                            dep.save(update_fields=update_cols)
 
             # 3. Process Cell Updates
             for up in updates:
@@ -452,11 +555,23 @@ class MonthlyMusterService:
                 if not site or not emp:
                     continue
 
-                # Rate resolution for this site
-                post = SecurityPost.objects.filter(site=site, is_active=True, is_deleted=False).first()
-                site_monthly_sal = post.monthly_pay_rate if (post and post.monthly_pay_rate) else Decimal('35000.00')
+                # Rate resolution for this guard at this specific site
+                guard_dep = Deployment.objects.filter(
+                    company=company, site=site, employee=emp, is_deleted=False
+                ).select_related('post', 'designation').first()
+
+                effective_post = guard_dep.post if guard_dep and guard_dep.post else None
+                effective_desig = guard_dep.designation if guard_dep and guard_dep.designation else emp.designation
+
+                if guard_dep and guard_dep.location_monthly_salary:
+                    site_monthly_sal = guard_dep.location_monthly_salary
+                elif effective_post and effective_post.monthly_pay_rate:
+                    site_monthly_sal = effective_post.monthly_pay_rate
+                else:
+                    site_monthly_sal = Decimal('35000.00')
+
                 daily_rate = (site_monthly_sal / Decimal(str(days_in_month))).quantize(Decimal('0.01'))
-                ot_rate = MonthlyMusterService.get_site_overtime_rate(site, desig=emp.designation)
+                ot_rate = MonthlyMusterService.get_site_overtime_rate(site, desig=effective_desig)
 
                 # Canonicalize duty code
                 code = raw_code
@@ -485,7 +600,7 @@ class MonthlyMusterService:
 
                     if existing_att and existing_att.site:
                         raise ValidationError(
-                            f"Guard {emp.first_name} ({emp.employee_code}) is already marked Present at '{existing_att.site.name}' on Day {day}. You can only mark Overtime (O) at '{site.name}'."
+                            f"Guard {emp.first_name} ({emp.display_code}) is already marked Present at '{existing_att.site.name}' on Day {day}. You can only mark Overtime (O) at '{site.name}'."
                         )
 
                     # 1. Update/Create primary WorkforceAttendance
@@ -507,8 +622,8 @@ class MonthlyMusterService:
                         company=company,
                         employee=emp,
                         duty_date=target_date,
-                        site=site,
                         defaults={
+                            'site': site,
                             'attendance_status': AttendanceStatus.PRESENT,
                             'client': site.crm_entity,
                             'daily_payable_rate': daily_rate,
@@ -525,10 +640,10 @@ class MonthlyMusterService:
                         company=company,
                         employee=emp,
                         duty_date=target_date,
-                        site=site,
                         defaults={
-                            'attendance_status': 'OVERTIME',
-                            'rate_source': DailyPayRateSource.POST_SPECIFIC_DAILY_PAY,
+                            'site': site,
+                            'attendance_status': AttendanceStatus.PRESENT,
+                            'rate_source': DailyPayRateSource.POST_RATE,
                             'client': site.crm_entity,
                             'daily_payable_rate': ot_rate,
                             'payable_percentage': Decimal('100.00'),
@@ -556,9 +671,10 @@ class MonthlyMusterService:
                         company=company,
                         employee=emp,
                         duty_date=target_date,
-                        site=site,
                         defaults={
-                            'attendance_status': 'DOUBLE_SHIFT',
+                            'site': site,
+                            'attendance_status': AttendanceStatus.PRESENT,
+                            'rate_source': DailyPayRateSource.POST_RATE,
                             'client': site.crm_entity,
                             'daily_payable_rate': double_rate,
                             'payable_percentage': Decimal('100.00'),
@@ -583,7 +699,7 @@ class MonthlyMusterService:
                     )
                     # Off day has 0.00 variable duty pay since base salary covers it
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date, site=site
+                        company=company, employee=emp, duty_date=target_date
                     ).delete()
 
                 elif code == 'A':
@@ -600,7 +716,7 @@ class MonthlyMusterService:
                         }
                     )
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date, site=site
+                        company=company, employee=emp, duty_date=target_date
                     ).delete()
 
                 elif code == 'L':
@@ -610,20 +726,23 @@ class MonthlyMusterService:
                         employee=emp,
                         date=target_date,
                         defaults={
-                            'status': AttendanceStatus.LEAVE,
+                            'status': AttendanceStatus.PAID_LEAVE,
                             'site': site,
                             'recorded_by': user,
                             'notes': 'Muster: Leave'
                         }
                     )
+                    DailyDutyPay.objects.filter(
+                        company=company, employee=emp, duty_date=target_date
+                    ).delete()
 
                 elif code == '':
                     # Cleared cell: remove duty pay and attendance for this site on this date
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date, site=site
+                        company=company, employee=emp, duty_date=target_date
                     ).delete()
                     WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date, site=site
+                        company=company, employee=emp, date=target_date
                     ).delete()
 
         return {'status': 'success', 'saved_updates': len(updates), 'added_guards': len(added_guards), 'removed_guards': len(removed_guards)}
@@ -643,10 +762,16 @@ class MonthlyMusterService:
         current_day = today.day if is_current_month else (32 if today > date(year, month, days_in_month) else 0)
 
         all_sites = list(OperationalSite.objects.filter(company=company, is_deleted=False))
-        all_emps = {
-            (e.employee_code or '').strip(): e
-            for e in Employee.objects.filter(company=company, is_deleted=False)
-        }
+        all_emps = {}
+        for e in Employee.objects.filter(company=company, is_deleted=False):
+            if e.previous_employee_code:
+                c_str = str(e.previous_employee_code).strip()
+                all_emps[c_str] = e
+                if c_str.isdigit():
+                    all_emps[c_str.zfill(6)] = e
+                    all_emps[c_str.lstrip('0')] = e
+            if e.employee_code:
+                all_emps[str(e.employee_code).strip()] = e
 
         updates_to_save = []
         current_site = None
@@ -830,13 +955,16 @@ class MonthlyMusterService:
 
         for att in attendances:
             d_str = str(att.date)
-            if att.status in [AttendanceStatus.WEEKLY_OFF, AttendanceStatus.ABSENT, AttendanceStatus.LEAVE]:
+            if att.status in [AttendanceStatus.WEEKLY_OFF, AttendanceStatus.ABSENT, AttendanceStatus.PAID_LEAVE, AttendanceStatus.ON_LEAVE, AttendanceStatus.UNPAID_LEAVE]:
                 if d_str not in date_records:
                     date_records[d_str] = []
+                    cust_name = ''
+                    if att.site and getattr(att.site, 'crm_entity', None):
+                        cust_name = att.site.crm_entity.name
                     date_records[d_str].append({
                         'date': d_str,
                         'site_name': att.site.name if att.site else 'Central',
-                        'customer_name': '',
+                        'customer_name': cust_name,
                         'duty_type': att.status,
                         'amount': 0.00,
                         'notes': att.notes or ''
@@ -848,7 +976,8 @@ class MonthlyMusterService:
 
         return {
             'employee_id': str(emp.id),
-            'employee_code': emp.employee_code,
+            'employee_code': emp.display_code,
+            'system_id': emp.system_id,
             'name': f"{emp.first_name} {emp.last_name}".strip(),
             'designation': emp.designation.name if emp.designation else 'Guard',
             'period_start': str(start_date),

@@ -278,7 +278,8 @@ class AttendanceRegisterService:
 
             rows.append({
                 'employee_id': str(emp.id),
-                'employee_code': emp.employee_code,
+                'employee_code': emp.display_code,
+                'system_id': emp.system_id,
                 'previous_employee_code': emp.previous_employee_code,
                 'full_name': emp.get_full_name(),
                 'father_name': emp.father_name,

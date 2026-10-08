@@ -134,7 +134,7 @@ class SecurityPostSerializer(BaseModelValidatorMixin, serializers.ModelSerialize
 
 class DeploymentSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True, default='')
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True, default='')
     employee_classification = serializers.CharField(source='employee.classification', read_only=True, default='DIRECT')
     site_name = serializers.CharField(source='site.name', read_only=True)
     post_name = serializers.CharField(source='post.post_name', read_only=True, default=None)
@@ -173,7 +173,7 @@ class DeploymentSerializer(BaseModelValidatorMixin, serializers.ModelSerializer)
 class DeploymentListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for list views — avoids N+1."""
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True, default='')
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True, default='')
     employee_classification = serializers.CharField(source='employee.classification', read_only=True, default='DIRECT')
     site_name = serializers.CharField(source='site.name', read_only=True)
     post_name = serializers.CharField(source='post.post_name', read_only=True, default=None)
@@ -248,7 +248,7 @@ class PostShiftRequirementSerializer(BaseModelValidatorMixin, serializers.ModelS
 
 class DutyRosterSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True, default='')
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True, default='')
     designation_name = serializers.CharField(source='employee.designation.name', read_only=True, default='')
     site_name = serializers.CharField(source='site.name', read_only=True)
     post_name = serializers.CharField(source='post.post_name', read_only=True, default='')
@@ -353,7 +353,7 @@ class ExtraDutySerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
 
 class SecurityAttendanceSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     site_name = serializers.SerializerMethodField()
     post_name = serializers.CharField(source='post.post_name', read_only=True, default=None)
     shift_name = serializers.CharField(source='shift.name', read_only=True, default=None)
@@ -422,7 +422,7 @@ class RestoreJumpActionSerializer(serializers.Serializer):
 
 class EquipmentIssueSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True, default=None)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True, default=None)
     item_name = serializers.CharField(source='item.name', read_only=True)
     item_code = serializers.CharField(source='item.code', read_only=True, default=None)
     serial_number = serializers.CharField(source='item_serial.serial_number', read_only=True, default=None)
@@ -725,7 +725,7 @@ class CorrectiveActionSerializer(BaseModelValidatorMixin, serializers.ModelSeria
 
 class DailyDutyPaySerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     classification = serializers.CharField(source='employee.classification', read_only=True)
     designation_name = serializers.CharField(source='employee.designation.name', read_only=True, default='')
     client_name = serializers.CharField(source='client.name', read_only=True, default='')
@@ -779,7 +779,7 @@ from .models import (
 
 class PayrollAdditionSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     addition_type_label = serializers.CharField(source='get_addition_type_display', read_only=True)
     frequency_label = serializers.CharField(source='get_frequency_display', read_only=True)
 
@@ -794,7 +794,7 @@ class PayrollAdditionSerializer(BaseModelValidatorMixin, serializers.ModelSerial
 
 class PayrollDeductionSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     deduction_type_label = serializers.CharField(source='get_deduction_type_display', read_only=True)
     frequency_label = serializers.CharField(source='get_frequency_display', read_only=True)
     advance_number = serializers.CharField(source='advance.advance_number', read_only=True, default='')
@@ -817,7 +817,7 @@ class PayrollCalculationLineSerializer(BaseModelValidatorMixin, serializers.Mode
 
 class EmployeePayrollCalculationSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     classification = serializers.CharField(source='employee.classification', read_only=True)
     designation_name = serializers.CharField(source='employee.designation.name', read_only=True, default='')
     status_label = serializers.CharField(source='get_status_display', read_only=True)
@@ -872,7 +872,7 @@ class OperationalPayslipLineSerializer(serializers.ModelSerializer):
 
 class OperationalPayslipSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
-    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_code = serializers.CharField(source='employee.display_code', read_only=True)
     designation_name = serializers.CharField(source='employee.designation.name', read_only=True, default='')
     department_name = serializers.CharField(source='employee.department.name', read_only=True, default='')
     cnic = serializers.CharField(source='employee.cnic', read_only=True, default='')

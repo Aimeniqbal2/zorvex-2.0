@@ -222,7 +222,7 @@ class DutyRosterViewSet(BaseSecurityOpsViewSet):
     ).all()
     serializer_class = DutyRosterSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_code', 'site__name', 'post__post_name', 'shift__name']
+    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code', 'site__name', 'post__post_name', 'shift__name']
     ordering_fields = ['duty_date', 'created_at']
     site_filter_field = 'site_id'
 
@@ -628,7 +628,7 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
     ).all()
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
-        'employee__first_name', 'employee__last_name', 'employee__employee_code',
+        'employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code',
         'site__name', 'post__post_name', 'designation__name', 'service_contract__contract_code'
     ]
     ordering_fields = ['start_date', 'created_at', 'status']
@@ -738,19 +738,25 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
 
         if search:
             from django.db.models import Q
-            qs = qs.filter(
-                Q(first_name__icontains=search) |
-                Q(last_name__icontains=search) |
-                Q(employee_code__icontains=search) |
-                Q(previous_employee_code__icontains=search) |
-                Q(cnic_number__icontains=search)
+            s_val = str(search).strip()
+            s_no_zero = s_val.lstrip('0')
+            q_search = (
+                Q(first_name__icontains=s_val) |
+                Q(last_name__icontains=s_val) |
+                Q(previous_employee_code__icontains=s_val) |
+                Q(employee_code__icontains=s_val) |
+                Q(cnic_number__icontains=s_val)
             )
+            if s_no_zero:
+                q_search |= Q(previous_employee_code__icontains=s_no_zero)
+            qs = qs.filter(q_search)
 
         data = [
             {
                 'id': str(emp.id),
                 'full_name': f"{emp.first_name} {emp.last_name}".strip(),
-                'employee_code': emp.previous_employee_code or emp.employee_code,
+                'employee_code': emp.display_code,
+                'system_id': emp.system_id,
                 'city': emp.city or 'KHI',
                 'cnic_number': emp.cnic_number,
                 'designation_id': str(emp.designation_id) if emp.designation_id else None,
@@ -800,13 +806,18 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
 
         if search:
             from django.db.models import Q
-            qs = qs.filter(
-                Q(employee__first_name__icontains=search) |
-                Q(employee__last_name__icontains=search) |
-                Q(employee__employee_code__icontains=search) |
-                Q(employee__previous_employee_code__icontains=search) |
-                Q(site__name__icontains=search)
+            s_val = str(search).strip()
+            s_no_zero = s_val.lstrip('0')
+            q_search = (
+                Q(employee__first_name__icontains=s_val) |
+                Q(employee__last_name__icontains=s_val) |
+                Q(employee__previous_employee_code__icontains=s_val) |
+                Q(employee__employee_code__icontains=s_val) |
+                Q(site__name__icontains=s_val)
             )
+            if s_no_zero:
+                q_search |= Q(employee__previous_employee_code__icontains=s_no_zero)
+            qs = qs.filter(q_search)
 
         data = []
         for dep in qs[:200]:
@@ -816,7 +827,8 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
                 'deployment_id': str(dep.id),
                 'id': str(emp.id),
                 'full_name': f"{emp.first_name} {emp.last_name}".strip(),
-                'employee_code': emp.previous_employee_code or emp.employee_code,
+                'employee_code': emp.display_code,
+                'system_id': emp.system_id,
                 'current_site_id': str(dep.site_id) if dep.site_id else None,
                 'current_site_name': dep.site.name if dep.site else 'Unknown Site',
                 'current_post_id': str(dep.post_id) if dep.post_id else None,
@@ -1131,7 +1143,7 @@ class SecurityAttendanceViewSet(BaseSecurityOpsViewSet):
     ).all()
     serializer_class = SecurityAttendanceSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_code', 'notes']
+    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code', 'notes']
     ordering_fields = ['date', 'created_at']
 
     def get_queryset(self):
@@ -1204,7 +1216,8 @@ class SecurityAttendanceViewSet(BaseSecurityOpsViewSet):
                     'employee': emp.id,
                     'employee_id': str(emp.id),
                     'employee_name': f"{emp.first_name} {emp.last_name or ''}".strip(),
-                    'employee_code': emp.employee_code or '',
+                    'employee_code': emp.display_code,
+                    'system_id': emp.system_id,
                     'designation_name': emp.designation.name if emp.designation else 'Guard',
                     'site': str(site_id),
                     'site_name': dp.site.name if dp.site else '',
@@ -2631,7 +2644,7 @@ class DailyDutyPayViewSet(BaseSecurityOpsViewSet):
     serializer_class = DailyDutyPaySerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
-        'employee__first_name', 'employee__last_name', 'employee__employee_code',
+        'employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code',
         'site__name', 'post__post_name', 'contract__contract_code'
     ]
     ordering_fields = ['duty_date', 'daily_payable_rate', 'payable_amount', 'created_at']
@@ -2819,21 +2832,21 @@ class PayrollAdditionViewSet(TenantModelViewSet):
     queryset = PayrollAddition.objects.select_related('employee').all()
     serializer_class = PayrollAdditionSerializer
     filterset_fields = ['employee', 'addition_type', 'frequency', 'is_active', 'is_approved']
-    search_fields = ['name', 'employee__first_name', 'employee__last_name', 'employee__employee_code']
+    search_fields = ['name', 'employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code']
 
 
 class PayrollDeductionViewSet(TenantModelViewSet):
     queryset = PayrollDeduction.objects.select_related('employee', 'advance').all()
     serializer_class = PayrollDeductionSerializer
     filterset_fields = ['employee', 'deduction_type', 'frequency', 'is_active', 'is_approved']
-    search_fields = ['name', 'employee__first_name', 'employee__last_name', 'employee__employee_code']
+    search_fields = ['name', 'employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code']
 
 
 class EmployeePayrollCalculationViewSet(BaseSecurityOpsViewSet):
     queryset = EmployeePayrollCalculation.objects.select_related('employee', 'employee__designation').prefetch_related('lines').all()
     serializer_class = EmployeePayrollCalculationSerializer
     filterset_fields = ['employee', 'status', 'has_blockers', 'period_start', 'period_end']
-    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_code']
+    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code']
 
     @action(detail=False, methods=['get'], url_path='preparation-workspace')
     def preparation_workspace(self, request):
@@ -3110,7 +3123,7 @@ class OperationalPayslipViewSet(TenantModelViewSet):
     ).prefetch_related('lines').all()
     serializer_class = OperationalPayslipSerializer
     filterset_fields = ['payroll_run', 'employee', 'status']
-    search_fields = ['payslip_number', 'employee__first_name', 'employee__last_name', 'employee__employee_code']
+    search_fields = ['payslip_number', 'employee__first_name', 'employee__last_name', 'employee__employee_code', 'employee__previous_employee_code']
 
     @action(detail=True, methods=['get'], url_path='detail-snapshot')
     def detail_snapshot(self, request, pk=None):

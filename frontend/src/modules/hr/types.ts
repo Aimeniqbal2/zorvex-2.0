@@ -98,6 +98,8 @@ export interface EmployeeReference {
 export interface Employee {
     id: string;
     employee_code: string;
+    system_id?: string;
+    display_code?: string;
     previous_employee_code?: string;
     city?: string;
     city_display?: string;

@@ -788,7 +788,8 @@ class PayrollRulesService:
             qs = qs.filter(
                 Q(employee__first_name__icontains=s) |
                 Q(employee__last_name__icontains=s) |
-                Q(employee__employee_code__icontains=s)
+                Q(employee__employee_code__icontains=s) |
+                Q(employee__previous_employee_code__icontains=s)
             )
 
         calculations = list(qs.order_by('employee__first_name'))
@@ -811,7 +812,8 @@ class PayrollRulesService:
                 'id': str(c.id),
                 'employee_id': str(emp.id),
                 'employee_name': f"{emp.first_name} {emp.last_name}".strip(),
-                'employee_code': emp.employee_code,
+                'employee_code': emp.display_code,
+                'system_id': emp.system_id,
                 'classification': getattr(emp, 'classification', 'DIRECT'),
                 'designation_name': emp.designation.name if emp.designation else '',
                 'duty_earnings': float(c.duty_earnings),

@@ -1082,7 +1082,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                         </label>
                                         <input 
                                             className="modal-input" 
-                                            value={formData.employee_code || (employee ? employee.employee_code : 'Auto-generated on save (EMP-XXXXXX)')} 
+                                            value={formData.system_id || employee?.system_id || (employee?.employee_code?.startsWith('EMP-') ? employee.employee_code : '') || 'Auto-generated on save (EMP-XXXXXX)'} 
                                             readOnly 
                                             disabled 
                                             style={{ background: 'var(--color-surface-secondary, rgba(0,0,0,0.03))', cursor: 'not-allowed', color: 'var(--color-text-muted)', fontFamily: 'monospace', fontWeight: 600 }} 

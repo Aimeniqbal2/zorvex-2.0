@@ -556,6 +556,7 @@ def get_daily_pay_review_workspace(company, duty_date=None, start_date=None, end
             Q(employee__first_name__icontains=s) |
             Q(employee__last_name__icontains=s) |
             Q(employee__employee_code__icontains=s) |
+            Q(employee__previous_employee_code__icontains=s) |
             Q(site__name__icontains=s) |
             Q(post__post_name__icontains=s) |
             Q(contract__contract_code__icontains=s)
@@ -604,7 +605,8 @@ def get_daily_pay_review_workspace(company, duty_date=None, start_date=None, end
             'id': str(r.id),
             'employee_id': str(emp.id),
             'employee_name': f"{emp.first_name} {emp.last_name}".strip(),
-            'employee_code': emp.employee_code,
+            'employee_code': emp.display_code,
+            'system_id': emp.system_id,
             'classification': getattr(emp, 'classification', 'DIRECT'),
             'designation_name': emp.designation.name if emp.designation else '',
             'duty_date': str(r.duty_date),
