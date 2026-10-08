@@ -10,6 +10,8 @@ export const SECURITY_NAVIGATION: ERPModule[] = [
     { code: 'vendors_purchasing', name: 'Purchasing & Vendors', icon: 'bx-buildings', route: '/purchasing', minRole: 'manager', category: 'Operations', engine: 'purchasing' },
     { code: 'store_equipment', name: 'Store & Equipment', icon: 'bx-box', route: '/inventory', minRole: 'manager', category: 'Operations', engine: 'inventory' },
     { code: 'operations', name: 'Operations', icon: 'bx-shield', route: '/security-ops', minRole: 'manager', category: 'Operations', engine: 'security_ops' },
+    { code: 'monthly_muster', name: 'Monthly Duty Muster', icon: 'bx-spreadsheet', route: '/monthly-muster', minRole: 'manager', category: 'Operations', engine: 'security_ops' },
+    { code: 'attendance_register', name: 'Attendance Register & Ledger', icon: 'bx-history', route: '/attendance-register', minRole: 'manager', category: 'Operations', engine: 'security_ops' },
     { code: 'reports', name: 'Reports', icon: 'bx-pie-chart-alt-2', route: '/reports', minRole: 'manager', category: 'Reporting', engine: 'reports' },
     { code: 'settings', name: 'Settings', icon: 'bx-cog', route: '/settings', minRole: 'admin', category: 'Administration', engine: 'core' },
 ];

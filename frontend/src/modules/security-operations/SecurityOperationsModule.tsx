@@ -22,6 +22,7 @@ import { SecurityReportsWorkspace } from './components/SecurityReportsWorkspace'
 import { MonthlyMusterSheetTab } from './components/MonthlyMusterSheetTab';
 import { AttendanceRegisterView } from './components/AttendanceRegisterView';
 import { EmployeeInfoView } from './components/EmployeeInfoView';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import './styles/securityOperations.css';
 
 type Tab = 'monthly_muster' | 'attendance_register' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'employee_info' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
@@ -29,11 +30,11 @@ type Tab = 'monthly_muster' | 'attendance_register' | 'overview' | 'advanced_ops
 const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'monthly_muster', label: 'Monthly Duty Muster', icon: 'bx-spreadsheet' },
     { id: 'attendance_register', label: 'Attendance Register & Ledger', icon: 'bx-history' },
+    { id: 'employee_info', label: 'Employee Info', icon: 'bx-id-card' },
     { id: 'overview', label: 'Control Center', icon: 'bx-radar' },
     { id: 'advanced_ops', label: 'Advanced Ops & Dispatch', icon: 'bx-broadcast' },
     { id: 'sites', label: 'Sites', icon: 'bx-building-house' },
     { id: 'deployments', label: 'Deployments', icon: 'bx-map-pin' },
-    { id: 'employee_info', label: 'Employee Info', icon: 'bx-id-card' },
     { id: 'duties', label: 'Duty Assignments', icon: 'bx-clipboard' },
     { id: 'roster', label: 'Roster', icon: 'bx-calendar' },
     { id: 'attendance', label: 'Attendance', icon: 'bx-time-five' },
@@ -52,18 +53,47 @@ const TABS: { id: Tab, label: string, icon: string }[] = [
 ];
 
 export const SecurityOperationsModule: React.FC = () => {
+    const { openTab } = useWorkspaceStore();
     const [activeTab, setActiveTab] = useState<Tab>('overview');
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
     const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(undefined);
 
+    const handleNavigate = (tabId: Tab) => {
+        if (tabId === 'monthly_muster') {
+            openTab({
+                code: 'monthly_muster',
+                name: 'Monthly Duty Muster',
+                icon: 'bx-spreadsheet',
+                route: '/monthly-muster',
+                category: 'Operations',
+                minRole: 'manager',
+                engine: 'security_ops'
+            });
+            return;
+        }
+        if (tabId === 'attendance_register') {
+            openTab({
+                code: 'attendance_register',
+                name: 'Attendance Register & Ledger',
+                icon: 'bx-history',
+                route: '/attendance-register',
+                category: 'Operations',
+                minRole: 'manager',
+                engine: 'security_ops'
+            });
+            return;
+        }
+        setActiveTab(tabId);
+    };
+
     const renderContent = () => {
         switch (activeTab) {
             case 'monthly_muster':
-                return <MonthlyMusterSheetTab />;
+                return <MonthlyMusterSheetTab onBack={() => setActiveTab('overview')} />;
             case 'attendance_register':
-                return <AttendanceRegisterView />;
+                return <AttendanceRegisterView onBack={() => setActiveTab('overview')} />;
             case 'overview':
-                return <SecurityOverview onNavigate={(tab: Tab) => setActiveTab(tab)} />;
+                return <SecurityOverview onNavigate={(tab: Tab) => handleNavigate(tab)} />;
             case 'advanced_ops':
                 return <AdvancedOperationsWorkspace onNavigateTab={(tab: any) => setActiveTab(tab)} />;
             case 'sites':
@@ -122,17 +152,9 @@ export const SecurityOperationsModule: React.FC = () => {
                 return <SecurityReportsWorkspace />;
             case 'overview':
             default:
-                return <OperationsControlCenter onNavigate={(tab: Tab) => setActiveTab(tab)} />;
+                return <OperationsControlCenter onNavigate={(tab: Tab) => handleNavigate(tab)} />;
         }
     };
-
-    // Full-screen canvas modes: completely remove sidebar, header and padding
-    if (activeTab === 'monthly_muster') {
-        return <MonthlyMusterSheetTab onBack={() => setActiveTab('overview')} />;
-    }
-    if (activeTab === 'attendance_register') {
-        return <AttendanceRegisterView onBack={() => setActiveTab('overview')} />;
-    }
 
     return (
         <div className="security-operations-module">
@@ -155,7 +177,7 @@ export const SecurityOperationsModule: React.FC = () => {
                             <button 
                                 key={tab.id}
                                 className={`sidebar-nav-btn ${activeTab === tab.id ? 'active' : ''}`}
-                                onClick={() => setActiveTab(tab.id)}
+                                onClick={() => handleNavigate(tab.id)}
                             >
                                 <i className={`bx ${tab.icon}`}></i>
                                 <span>{tab.label}</span>

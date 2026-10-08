@@ -353,7 +353,11 @@ export const FastCostingGridTab: React.FC = () => {
                 withholding_tax_override: (r.withholding_tax_override !== '' && r.withholding_tax_override !== null && r.withholding_tax_override !== undefined) ? Number(r.withholding_tax_override) : null,
                 sessi: (r.sessi !== '' && r.sessi !== null && r.sessi !== undefined) ? Number(r.sessi) : 0,
                 eobi: (r.eobi !== '' && r.eobi !== null && r.eobi !== undefined) ? Number(r.eobi) : 0,
-                ot_rate: (r.ot_rate !== '' && r.ot_rate !== null && r.ot_rate !== undefined) ? Number(r.ot_rate) : 0,
+                ot_rate: (r.ot_rate !== '' && r.ot_rate !== null && r.ot_rate !== undefined && Number(r.ot_rate) > 0) 
+                    ? Number(r.ot_rate) 
+                    : (computeRowTotals(r).totalStrength > 0 
+                        ? Math.round((computeRowTotals(r).monthlySalary / computeRowTotals(r).totalStrength) / 30) 
+                        : Math.round(Number(r.guard_civ_sal || 35000) / 30)),
             }));
             const res = await syncCostingGrid(preparedRows as any);
             useToastStore.getState().success(res.message || 'Costing grid synced to CRM successfully!');
@@ -1028,28 +1032,55 @@ export const FastCostingGridTab: React.FC = () => {
                                             {calc.expense.toLocaleString()}
                                         </td>
 
-                                        {/* Col OT: Overtime Hourly Billing Rate */}
+                                        {/* Col OT: Overtime Rate (Default: 1-Day Salary, Editable) */}
                                         <td style={{ padding: '6px 4px' }}>
-                                            <input 
-                                                type="number"
-                                                step="any"
-                                                value={row.ot_rate !== undefined && row.ot_rate !== null ? row.ot_rate : ''}
-                                                onChange={(e) => handleUpdateRow(row, 'ot_rate', e.target.value)}
-                                                placeholder="0"
-                                                title="Overtime Hourly Billing Rate in PKR"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 8px',
-                                                    fontSize: '12px',
-                                                    textAlign: 'right',
-                                                    borderRadius: '6px',
-                                                    border: '1px solid var(--color-border)',
-                                                    background: 'var(--color-surface)',
-                                                    color: '#10b981',
-                                                    fontWeight: 700
-                                                }}
-                                            />
+                                            {(() => {
+                                                const avgSal = calc.totalStrength > 0 ? (calc.monthlySalary / calc.totalStrength) : (row.guard_civ_sal || 35000);
+                                                const defaultOt = Math.round(avgSal / 30);
+                                                return (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                                        <input 
+                                                            type="number"
+                                                            step="any"
+                                                            value={row.ot_rate !== undefined && row.ot_rate !== null ? row.ot_rate : ''}
+                                                            onChange={(e) => handleUpdateRow(row, 'ot_rate', e.target.value)}
+                                                            placeholder={String(defaultOt)}
+                                                            title={`Overtime Rate in PKR (Editable). Default: PKR ${defaultOt}. Click ⚡ to reset.`}
+                                                            style={{
+                                                                width: '100%',
+                                                                minWidth: '55px',
+                                                                height: '34px',
+                                                                padding: '0 6px',
+                                                                fontSize: '12px',
+                                                                textAlign: 'right',
+                                                                borderRadius: '6px',
+                                                                border: '1px solid var(--color-border)',
+                                                                background: 'var(--color-surface)',
+                                                                color: '#10b981',
+                                                                fontWeight: 700
+                                                            }}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleUpdateRow(row, 'ot_rate', defaultOt)}
+                                                            title={`Reset to default 1-day overtime rate (PKR ${defaultOt})`}
+                                                            style={{
+                                                                padding: '4px 6px',
+                                                                fontSize: '11px',
+                                                                borderRadius: '4px',
+                                                                border: '1px solid rgba(16, 185, 129, 0.4)',
+                                                                background: 'rgba(16, 185, 129, 0.1)',
+                                                                color: '#059669',
+                                                                cursor: 'pointer',
+                                                                fontWeight: 700,
+                                                                flexShrink: 0
+                                                            }}
+                                                        >
+                                                            ⚡
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
                                         </td>
 
                                         {/* Col AG: Service Charges (Editable inline cell, flat monthly) */}

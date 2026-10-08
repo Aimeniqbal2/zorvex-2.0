@@ -23,11 +23,13 @@ import { SecurityPurchasingModule } from '../../industries/security/purchasing/S
 import { SecurityFinanceModule } from '../../industries/security/finance/SecurityFinanceModule';
 import { SecurityReportsWorkspace } from '../../modules/security-operations/components/SecurityReportsWorkspace';
 import { SecurityInventoryWorkspace } from '../../modules/security-operations/components/SecurityInventoryWorkspace';
+import { MonthlyMusterSheetTab } from '../../modules/security-operations/components/MonthlyMusterSheetTab';
+import { AttendanceRegisterView } from '../../modules/security-operations/components/AttendanceRegisterView';
 import { SettingsWorkspace } from '../desktop/SettingsWorkspace';
 
 
 export const WorkspaceManager: React.FC = () => {
-    const { tabs, activeTabId, openTab, activateTab } = useWorkspaceStore();
+    const { tabs, activeTabId, openTab, activateTab, closeTab } = useWorkspaceStore();
     const { user } = useAuthStore();
     const { enabledModules, fetchModuleState, industry, company } = useAppStore();
     const location = useLocation();
@@ -112,6 +114,16 @@ export const WorkspaceManager: React.FC = () => {
                             isSecurityIndustry ? <SecurityCRMModule /> : <CRMModule />
                         ) : tab.moduleCode === 'security_ops' || tab.moduleCode === 'operations' ? (
                             <SecurityOperationsModule />
+                        ) : tab.moduleCode === 'monthly_muster' ? (
+                            <MonthlyMusterSheetTab onBack={() => {
+                                closeTab(tab.id);
+                                activateTab('operations');
+                            }} />
+                        ) : tab.moduleCode === 'attendance_register' ? (
+                            <AttendanceRegisterView onBack={() => {
+                                closeTab(tab.id);
+                                activateTab('operations');
+                            }} />
                         ) : tab.moduleCode === 'platform' ? (
                             <PlatformModule />
                         ) : tab.moduleCode === 'hr' || tab.moduleCode === 'guards_staff' ? (

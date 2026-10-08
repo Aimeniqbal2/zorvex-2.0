@@ -173,14 +173,46 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             }
         }
 
-        // Anti-Cheating Cross-Location Check:
-        // If typing 'P', verify guard is NOT already marked 'P' at another site on this day!
-        if (val === 'P') {
+        // Anti-Cheating Cross-Location & Shift Capacity Validation:
+        if (['P', 'O', 'D', 'W', 'L', 'A'].includes(val)) {
             for (const otherSite of sitesData) {
                 if (otherSite.site_id === siteId) continue;
-                const guardAtOtherSite = otherSite.guards.find(g => g.employee_id === employeeId);
-                if (guardAtOtherSite && (guardAtOtherSite.days[String(day)] === 'P' || guardAtOtherSite.days[String(day)] === '1')) {
-                    addToast('error', `⚠️ Duplicate Prevented: Guard ${guardAtOtherSite.name} (${guardAtOtherSite.employee_code}) is already marked Present (P) at "${otherSite.site_name}" on Day ${day}. Only "O" (Overtime) can be marked here!`);
+                const otherGuard = otherSite.guards.find(g => g.employee_id === employeeId);
+                if (!otherGuard) continue;
+                const otherCode = (otherGuard.days[String(day)] || '').trim().toUpperCase();
+                if (!otherCode) continue;
+
+                // Rule 1: A guard cannot be marked Present (P) at two different locations on the same day
+                if (val === 'P' && (otherCode === 'P' || otherCode === '1')) {
+                    addToast('error', `⚠️ Duplicate Prevented: Guard ${otherGuard.name} (${otherGuard.employee_code}) is already marked Present (P) at "${otherSite.site_name}" on Day ${day}. Only "O" (Overtime) can be marked here!`);
+                    return;
+                }
+
+                // Rule 2: Double Shift (D) consumes full daily capacity (2 shifts / 24 hours)
+                if (val === 'D') {
+                    addToast('error', `⚠️ Capacity Conflict: Guard ${otherGuard.name} is already assigned at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Double Shift (D) consumes full 24h capacity and cannot co-exist with another site!`);
+                    return;
+                }
+                if (['D', 'WO+OT', 'DS', '2'].includes(otherCode)) {
+                    addToast('error', `⚠️ Capacity Reached: Guard ${otherGuard.name} already worked Double Shift (D) at "${otherSite.site_name}" on Day ${day}. No additional duty allowed on this date!`);
+                    return;
+                }
+
+                // Rule 3: Maximum 1 Overtime shift (O) per day across all sites
+                if (val === 'O' && (otherCode === 'O' || otherCode === 'OT')) {
+                    addToast('error', `⚠️ Overtime Limit: Guard ${otherGuard.name} is already marked Overtime (O) at "${otherSite.site_name}" on Day ${day}. Maximum 1 overtime shift allowed per day!`);
+                    return;
+                }
+
+                // Rule 4: If guard is on Leave (L) at another location, cannot perform active duty (P, O, D)
+                if (['P', 'O'].includes(val) && ['L', 'PL', 'SL'].includes(otherCode)) {
+                    addToast('error', `⚠️ Conflict: Guard ${otherGuard.name} is on Leave (L) at "${otherSite.site_name}" on Day ${day}. Cannot mark active duty while on leave.`);
+                    return;
+                }
+
+                // Rule 5: If guard is Weekly Off (W) at Site A, they cannot be marked normal Present (P) at Site B
+                if (val === 'P' && ['W', 'WO', 'OFF'].includes(otherCode)) {
+                    addToast('error', `⚠️ Conflict: Guard ${otherGuard.name} is on Weekly Off (W) at "${otherSite.site_name}" on Day ${day}. If they worked on off day, mark "D" (Double Shift) at their site instead!`);
                     return;
                 }
             }
