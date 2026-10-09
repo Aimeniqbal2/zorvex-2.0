@@ -55,12 +55,13 @@ class Command(BaseCommand):
         imported_lines = 0
         proposals_to_sync = set()
 
-        with transaction.atomic():
-            for rec in records:
-                cust_name = rec['customer_name'].strip()
-                loc_name = rec['location_name'].strip()
-                st_name = rec['service_type_name'].strip()
-                st_code = rec['service_type_code'].strip()
+        for rec in records:
+            try:
+                with transaction.atomic():
+                    cust_name = rec['customer_name'].strip()
+                    loc_name = rec['location_name'].strip()
+                    st_name = rec['service_type_name'].strip()
+                    st_code = rec['service_type_code'].strip()
 
                 # 1. Customer
                 customer = getattr(CRMEntity, 'all_objects', CRMEntity.objects).filter(
@@ -105,10 +106,18 @@ class Command(BaseCommand):
                 imported_locations.add(location.id)
 
                 # 3. Proposal
-                proposal = getattr(SecurityProposal, 'all_objects', SecurityProposal.objects).filter(
+                proposal = SecurityProposal.objects.filter(
                     company=company,
-                    customer=customer
+                    customer=customer,
+                    is_deleted=False
                 ).order_by('-created_at').first()
+
+                if not proposal:
+                    proposal = getattr(SecurityProposal, 'all_objects', SecurityProposal.objects).filter(
+                        company=company,
+                        customer=customer
+                    ).order_by('-created_at').first()
+
                 if not proposal:
                     proposal = SecurityProposal.objects.create(
                         company=company,
@@ -119,11 +128,23 @@ class Command(BaseCommand):
                         is_deleted=False
                     )
                 else:
-                    if proposal.is_deleted or proposal.status != SecurityProposalStatus.ACTIVE:
+                    if proposal.is_deleted:
+                        # Check if another active proposal already uses this proposal_number
+                        if SecurityProposal.objects.filter(
+                            company=company,
+                            proposal_number=proposal.proposal_number
+                        ).exclude(id=proposal.id).exists():
+                            proposal.proposal_number = None  # Allow save() to auto-generate a fresh unique number
+
                         proposal.is_deleted = False
                         proposal.status = SecurityProposalStatus.ACTIVE
                         proposal.is_handoff_ready = True
-                        proposal.save(update_fields=['is_deleted', 'status', 'is_handoff_ready'])
+                        proposal.save()
+                    else:
+                        if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:
+                            proposal.status = SecurityProposalStatus.ACTIVE
+                            proposal.is_handoff_ready = True
+                            proposal.save(update_fields=['status', 'is_handoff_ready'])
 
                 # 4. Version
                 version = ProposalVersion.objects.filter(
@@ -202,15 +223,17 @@ class Command(BaseCommand):
                     line.is_deleted = False
                     line.save()
 
-                imported_lines += 1
-                proposals_to_sync.add(proposal)
+                    imported_lines += 1
+                    proposals_to_sync.add(proposal)
+            except Exception as item_err:
+                self.stdout.write(self.style.WARNING(f"Warning on record {rec.get('customer_name')} ({rec.get('location_name')}): {item_err}"))
 
-            # Sync to operations
-            for prop in proposals_to_sync:
-                try:
-                    SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(prop)
-                except Exception as e:
-                    self.stdout.write(self.style.WARNING(f"Sync warning for {prop.proposal_number}: {e}"))
+        # Sync to operations
+        for prop in proposals_to_sync:
+            try:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(prop)
+            except Exception as e:
+                self.stdout.write(self.style.WARNING(f"Sync warning for {prop.proposal_number}: {e}"))
 
         self.stdout.write(self.style.SUCCESS("=================================================="))
         self.stdout.write(self.style.SUCCESS("MASTER COSTING RESTORATION COMPLETE!"))
