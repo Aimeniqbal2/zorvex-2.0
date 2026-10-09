@@ -52,6 +52,16 @@ class BaseModel(models.Model):
     objects = TenantManager()
     all_objects = models.Manager()
 
+    def delete(self, using=None, keep_parents=False):
+        """Soft-deletes the record instead of hard-deleting it from the database."""
+        self.is_deleted = True
+        self.save(update_fields=['is_deleted', 'updated_at'])
+        return (1, {self._meta.label: 1})
+
+    def hard_delete(self, using=None, keep_parents=False):
+        """Physical hard deletion, only used if explicitly needed for tests or purged data."""
+        return super().delete(using=using, keep_parents=keep_parents)
+
     class Meta:
         abstract = True
 
