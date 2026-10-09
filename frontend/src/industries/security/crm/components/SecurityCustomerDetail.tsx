@@ -248,8 +248,23 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
             setIsLocationModalOpen(false);
             setEditingLocation(null);
             loadData();
-        } catch (error) {
-            useToastStore.getState().error(editingLocation ? 'Failed to update location' : 'Failed to create location');
+        } catch (error: any) {
+            let errorMsg = editingLocation ? 'Failed to update location' : 'Failed to create location';
+            if (error?.response?.data) {
+                const data = error.response.data;
+                if (typeof data === 'string') {
+                    errorMsg = data;
+                } else if (data.detail) {
+                    errorMsg = data.detail;
+                } else if (typeof data === 'object') {
+                    const firstKey = Object.keys(data)[0];
+                    if (firstKey && data[firstKey]) {
+                        const val = Array.isArray(data[firstKey]) ? data[firstKey][0] : data[firstKey];
+                        errorMsg = `${firstKey}: ${val}`;
+                    }
+                }
+            }
+            useToastStore.getState().error(errorMsg);
         } finally {
             setIsSubmittingLocation(false);
         }

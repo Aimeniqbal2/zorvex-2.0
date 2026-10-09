@@ -69,7 +69,28 @@ class ClientLocationViewSet(TenantModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        loc = serializer.save()
+        customer = serializer.validated_data.get('customer')
+        customer_company_id = getattr(customer, 'company_id', None) if customer else None
+
+        from erp_core.middleware import get_current_company
+        company_id = (
+            get_current_company() 
+            or self.request.META.get('HTTP_X_COMPANY_ID') 
+            or getattr(self.request.user, 'company_id', None)
+            or customer_company_id
+        )
+        if not company_id and getattr(self.request.user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(self.request)
+            if comp:
+                company_id = comp.id
+        if not company_id and customer_company_id:
+            company_id = customer_company_id
+
+        if not company_id:
+            raise ValidationError({"detail": "Company context is required for this operation."})
+
+        loc = serializer.save(company_id=company_id)
         try:
             from operations.models import OperationalSite
             OperationalSite.objects.get_or_create(

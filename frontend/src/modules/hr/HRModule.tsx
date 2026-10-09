@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { useIndustry, useAppStore } from '../../stores/appStore';
 import { EmployeeList } from './components/EmployeeList';
@@ -18,15 +18,11 @@ import { StatutorySchemeList } from './components/StatutorySchemeList';
 import { PayrollDisbursementList } from './components/PayrollDisbursementList';
 import { OvertimeList } from './components/OvertimeList';
 import { CompanyPayrollPolicyForm } from './components/CompanyPayrollPolicyForm';
-import { DeploymentsView } from '../security-operations/components/DeploymentsView';
-import { RosterView } from '../security-operations/components/RosterView';
 import { AttendanceRegisterView } from './components/AttendanceRegisterView';
 import { PayslipReportView } from './components/PayslipReportView';
 
 type TabId = 
     | 'EMPLOYEES'
-    | 'DEPLOYMENTS'
-    | 'ROSTERS'
     | 'RECRUITMENT'
     | 'DESIGNATIONS'
     | 'DEPARTMENTS'
@@ -58,21 +54,10 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
     const [activeTab, setActiveTab] = useState<TabId>('EMPLOYEES');
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-    // Auto reset security-only tabs if switched to universal HR
-    useEffect(() => {
-        if (!isSecurity && (activeTab === 'DEPLOYMENTS' || activeTab === 'ROSTERS')) {
-            setActiveTab('EMPLOYEES');
-        }
-    }, [isSecurity, activeTab]);
-
     const renderContent = () => {
         switch (activeTab) {
             case 'EMPLOYEES':
                 return <EmployeeList key={`${company?.id || 'emp'}-${isSecurity ? 'sec' : 'univ'}`} isSecurity={isSecurity} />;
-            case 'DEPLOYMENTS':
-                return isSecurity ? <DeploymentsView /> : null;
-            case 'ROSTERS':
-                return isSecurity ? <RosterView /> : null;
             case 'RECRUITMENT':
                 return <RecruitmentList />;
             case 'DESIGNATIONS':
@@ -118,8 +103,6 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
     const tabs: Array<{ id: TabId; label: string; icon: string }> = isSecurity
         ? [
             { id: 'EMPLOYEES', label: 'Guards & Staff', icon: 'bx-group' },
-            { id: 'DEPLOYMENTS', label: 'Deployments', icon: 'bx-shield-quarter' },
-            { id: 'ROSTERS', label: 'Duty Rosters', icon: 'bx-calendar-check' },
             { id: 'ATTENDANCE_REGISTER', label: 'Attendance Register', icon: 'bx-calendar-event' },
             { id: 'PAYSLIP_REPORT', label: 'Pay Slips Report', icon: 'bx-receipt' },
             { id: 'RECRUITMENT', label: 'Recruitment', icon: 'bx-user-plus' },
@@ -172,7 +155,7 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
                         <h1>{isSecurity ? 'Guards & Staff — Security Workforce & HR' : 'Human Resources'}</h1>
                         <p>
                             {isSecurity 
-                                ? 'Manage security guards, office staff, deployments, rosters, and payroll.' 
+                                ? 'Manage workforce master records, attendance register, leave, and payroll policies.' 
                                 : 'Manage employee records, departments, designations, attendance, leave, and payroll.'}
                         </p>
                     </div>

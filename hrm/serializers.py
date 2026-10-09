@@ -160,7 +160,7 @@ class EmployeeSerializer(BaseTenantSerializer):
         data = data.copy() if hasattr(data, 'copy') else dict(data)
         
         # Single full name support: allows "name", "full_name", or "first_name" without requiring last_name
-        name_val = data.get('name') or data.get('full_name') or data.get('first_name')
+        name_val = data.get('first_name') or data.get('full_name') or data.get('name')
         if name_val is not None:
             data['first_name'] = str(name_val).strip()
             data['last_name'] = str(data.get('last_name') or '').strip()

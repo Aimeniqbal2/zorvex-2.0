@@ -154,8 +154,12 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 bgType = 'CIVILIAN';
             }
 
+            const empName = (employee.first_name || (employee as any).full_name || (employee as any).name || '').trim();
+
             setFormData({
                 ...employee,
+                first_name: empName,
+                full_name: empName,
                 city: employee?.city || 'KHI',
                 background_type: bgType,
                 designation: employee?.designation || '',
@@ -545,18 +549,21 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         setError(null);
         try {
             const payload: any = { ...formData };
-            const fullNameVal = (payload.full_name || payload.name || payload.first_name || '').trim();
+            const fullNameVal = (payload.first_name || (payload as any).full_name || (payload as any).name || '').trim();
             payload.first_name = fullNameVal;
             payload.last_name = '';
 
             // Clean read-only, nested relation, and calculated fields from payload
             delete payload.full_name;
             delete payload.name;
-            if (photoRemoved && !photoFile) {
-                payload.photograph = null;
-            } else {
-                delete payload.photograph;
-            }
+            delete payload.id;
+            delete payload.company;
+            delete payload.employee_code;
+            delete payload.system_id;
+            delete payload.display_code;
+            delete payload.deployed_site_name;
+            delete payload.deployment_status;
+            delete payload.city_display;
             delete payload.department_name;
             delete payload.designation_name;
             delete payload.age;
@@ -569,16 +576,32 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             delete payload.history_logs;
             delete payload.architecture_state;
             delete payload.preferred_payment_destination;
+            delete payload.salary_assignments;
+            delete payload.statutory_enrollments;
+            delete payload.user;
+            delete payload.crm_entity;
+            delete payload.branch;
 
-            if (!payload.designation) delete payload.designation;
-            if (!payload.department) delete payload.department;
-            if (!payload.employee_code) delete payload.employee_code;
-            if (!payload.date_of_birth) delete payload.date_of_birth;
-            if (!payload.hire_date) delete payload.hire_date;
-            if (!payload.joining_date) delete payload.joining_date;
-            if (!payload.cnic_issue_date) delete payload.cnic_issue_date;
-            if (!payload.cnic_expiry_date) delete payload.cnic_expiry_date;
-            if (!payload.confirmation_date) delete payload.confirmation_date;
+            if (photoRemoved && !photoFile) {
+                payload.photograph = null;
+            } else {
+                delete payload.photograph;
+            }
+
+            // Normalize date fields: if empty string or undefined, send null so DRF accepts it cleanly
+            const dateFields = [
+                'date_of_birth', 'hire_date', 'joining_date', 'confirmation_date',
+                'cnic_issue_date', 'cnic_expiry_date', 'resignation_date', 'termination_date',
+                'last_working_date', 'rehire_date'
+            ];
+            dateFields.forEach(f => {
+                if (payload[f] === '' || payload[f] === undefined) {
+                    payload[f] = null;
+                }
+            });
+
+            if (payload.designation === '' || payload.designation === undefined) payload.designation = null;
+            if (payload.department === '' || payload.department === undefined) payload.department = null;
 
             let createdEmpId: string | null = null;
 
@@ -1170,8 +1193,16 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     <Input 
                                         label="Full Name" 
                                         name="first_name" 
-                                        value={formData.first_name || (formData as any).full_name || (formData as any).name || ''} 
-                                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value, last_name: '' })} 
+                                        value={formData.first_name || ''} 
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                first_name: val,
+                                                full_name: val,
+                                                last_name: ''
+                                            }));
+                                        }} 
                                         required 
                                         placeholder="e.g. Aamir Khan / Saif ur Rehman" 
                                     />

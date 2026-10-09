@@ -11,3 +11,9 @@ class PlatformCoreConfig(AppConfig):
             import industries.security.manifest
         except ImportError:
             pass
+        try:
+            import erp_core.audit_signals
+            from erp_core.admin_audit import enhance_all_registered_admins
+            enhance_all_registered_admins()
+        except Exception:
+            pass

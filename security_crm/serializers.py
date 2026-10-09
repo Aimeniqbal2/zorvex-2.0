@@ -67,6 +67,10 @@ class ClientLocationSerializer(serializers.ModelSerializer):
         phone = validated_data.pop('phone', None)
         whatsapp = validated_data.pop('whatsapp', None)
         email = validated_data.pop('email', None)
+        if not validated_data.get('company_id') and not validated_data.get('company'):
+            customer = validated_data.get('customer')
+            if customer and hasattr(customer, 'company_id'):
+                validated_data['company_id'] = customer.company_id
 
         instance = super().create(validated_data)
 

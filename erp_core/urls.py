@@ -7,6 +7,11 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from accounts.views import CustomTokenObtainPairView
 from erp_core.search_views import GlobalSearchView
 from django.views.generic import RedirectView
+import erp_core.audit_signals
+from erp_core.admin_audit import enhance_all_registered_admins
+
+# Enhance all registered ModelAdmins across all ERP apps with universal audit capabilities
+enhance_all_registered_admins()
 
 urlpatterns = [
     # Redirect Django root to the React application (Vite 5173 in dev, /app/ in production)

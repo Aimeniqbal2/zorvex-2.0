@@ -8,10 +8,18 @@ def get_current_company():
     """Retrieve the company ID associated with the current request from thread locals."""
     return getattr(_thread_locals, 'company', None)
 
+def get_current_user():
+    """Retrieve the User object associated with the current request from thread locals."""
+    return getattr(_thread_locals, 'user', None)
+
+def get_current_request():
+    """Retrieve the HttpRequest object associated with the current request from thread locals."""
+    return getattr(_thread_locals, 'request', None)
+
 class TenantMiddleware:
     """
-    Middleware to detect the logged-in user's company and store it in thread locals.
-    This enables global queryset-level tenant filtering as required for SaaS.
+    Middleware to detect the logged-in user's company and user and store them in thread locals.
+    This enables global queryset-level tenant filtering as required for SaaS and global audit tracking.
     It also natively blocks API access for expired companies (402 Payment Required).
     """
     def __init__(self, get_response):
@@ -22,6 +30,8 @@ class TenantMiddleware:
         path = request.path
         
         _thread_locals.company = None
+        _thread_locals.user = None
+        _thread_locals.request = request
         company_id = None
         
         # Authenticate JWT for API requests so middleware can see request.user
@@ -38,6 +48,7 @@ class TenantMiddleware:
                 pass
         
         if request.user.is_authenticated:
+            _thread_locals.user = request.user
             if getattr(request.user, 'company_id', None):
                 company_id = request.user.company_id
                 _thread_locals.company = company_id
@@ -73,5 +84,9 @@ class TenantMiddleware:
         # Cleanup to avoid thread leaking
         if hasattr(_thread_locals, 'company'):
             del _thread_locals.company
+        if hasattr(_thread_locals, 'user'):
+            del _thread_locals.user
+        if hasattr(_thread_locals, 'request'):
+            del _thread_locals.request
             
         return response

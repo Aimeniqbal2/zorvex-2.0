@@ -192,6 +192,21 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
         setCurrentPage(1);
     };
 
+    const hasActiveFilters = filterTab !== 'ALL' || selectedCity !== 'ALL' || !!searchQuery.trim() || !!dateFrom || !!dateTo || searchField !== 'ALL';
+
+    const handleResetAllFilters = () => {
+        setFilterTab('ALL');
+        setSelectedCity('ALL');
+        setSearchQuery('');
+        setSearchField('ALL');
+        setDateFrom('');
+        setDateTo('');
+        setCurrentPage(1);
+        if (filterTab === 'ALL' && selectedCity === 'ALL' && !dateFrom && !dateTo) {
+            fetchEmployees(1, pageSize);
+        }
+    };
+
     useEffect(() => {
         setCurrentPage(1);
         fetchEmployees(1, pageSize);
@@ -621,93 +636,109 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                 </div>
             </div>
 
-            {/* Filter Bar */}
+            {/* Executive Organized Filter & Search Toolbar */}
             <div style={{
                 display: 'flex',
-                gap: '8px 12px',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
+                flexDirection: 'column',
+                gap: '12px',
                 background: 'var(--color-surface)',
-                padding: '8px 12px',
-                borderRadius: '6px',
+                padding: '12px 16px',
+                borderRadius: '8px',
                 border: '1px solid var(--color-border)',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
                 boxSizing: 'border-box',
                 width: '100%'
             }}>
-                {/* Left: Tabs */}
-                <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {['ALL', ...(isSecurity ? ['DEPLOYED', 'UNDEPLOYED'] : []), 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
-                        const isAlertsTab = t === 'CNIC_ALERTS';
-                        const isSelected = filterTab === t;
-                        let tabLabel = t;
-                        if (t === 'CNIC_ALERTS') tabLabel = 'CNIC Alerts';
-                        else if (t === 'DEPLOYED') tabLabel = 'Deployed';
-                        else if (t === 'UNDEPLOYED') tabLabel = 'Undeployed';
-                        else if (t === 'DIRECT') tabLabel = 'Direct (Guard)';
-                        else if (t === 'INDIRECT') tabLabel = 'Indirect (Staff)';
-                        else if (t === 'JUMP') tabLabel = 'Jump / AWOL';
-                        else if (t === 'ACTIVE') tabLabel = 'Active';
-                        else if (t === 'INACTIVE') tabLabel = 'Inactive';
-                        else if (t === 'ALL') tabLabel = 'All Workforce';
-
-                        return (
-                            <button
-                                key={t}
-                                onClick={() => handleTabChange(t)}
-                                style={{
-                                    padding: '4px 8px',
-                                    borderRadius: '4px',
-                                    border: isAlertsTab ? (isSelected ? 'none' : '1px solid rgba(239, 68, 68, 0.35)') : 'none',
-                                    cursor: 'pointer',
-                                    fontSize: '11.5px',
-                                    fontWeight: isSelected ? 600 : 400,
-                                    background: isSelected 
-                                        ? (isAlertsTab ? '#ef4444' : 'var(--color-primary)') 
-                                        : (isAlertsTab ? 'rgba(239, 68, 68, 0.08)' : 'transparent'),
-                                    color: isSelected 
-                                        ? '#fff' 
-                                        : (isAlertsTab ? '#dc2626' : 'var(--color-text)'),
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    whiteSpace: 'nowrap'
-                                }}
-                            >
-                                {isAlertsTab && <i className="bx bx-bell" style={{ fontSize: '12px' }}></i>}
-                                <span>{tabLabel}</span>
-                                {isAlertsTab && (cnicAlerts?.total_alerts !== undefined && cnicAlerts.total_alerts > 0) && (
-                                    <span style={{
-                                        background: isSelected ? '#fff' : '#ef4444',
-                                        color: isSelected ? '#ef4444' : '#fff',
-                                        fontSize: '9.5px',
-                                        fontWeight: 700,
-                                        padding: '0 4px',
-                                        borderRadius: '8px',
-                                        lineHeight: 1.2
-                                    }}>
-                                        {cnicAlerts.total_alerts}
-                                    </span>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                {/* Center / Right: Station & Search & Date Range */}
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', flex: '1 1 340px', justifyContent: 'flex-end', minWidth: '0' }}>
-                    {/* Station / City Quick Filter Pills */}
+                {/* ROW 1: Status & Category Navigation Tabs + Station Quick Switcher */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                }}>
+                    {/* Left: Category Navigation Tabs */}
                     <div style={{
                         display: 'inline-flex',
                         alignItems: 'center',
-                        background: 'var(--color-surface-secondary, rgba(0,0,0,0.03))',
-                        padding: '2px 4px',
-                        borderRadius: '5px',
-                        border: '1px solid var(--color-border)',
-                        gap: '2px'
+                        gap: '4px',
+                        flexWrap: 'wrap',
+                        background: 'var(--color-surface-secondary, rgba(0,0,0,0.02))',
+                        padding: '4px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border)'
                     }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', padding: '0 4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                            <i className="bx bx-buildings" style={{ fontSize: '12px' }}></i> Station:
+                        {['ALL', ...(isSecurity ? ['DEPLOYED', 'UNDEPLOYED'] : []), 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
+                            const isAlertsTab = t === 'CNIC_ALERTS';
+                            const isSelected = filterTab === t;
+                            let tabLabel = t;
+                            if (t === 'CNIC_ALERTS') tabLabel = 'CNIC Alerts';
+                            else if (t === 'DEPLOYED') tabLabel = 'Deployed';
+                            else if (t === 'UNDEPLOYED') tabLabel = 'Undeployed';
+                            else if (t === 'DIRECT') tabLabel = 'Direct (Guard)';
+                            else if (t === 'INDIRECT') tabLabel = 'Indirect (Staff)';
+                            else if (t === 'JUMP') tabLabel = 'Jump / AWOL';
+                            else if (t === 'ACTIVE') tabLabel = 'Active';
+                            else if (t === 'INACTIVE') tabLabel = 'Inactive';
+                            else if (t === 'ALL') tabLabel = 'All Workforce';
+
+                            return (
+                                <button
+                                    key={t}
+                                    type="button"
+                                    onClick={() => handleTabChange(t)}
+                                    style={{
+                                        padding: '5px 11px',
+                                        borderRadius: '5px',
+                                        border: isAlertsTab ? (isSelected ? 'none' : '1px solid rgba(239, 68, 68, 0.35)') : 'none',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: isSelected ? 600 : 500,
+                                        background: isSelected 
+                                            ? (isAlertsTab ? '#ef4444' : 'var(--color-primary)') 
+                                            : (isAlertsTab ? 'rgba(239, 68, 68, 0.08)' : 'transparent'),
+                                        color: isSelected 
+                                            ? '#ffffff' 
+                                            : (isAlertsTab ? '#dc2626' : 'var(--color-text)'),
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    {isAlertsTab && <i className="bx bx-bell" style={{ fontSize: '13px' }}></i>}
+                                    <span>{tabLabel}</span>
+                                    {isAlertsTab && (cnicAlerts?.total_alerts !== undefined && cnicAlerts.total_alerts > 0) && (
+                                        <span style={{
+                                            background: isSelected ? '#ffffff' : '#ef4444',
+                                            color: isSelected ? '#ef4444' : '#ffffff',
+                                            fontSize: '10px',
+                                            fontWeight: 700,
+                                            padding: '1px 5px',
+                                            borderRadius: '10px',
+                                            lineHeight: 1.2
+                                        }}>
+                                            {cnicAlerts.total_alerts}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Right: Station / City Quick Filter Pills */}
+                    <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        background: 'var(--color-surface-secondary, rgba(0,0,0,0.02))',
+                        padding: '4px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border)',
+                        gap: '3px'
+                    }}>
+                        <span style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--color-text-muted)', padding: '0 6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <i className="bx bx-buildings" style={{ fontSize: '13.5px' }}></i> Station:
                         </span>
                         {(['ALL', 'KHI', 'LHR', 'ISB'] as const).map(city => {
                             const isCityActive = selectedCity === city;
@@ -718,9 +749,9 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                                     onClick={() => setSelectedCity(city)}
                                     style={{
                                         border: 'none',
-                                        borderRadius: '3px',
-                                        padding: '2px 7px',
-                                        fontSize: '11px',
+                                        borderRadius: '4px',
+                                        padding: '4px 9px',
+                                        fontSize: '11.5px',
                                         fontWeight: isCityActive ? 700 : 500,
                                         cursor: 'pointer',
                                         background: isCityActive ? 'var(--color-primary)' : 'transparent',
@@ -734,60 +765,106 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                             );
                         })}
                     </div>
+                </div>
 
-                    {/* Search Form */}
-                    <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '6px', flex: '1 1 200px', maxWidth: '360px', minWidth: '0' }}>
+                {/* ROW 2: Prominent Search Box & Enrollment Date Range & Reset */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                }}>
+                    {/* Left: Prominent Executive Search Box */}
+                    <form onSubmit={handleSearchSubmit} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        flex: '1 1 420px',
+                        maxWidth: '650px',
+                        minWidth: '280px',
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '6px',
+                        padding: '2px',
+                        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)'
+                    }}>
                         <select
                             value={searchField}
                             onChange={(e) => setSearchField(e.target.value)}
                             style={{
-                                width: '92px',
-                                height: '30px',
-                                padding: '0 4px',
-                                borderRadius: '4px',
-                                border: '1px solid var(--color-border)',
-                                background: 'var(--color-surface)',
+                                height: '34px',
+                                padding: '0 8px',
+                                border: 'none',
+                                borderRight: '1px solid var(--color-border)',
+                                background: 'transparent',
                                 color: 'var(--color-text)',
-                                fontSize: '11.5px',
+                                fontSize: '12px',
+                                fontWeight: 500,
+                                cursor: 'pointer',
+                                outline: 'none',
                                 flexShrink: 0
                             }}
                         >
                             <option value="ALL">All Fields</option>
                             <option value="NAME">Name</option>
-                            <option value="CODE">Employee Code</option>
-                            <option value="CNIC">CNIC</option>
-                            <option value="PHONE">Phone</option>
+                            <option value="CODE">Employee Code / Badge</option>
+                            <option value="CNIC">CNIC Number</option>
+                            <option value="PHONE">Phone Number</option>
                         </select>
+
+                        <i className="bx bx-search" style={{ fontSize: '17px', color: 'var(--color-text-muted)', margin: '0 6px 0 10px' }}></i>
+
                         <input
                             type="text"
-                            placeholder="Search name, code, CNIC..."
+                            placeholder="Search by guard name, code (009399 / 9399), CNIC, phone..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             style={{
                                 flex: 1,
                                 minWidth: '0',
-                                padding: '0 8px',
-                                height: '30px',
-                                borderRadius: '4px',
-                                border: '1px solid var(--color-border)',
-                                background: 'var(--color-surface)',
+                                border: 'none',
+                                background: 'transparent',
                                 color: 'var(--color-text)',
-                                fontSize: '12px'
+                                fontSize: '12.5px',
+                                height: '34px',
+                                outline: 'none',
+                                padding: '0 6px'
                             }}
                         />
+
+                        {searchQuery && (
+                            <button
+                                type="button"
+                                onClick={() => { setSearchQuery(''); setCurrentPage(1); fetchEmployees(1, pageSize); }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--color-text-muted)',
+                                    cursor: 'pointer',
+                                    padding: '0 6px',
+                                    fontSize: '16px',
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                }}
+                                title="Clear search text"
+                            >
+                                <i className="bx bx-x"></i>
+                            </button>
+                        )}
+
                         <Button
                             type="submit"
-                            variant="secondary"
+                            variant="primary"
                             size="sm"
                             style={{
-                                height: '30px',
-                                padding: '0 10px',
-                                fontSize: '11.5px',
+                                height: '32px',
+                                padding: '0 14px',
+                                fontSize: '12px',
                                 flexShrink: 0,
                                 whiteSpace: 'nowrap',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px'
+                                gap: '5px'
                             }}
                         >
                             <i className="bx bx-search"></i>
@@ -795,30 +872,70 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                         </Button>
                     </form>
 
-                    {/* Enrollment Date Range */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', flexShrink: 0, color: 'var(--color-text-muted)' }}>
-                        <span>Enrolled:</span>
-                        <input
-                            type="date"
-                            value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
-                            style={{ height: '30px', padding: '0 4px', width: '115px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11px' }}
-                        />
-                        <span>to</span>
-                        <input
-                            type="date"
-                            value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
-                            style={{ height: '30px', padding: '0 4px', width: '115px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11px' }}
-                        />
-                        {(dateFrom || dateTo) && (
+                    {/* Right: Enrollment Date Range & Reset Filters */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: 'var(--color-surface-secondary, rgba(0,0,0,0.02))',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--color-border)',
+                            fontSize: '11.5px',
+                            color: 'var(--color-text-muted)'
+                        }}>
+                            <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                <i className="bx bx-calendar" style={{ fontSize: '13px' }}></i> Enrolled:
+                            </span>
+                            <input
+                                type="date"
+                                value={dateFrom}
+                                onChange={(e) => setDateFrom(e.target.value)}
+                                style={{ height: '26px', padding: '0 4px', width: '115px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11px', outline: 'none' }}
+                            />
+                            <span style={{ fontSize: '10.5px' }}>to</span>
+                            <input
+                                type="date"
+                                value={dateTo}
+                                onChange={(e) => setDateTo(e.target.value)}
+                                style={{ height: '26px', padding: '0 4px', width: '115px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '11px', outline: 'none' }}
+                            />
+                            {(dateFrom || dateTo) && (
+                                <button
+                                    type="button"
+                                    onClick={() => { setDateFrom(''); setDateTo(''); setCurrentPage(1); fetchEmployees(1, pageSize); }}
+                                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', padding: '0 2px', display: 'flex', alignItems: 'center' }}
+                                    title="Clear date range"
+                                >
+                                    <i className="bx bx-x"></i>
+                                </button>
+                            )}
+                        </div>
+
+                        {hasActiveFilters && (
                             <button
                                 type="button"
-                                onClick={() => { setDateFrom(''); setDateTo(''); setCurrentPage(1); fetchEmployees(1, pageSize); }}
-                                style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '13px', padding: '2px 4px' }}
-                                title="Clear dates"
+                                onClick={handleResetAllFilters}
+                                style={{
+                                    height: '32px',
+                                    padding: '0 10px',
+                                    borderRadius: '5px',
+                                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                                    background: 'rgba(239, 68, 68, 0.08)',
+                                    color: '#ef4444',
+                                    fontSize: '11.5px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.15s ease'
+                                }}
+                                title="Reset all category, station, search, and date filters"
                             >
-                                ✕
+                                <i className="bx bx-reset" style={{ fontSize: '13.5px' }}></i>
+                                <span>Reset All</span>
                             </button>
                         )}
                     </div>

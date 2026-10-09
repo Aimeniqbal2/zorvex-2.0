@@ -193,6 +193,10 @@ USE_I18N = True
 
 USE_TZ = True
 
+# Explicit DateTime formats displaying down to the second across all Django Admin views
+DATETIME_FORMAT = 'Y-m-d H:i:s'
+SHORT_DATETIME_FORMAT = 'Y-m-d H:i:s'
+
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
