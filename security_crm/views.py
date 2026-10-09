@@ -1529,10 +1529,15 @@ class CostingGridView(APIView):
                 loc_map[loc_id]["lines"].append(line)
 
             for loc_id, loc_info in loc_map.items():
-                loc_key = (str(cust.id), loc_info["location_name"].strip().lower())
-                if loc_key in seen_customer_locations:
+                loc_clean_name = loc_info["location_name"].strip().lower()
+                loc_key_name = (str(cust.id), loc_clean_name)
+                loc_key_id = (str(cust.id), str(loc_info["location_id"])) if loc_info["location_id"] else None
+
+                if loc_key_name in seen_customer_locations or (loc_key_id and loc_key_id in seen_customer_locations):
                     continue
-                seen_customer_locations.add(loc_key)
+                seen_customer_locations.add(loc_key_name)
+                if loc_key_id:
+                    seen_customer_locations.add(loc_key_id)
 
                 row = {
                     "proposal_version_id": str(ver.id),
@@ -1625,10 +1630,13 @@ class CostingGridView(APIView):
 
         for cloc in all_locations:
             cust = cloc.customer
-            loc_key = (str(cust.id), str(cloc.id))
-            if loc_key in seen_customer_locations:
+            cloc_clean_name = cloc.name.strip().lower()
+            loc_key_name = (str(cust.id), cloc_clean_name)
+            loc_key_id = (str(cust.id), str(cloc.id))
+            if loc_key_name in seen_customer_locations or loc_key_id in seen_customer_locations:
                 continue
-            seen_customer_locations.add(loc_key)
+            seen_customer_locations.add(loc_key_name)
+            seen_customer_locations.add(loc_key_id)
 
             prop = SecurityProposal.objects.filter(company=company, customer=cust).order_by('-created_at').first()
             ver = prop.versions.order_by('-version_number').first() if prop else None
@@ -2052,7 +2060,7 @@ class CostingGridDeleteRowView(APIView):
         client_name = (request.data.get('client_name') or '').strip()
         version_id = request.data.get('proposal_version_id')
 
-        # 1. Find and cascade delete location if it exists
+        # 1. Resolve target location and version
         location = None
         if location_id:
             location = ClientLocation.objects.filter(id=location_id, company=company).first()
@@ -2061,23 +2069,37 @@ class CostingGridDeleteRowView(APIView):
         if not location and client_name and location_name:
             location = ClientLocation.objects.filter(customer__name__iexact=client_name, name__iexact=location_name, company=company).first()
 
-        if location:
+        version = None
+        if version_id:
+            version = ProposalVersion.objects.filter(id=version_id, company=company).first()
+        elif client_id:
+            prop = SecurityProposal.objects.filter(company=company, customer_id=client_id).order_by('-created_at').first()
+            if prop:
+                version = prop.versions.order_by('-version_number').first()
+
+        # 2. If explicit cascade deletion of the entire location is requested
+        if request.data.get('delete_location_entirely') and location:
             SecurityProposalWorkflowService.cascade_delete_client_location(location)
             return Response({"success": True, "message": f"Location '{location.name}' and all associated requirements deleted successfully."})
 
-        # 2. If location wasn't in ClientLocation yet but service lines exist in this proposal version
-        if version_id:
-            version = ProposalVersion.objects.filter(id=version_id, company=company).first()
-            if version:
-                lines = ProposalServiceLine.objects.filter(proposal_version=version)
-                if location_name:
-                    lines = lines.filter(location__name__iexact=location_name)
-                lines.update(is_deleted=True)
-                if version.proposal:
-                    SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(version.proposal)
-                return Response({"success": True, "message": "Service lines deleted successfully."})
+        # 3. Safe grid row removal: Soft-delete service lines in this proposal version for this location
+        deleted_count = 0
+        if version:
+            lines = ProposalServiceLine.objects.filter(proposal_version=version)
+            if location:
+                lines = lines.filter(location=location)
+            elif location_name:
+                lines = lines.filter(location__name__iexact=location_name)
+            deleted_count = lines.count()
+            lines.update(is_deleted=True)
+            if version.proposal:
+                SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(version.proposal)
 
-        return Response({"success": True, "message": "Row removed successfully."})
+        return Response({
+            "success": True, 
+            "deleted_lines": deleted_count,
+            "message": f"Costing row for '{location_name or (location.name if location else 'location')}' removed successfully."
+        })
 
 
 class CostingGridImportExcelView(APIView):
