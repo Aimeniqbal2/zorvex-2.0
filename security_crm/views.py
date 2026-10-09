@@ -57,6 +57,7 @@ class ClientLocationViewSet(TenantModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        qs = qs.filter(is_deleted=False)
         customer_id = self.request.query_params.get('customer') or self.request.query_params.get('customer_id')
         if customer_id:
             qs = qs.filter(customer_id=customer_id)
@@ -106,16 +107,30 @@ class ClientLocationViewSet(TenantModelViewSet):
             logger.warning(f"Could not auto-create OperationalSite for location {loc.name}: {e}")
 
     def perform_update(self, serializer):
+        old_name = serializer.instance.name if serializer.instance else None
         loc = serializer.save()
         try:
             from operations.models import OperationalSite
-            OperationalSite.objects.filter(
-                company=loc.company,
-                crm_entity=loc.customer,
-                name=loc.name
-            ).update(is_active=loc.is_active)
+            if old_name and old_name != loc.name:
+                OperationalSite.objects.filter(
+                    company=loc.company,
+                    crm_entity=loc.customer,
+                    name=old_name
+                ).update(name=loc.name, is_active=loc.is_active)
+            else:
+                OperationalSite.objects.filter(
+                    company=loc.company,
+                    crm_entity=loc.customer,
+                    name=loc.name
+                ).update(is_active=loc.is_active)
         except Exception as e:
             logger.warning(f"Could not auto-update OperationalSite for location {loc.name}: {e}")
+
+    def destroy(self, request, *args, **kwargs):
+        loc = self.get_object()
+        from security_crm.services.workflow import SecurityProposalWorkflowService
+        SecurityProposalWorkflowService.cascade_delete_client_location(loc)
+        return Response({'status': 'deleted', 'id': str(loc.id)}, status=status.HTTP_200_OK)
 
 
 
@@ -161,6 +176,32 @@ class SecurityProposalViewSet(TenantModelViewSet):
                 SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(proposal)
             except Exception as e:
                 logger.warning(f"Error auto-syncing new requirement to operations: {e}")
+
+    def destroy(self, request, *args, **kwargs):
+        proposal = self.get_object()
+        proposal.is_deleted = True
+        proposal.status = 'CANCELLED'
+        proposal.save(update_fields=['is_deleted', 'status', 'updated_at'])
+
+        try:
+            from operations.models import ServiceContract, SecurityPost
+            if proposal.contract:
+                sc = proposal.contract
+                sc.is_deleted = True
+                sc.status = 'CANCELLED'
+                sc.save(update_fields=['is_deleted', 'status', 'updated_at'])
+                SecurityPost.objects.filter(service_contract=sc).update(is_deleted=True, is_active=False)
+
+            contracts = ServiceContract.objects.filter(contract_code=f"SC-{proposal.proposal_number}")
+            for sc in contracts:
+                sc.is_deleted = True
+                sc.status = 'CANCELLED'
+                sc.save(update_fields=['is_deleted', 'status', 'updated_at'])
+                SecurityPost.objects.filter(service_contract=sc).update(is_deleted=True, is_active=False)
+        except Exception as e:
+            logger.warning(f"Error cascading proposal deletion to operations: {e}")
+
+        return Response({'status': 'deleted', 'id': str(proposal.id)}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='sync-to-operations')
     def sync_to_operations(self, request, pk=None):
@@ -1239,6 +1280,7 @@ class ProposalServiceLineViewSet(TenantModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        qs = qs.filter(is_deleted=False).exclude(location__is_deleted=True).exclude(location__is_active=False)
         version_id = self.request.query_params.get('proposal_version') or self.request.query_params.get('proposal_version_id')
         if version_id:
             qs = qs.filter(proposal_version_id=version_id)
@@ -1451,7 +1493,11 @@ class CostingGridView(APIView):
 
         versions = ProposalVersion.objects.filter(
             company=company,
-            proposal__customer__isnull=False
+            is_deleted=False,
+            proposal__is_deleted=False,
+            proposal__customer__isnull=False,
+            proposal__customer__is_deleted=False,
+            proposal__customer__active=True
         ).select_related(
             'proposal', 'proposal__customer'
         ).prefetch_related(
@@ -1463,7 +1509,10 @@ class CostingGridView(APIView):
         for ver in versions:
             prop = ver.proposal
             cust = prop.customer
-            lines = list(ver.service_lines.all())
+            lines = [
+                l for l in ver.service_lines.all()
+                if not l.is_deleted and (not l.location or (not l.location.is_deleted and l.location.is_active))
+            ]
             if not lines:
                 continue
 
@@ -1480,7 +1529,7 @@ class CostingGridView(APIView):
                 loc_map[loc_id]["lines"].append(line)
 
             for loc_id, loc_info in loc_map.items():
-                loc_key = (str(cust.id), loc_info["location_id"] or 'default')
+                loc_key = (str(cust.id), loc_info["location_name"].strip().lower())
                 if loc_key in seen_customer_locations:
                     continue
                 seen_customer_locations.add(loc_key)
@@ -1745,15 +1794,17 @@ class CostingGridBatchSyncView(APIView):
                         )
 
                     loc_name = str(row.get('location_name') or '').strip() or client_name
-                    location = getattr(ClientLocation, 'all_objects', ClientLocation.objects).filter(
-                        company=company,
-                        customer=customer,
-                        name__iexact=loc_name
-                    ).first()
-                    if location and location.is_deleted:
-                        location.is_deleted = False
-                        location.is_active = True
-                        location.save(update_fields=['is_deleted', 'is_active'])
+                    location_id = row.get('location_id')
+                    location = None
+                    if location_id:
+                        location = ClientLocation.objects.filter(id=location_id, company=company, is_deleted=False).first()
+                    if not location:
+                        location = ClientLocation.objects.filter(
+                            company=company,
+                            customer=customer,
+                            name__iexact=loc_name,
+                            is_deleted=False
+                        ).first()
                     if not location:
                         location = ClientLocation.objects.create(
                             company=company,
@@ -1977,6 +2028,56 @@ class CostingGridBatchSyncView(APIView):
 
         except Exception as e:
             return Response({"error": f"Failed to sync costing grid: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CostingGridDeleteRowView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from erp_core.middleware import get_current_company
+        from companies.models import Company
+        from security_crm.services.workflow import SecurityProposalWorkflowService
+        from security_crm.models import ClientLocation, ProposalVersion, ProposalServiceLine
+
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        company = Company.objects.filter(id=company_id).first() if company_id else getattr(request.user, 'company', None)
+        if not company and request.user.is_superuser:
+            company = Company.objects.first()
+        if not company:
+            return Response({"error": "No company context"}, status=status.HTTP_400_BAD_REQUEST)
+
+        location_id = request.data.get('location_id')
+        location_name = (request.data.get('location_name') or '').strip()
+        client_id = request.data.get('client_id')
+        client_name = (request.data.get('client_name') or '').strip()
+        version_id = request.data.get('proposal_version_id')
+
+        # 1. Find and cascade delete location if it exists
+        location = None
+        if location_id:
+            location = ClientLocation.objects.filter(id=location_id, company=company).first()
+        if not location and client_id and location_name:
+            location = ClientLocation.objects.filter(customer_id=client_id, name__iexact=location_name, company=company).first()
+        if not location and client_name and location_name:
+            location = ClientLocation.objects.filter(customer__name__iexact=client_name, name__iexact=location_name, company=company).first()
+
+        if location:
+            SecurityProposalWorkflowService.cascade_delete_client_location(location)
+            return Response({"success": True, "message": f"Location '{location.name}' and all associated requirements deleted successfully."})
+
+        # 2. If location wasn't in ClientLocation yet but service lines exist in this proposal version
+        if version_id:
+            version = ProposalVersion.objects.filter(id=version_id, company=company).first()
+            if version:
+                lines = ProposalServiceLine.objects.filter(proposal_version=version)
+                if location_name:
+                    lines = lines.filter(location__name__iexact=location_name)
+                lines.update(is_deleted=True)
+                if version.proposal:
+                    SecurityProposalWorkflowService.sync_proposal_and_locations_to_operations(version.proposal)
+                return Response({"success": True, "message": "Service lines deleted successfully."})
+
+        return Response({"success": True, "message": "Row removed successfully."})
 
 
 class CostingGridImportExcelView(APIView):

@@ -10,7 +10,7 @@ from django.dispatch import receiver
 from django.conf import settings
 
 class OperationalSite(BaseModel):
-    crm_entity = models.ForeignKey(CRMEntity, on_delete=models.RESTRICT, related_name='operational_sites')
+    crm_entity = models.ForeignKey(CRMEntity, on_delete=models.CASCADE, related_name='operational_sites')
     name = models.CharField(max_length=255)
     address = models.TextField()
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -54,7 +54,7 @@ class ServiceContractStatus(models.TextChoices):
 
 
 class ServiceContract(BaseModel):
-    crm_entity = models.ForeignKey(CRMEntity, on_delete=models.RESTRICT, related_name='service_contracts')
+    crm_entity = models.ForeignKey(CRMEntity, on_delete=models.CASCADE, related_name='service_contracts')
     sites = models.ManyToManyField(OperationalSite, related_name='service_contracts', blank=True)
     contract_code = models.CharField(max_length=100)
     start_date = models.DateField()
@@ -120,7 +120,7 @@ def validate_contract_sites(sender, instance, action, pk_set, **kwargs):
 
 
 class ContractRate(BaseModel):
-    service_contract = models.ForeignKey(ServiceContract, on_delete=models.RESTRICT, related_name='rates')
+    service_contract = models.ForeignKey(ServiceContract, on_delete=models.CASCADE, related_name='rates')
     designation = models.ForeignKey(Designation, on_delete=models.RESTRICT, related_name='contract_rates')
     billing_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     pay_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -174,8 +174,8 @@ class ContractRate(BaseModel):
         ]
 
 class SiteStaffingRequirement(BaseModel):
-    service_contract = models.ForeignKey(ServiceContract, on_delete=models.RESTRICT, related_name='staffing_requirements')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='staffing_requirements')
+    service_contract = models.ForeignKey(ServiceContract, on_delete=models.CASCADE, related_name='staffing_requirements')
+    site = models.ForeignKey(OperationalSite, on_delete=models.CASCADE, related_name='staffing_requirements')
     designation = models.ForeignKey(Designation, on_delete=models.RESTRICT, related_name='staffing_requirements')
     shift = models.ForeignKey(Shift, on_delete=models.RESTRICT, related_name='staffing_requirements')
     required_headcount = models.PositiveIntegerField(default=0)
@@ -325,10 +325,10 @@ class DeploymentAssignmentType(models.TextChoices):
 
 class Deployment(BaseModel):
     employee = models.ForeignKey('hrm.Employee', on_delete=models.RESTRICT, related_name='deployments')
-    crm_entity = models.ForeignKey(CRMEntity, on_delete=models.RESTRICT, null=True, blank=True, related_name='deployments')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='deployments')
+    crm_entity = models.ForeignKey(CRMEntity, on_delete=models.CASCADE, null=True, blank=True, related_name='deployments')
+    site = models.ForeignKey(OperationalSite, on_delete=models.CASCADE, related_name='deployments')
     post = models.ForeignKey(SecurityPost, on_delete=models.SET_NULL, null=True, blank=True, related_name='deployments')
-    service_contract = models.ForeignKey(ServiceContract, on_delete=models.RESTRICT, null=True, blank=True, related_name='deployments')
+    service_contract = models.ForeignKey(ServiceContract, on_delete=models.CASCADE, null=True, blank=True, related_name='deployments')
     designation = models.ForeignKey('hrm.Designation', on_delete=models.RESTRICT, related_name='deployments')
     assignment_type = models.CharField(max_length=20, choices=DeploymentAssignmentType.choices, default=DeploymentAssignmentType.PERMANENT)
     start_date = models.DateField()
@@ -531,7 +531,7 @@ class DutyRosterStatus(models.TextChoices):
 class DutyRoster(BaseModel):
     duty_date = models.DateField()
     shift = models.ForeignKey('hrm.Shift', on_delete=models.RESTRICT, related_name='duty_rosters')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='duty_rosters')
+    site = models.ForeignKey(OperationalSite, on_delete=models.CASCADE, related_name='duty_rosters')
     post = models.ForeignKey(SecurityPost, on_delete=models.SET_NULL, null=True, blank=True, related_name='duty_rosters')
     employee = models.ForeignKey('hrm.Employee', on_delete=models.RESTRICT, related_name='duty_rosters')
     deployment = models.ForeignKey(Deployment, on_delete=models.SET_NULL, null=True, blank=True, related_name='duty_rosters')
@@ -609,7 +609,7 @@ class DutyReplacement(BaseModel):
     original_roster = models.ForeignKey(DutyRoster, on_delete=models.RESTRICT, related_name='replacement_records')
     original_employee = models.ForeignKey('hrm.Employee', on_delete=models.RESTRICT, related_name='replaced_duties')
     replacement_employee = models.ForeignKey('hrm.Employee', on_delete=models.RESTRICT, related_name='replacement_coverages')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='duty_replacements')
+    site = models.ForeignKey(OperationalSite, on_delete=models.CASCADE, related_name='duty_replacements')
     post = models.ForeignKey(SecurityPost, on_delete=models.SET_NULL, null=True, blank=True, related_name='duty_replacements')
     shift = models.ForeignKey('hrm.Shift', on_delete=models.RESTRICT, related_name='duty_replacements')
     duty_date = models.DateField()
@@ -696,7 +696,7 @@ class DutyAssignment(BaseModel):
     deployment = models.ForeignKey(Deployment, on_delete=models.RESTRICT, null=True, blank=True, related_name='duty_assignments')
     temporary_service = models.ForeignKey('TemporaryServiceRequest', on_delete=models.RESTRICT, null=True, blank=True, related_name='duty_assignments')
     employee = models.ForeignKey('hrm.Employee', on_delete=models.RESTRICT, related_name='duty_assignments')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='duty_assignments')
+    site = models.ForeignKey(OperationalSite, on_delete=models.CASCADE, related_name='duty_assignments')
     date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
@@ -800,8 +800,8 @@ class ExtraDutyStatus(models.TextChoices):
 
 class ExtraDuty(BaseModel):
     employee = models.ForeignKey('hrm.Employee', on_delete=models.RESTRICT, related_name='extra_duties')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, null=True, blank=True, related_name='extra_duties')
-    service_contract = models.ForeignKey(ServiceContract, on_delete=models.RESTRICT, null=True, blank=True, related_name='extra_duties')
+    site = models.ForeignKey(OperationalSite, on_delete=models.CASCADE, null=True, blank=True, related_name='extra_duties')
+    service_contract = models.ForeignKey(ServiceContract, on_delete=models.CASCADE, null=True, blank=True, related_name='extra_duties')
     date = models.DateField()
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
@@ -1206,7 +1206,7 @@ class IncidentReport(BaseModel):
 
     client = models.ForeignKey(CRMEntity, on_delete=models.SET_NULL, null=True, blank=True, related_name='operational_incidents')
     contract = models.ForeignKey('operations.ServiceContract', on_delete=models.SET_NULL, null=True, blank=True, related_name='operational_incidents')
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='incidents')
+    site = models.ForeignKey(OperationalSite, on_delete=models.SET_NULL, null=True, blank=True, related_name='incidents')
     post = models.ForeignKey('operations.SecurityPost', on_delete=models.SET_NULL, null=True, blank=True, related_name='incidents')
     shift = models.ForeignKey('hrm.Shift', on_delete=models.SET_NULL, null=True, blank=True, related_name='incidents')
     roster = models.ForeignKey('operations.DutyRoster', on_delete=models.SET_NULL, null=True, blank=True, related_name='incidents')
@@ -1307,7 +1307,7 @@ class DailyActivityReport(BaseModel):
         ('REVIEWED', 'Reviewed'),
     ]
 
-    site = models.ForeignKey(OperationalSite, on_delete=models.RESTRICT, related_name='daily_reports')
+    site = models.ForeignKey(OperationalSite, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_reports')
     report_date = models.DateField()
     deployment = models.ForeignKey(Deployment, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_reports')
     duty_assignment = models.ForeignKey(DutyAssignment, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_reports')
@@ -1455,8 +1455,8 @@ class QAInspection(BaseModel):
         ('REVIEWED', 'Reviewed'),
     ]
     template = models.ForeignKey(QAChecklistTemplate, on_delete=models.RESTRICT)
-    service_contract = models.ForeignKey('ServiceContract', null=True, blank=True, on_delete=models.RESTRICT)
-    operational_site = models.ForeignKey('OperationalSite', null=True, blank=True, on_delete=models.RESTRICT)
+    service_contract = models.ForeignKey('ServiceContract', null=True, blank=True, on_delete=models.SET_NULL)
+    operational_site = models.ForeignKey('OperationalSite', null=True, blank=True, on_delete=models.SET_NULL)
     inspection_date = models.DateField()
     inspector = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.RESTRICT, related_name='inspections_performed')
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='DRAFT')

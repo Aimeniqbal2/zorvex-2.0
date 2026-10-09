@@ -1192,6 +1192,17 @@ export const syncCostingGrid = async (rows: CostingGridRow[]) => {
     return response.data as { success: boolean; synced_count: number; message: string };
 };
 
+export const deleteCostingGridRow = async (payload: {
+    client_id?: string | null;
+    client_name?: string | null;
+    location_id?: string | null;
+    location_name?: string | null;
+    proposal_version_id?: string | null;
+}) => {
+    const response = await apiClient.post('/api/security/crm/costing-grid/delete-row/', payload);
+    return response.data as { success: boolean; message: string };
+};
+
 export const importCostingExcel = async (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

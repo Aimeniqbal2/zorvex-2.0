@@ -135,6 +135,7 @@ class OperationalSiteViewSet(BaseSecurityOpsViewSet):
             qs = qs.filter(is_active=status_param.lower() == 'true')
         if customer_id:
             qs = qs.filter(crm_entity_id=customer_id)
+        qs = qs.exclude(crm_entity__is_deleted=True).exclude(crm_entity__active=False)
         return qs
 
     @action(detail=True, methods=['get'], url_path='manpower-summary')
@@ -167,6 +168,8 @@ class SecurityPostViewSet(BaseSecurityOpsViewSet):
             qs = qs.filter(service_contract_id=contract_id)
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() == 'true')
+        qs = qs.exclude(site__is_deleted=True).exclude(site__is_active=False).exclude(site__crm_entity__is_deleted=True)
+        qs = qs.exclude(service_contract__is_deleted=True).exclude(service_contract__status='CANCELLED')
         return qs
 
     @action(detail=True, methods=['get', 'post'], url_path='shift-requirements')

@@ -287,7 +287,9 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
         ver = self._get_target_version(obj)
         if not ver:
             return ""
-        loc_names = list(ver.service_lines.filter(location__isnull=False).values_list('location__name', flat=True).distinct())
+        loc_names = list(ver.service_lines.filter(
+            is_deleted=False, location__isnull=False, location__is_deleted=False, location__is_active=True
+        ).values_list('location__name', flat=True).distinct())
         return ", ".join(loc_names) if loc_names else ""
 
     def get_guard_headcount(self, obj):
@@ -295,13 +297,25 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
         if not ver:
             return 0
         from django.db.models import Sum
-        return ver.service_lines.aggregate(total=Sum('quantity'))['total'] or 0
+        return ver.service_lines.filter(
+            is_deleted=False
+        ).exclude(
+            location__is_deleted=True
+        ).exclude(
+            location__is_active=False
+        ).aggregate(total=Sum('quantity'))['total'] or 0
 
     def get_guard_breakdown(self, obj):
         ver = self._get_target_version(obj)
         if not ver:
             return ""
-        lines = ver.service_lines.select_related('service_type').all()
+        lines = ver.service_lines.filter(
+            is_deleted=False
+        ).exclude(
+            location__is_deleted=True
+        ).exclude(
+            location__is_active=False
+        ).select_related('service_type').all()
         parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
         return ", ".join(parts)
 
@@ -309,9 +323,17 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
         ver = self._get_target_version(obj)
         if not ver:
             return obj.title
-        loc_names = list(ver.service_lines.filter(location__isnull=False).values_list('location__name', flat=True).distinct())
+        loc_names = list(ver.service_lines.filter(
+            is_deleted=False, location__isnull=False, location__is_deleted=False, location__is_active=True
+        ).values_list('location__name', flat=True).distinct())
         loc_str = ", ".join(loc_names) if loc_names else ""
-        lines = ver.service_lines.select_related('service_type').all()
+        lines = ver.service_lines.filter(
+            is_deleted=False
+        ).exclude(
+            location__is_deleted=True
+        ).exclude(
+            location__is_active=False
+        ).select_related('service_type').all()
         headcount = sum(l.quantity for l in lines)
         if loc_str and headcount > 0:
             guard_parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
@@ -471,9 +493,22 @@ class ProposalVersionSerializer(serializers.ModelSerializer):
 
 
 class ProposalVersionDetailSerializer(ProposalVersionSerializer):
-    service_lines = ProposalServiceLineSerializer(many=True, read_only=True)
-    equipment_requirements = ContractEquipmentRequirementSerializer(many=True, read_only=True)
-    additional_charges = ProposalAdditionalChargeSerializer(many=True, read_only=True)
+    service_lines = serializers.SerializerMethodField()
+    equipment_requirements = serializers.SerializerMethodField()
+    additional_charges = serializers.SerializerMethodField()
+
+    def get_service_lines(self, obj):
+        lines = obj.service_lines.filter(is_deleted=False)
+        lines = lines.exclude(location__is_deleted=True).exclude(location__is_active=False)
+        return ProposalServiceLineSerializer(lines, many=True).data
+
+    def get_equipment_requirements(self, obj):
+        items = obj.equipment_requirements.filter(is_deleted=False).exclude(location__is_deleted=True)
+        return ContractEquipmentRequirementSerializer(items, many=True).data
+
+    def get_additional_charges(self, obj):
+        items = obj.additional_charges.filter(is_deleted=False)
+        return ProposalAdditionalChargeSerializer(items, many=True).data
 
 
 class AssessmentRiskFindingSerializer(serializers.ModelSerializer):

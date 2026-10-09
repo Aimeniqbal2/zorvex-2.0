@@ -811,14 +811,16 @@ class SecurityProposalWorkflowService:
 
         active_ver = proposal.approved_version or proposal.versions.filter(company=proposal.company).order_by('-version_number').first()
 
-        # 1. Collect all distinct ClientLocations
-        client_locations = list(proposal.customer.security_locations.filter(company=proposal.company, is_active=True, is_deleted=False))
+        # 1. Collect all distinct active ClientLocations (strictly excluding deleted/inactive)
+        client_locations = list(proposal.customer.security_locations.filter(
+            company=proposal.company, is_active=True, is_deleted=False
+        ))
         if active_ver:
-            for line in active_ver.service_lines.select_related('location').all():
-                if line.location and line.location not in client_locations:
+            for line in active_ver.service_lines.filter(is_deleted=False).select_related('location'):
+                if line.location and not line.location.is_deleted and line.location.is_active and line.location not in client_locations:
                     client_locations.append(line.location)
 
-        # 2. Find or create OperationalSites for each ClientLocation
+        # 2. Find or create OperationalSites for each active ClientLocation
         operational_sites = []
         for loc in client_locations:
             site, _ = OperationalSite.objects.get_or_create(
@@ -830,6 +832,12 @@ class SecurityProposalWorkflowService:
                     'is_active': True
                 }
             )
+            if site.is_deleted:
+                site.is_deleted = False
+                site.save(update_fields=['is_deleted'])
+            if not site.is_active:
+                site.is_active = True
+                site.save(update_fields=['is_active'])
             operational_sites.append(site)
 
         # 3. Create or link ServiceContract idempotently
@@ -857,12 +865,19 @@ class SecurityProposalWorkflowService:
                     notes=f"Created automatically from Security Proposal {proposal.proposal_number}."
                 )
 
-        if operational_sites:
-            service_contract.sites.add(*operational_sites)
+        service_contract.sites.set(operational_sites)
 
         if not proposal.contract:
             proposal.contract = service_contract
             proposal.save(update_fields=['contract'])
+
+        # Deactivate any posts on this contract whose site is no longer among operational_sites
+        active_site_ids = [s.id for s in operational_sites]
+        SecurityPost.objects.filter(
+            service_contract=service_contract
+        ).exclude(
+            site_id__in=active_site_ids
+        ).update(is_active=False, is_deleted=True)
 
         # 4. Sync Location Rates and SecurityPosts from ProposalServiceLines
         if active_ver and service_contract:
@@ -998,6 +1013,86 @@ class SecurityProposalWorkflowService:
             proposal.customer.save(update_fields=['entity_type'])
 
         return service_contract
+
+    @classmethod
+    def cascade_delete_client_location(cls, location):
+        """
+        Comprehensively deletes a ClientLocation and cascades deletion to:
+        1. All ProposalServiceLines for this location across all proposal versions.
+        2. ContractEquipmentRequirements and AssessmentStaffingRecommendations.
+        3. Matching OperationalSites in Operations (marked is_active=False, is_deleted=True).
+        4. Associated SecurityPosts, SiteStaffingRequirements, Deployments.
+        5. Re-synchronizes active proposals to Operations so muster grids and contracts immediately update.
+        """
+        from django.db import transaction
+        from django.db.models import Q
+        from security_crm.models import (
+            ProposalServiceLine, ContractEquipmentRequirement, 
+            AssessmentStaffingRecommendation, SecurityProposal
+        )
+        from operations.models import (
+            OperationalSite, SecurityPost, SiteStaffingRequirement,
+            Deployment, DutyRoster, DutyAssignment, DailyDutyPay
+        )
+
+        with transaction.atomic():
+            location.is_deleted = True
+            location.is_active = False
+            location.save(update_fields=['is_deleted', 'is_active', 'updated_at'])
+
+            company = location.company
+            customer = location.customer
+            loc_name = (location.name or '').strip()
+
+            # 1. Cascade delete all proposal service lines referencing this location
+            lines = list(ProposalServiceLine.objects.filter(
+                Q(location=location) |
+                Q(proposal_version__proposal__customer=customer, location__name__iexact=loc_name)
+            ).select_related('proposal_version', 'proposal_version__proposal'))
+
+            proposals_to_resync = set()
+            for line in lines:
+                if line.proposal_version and line.proposal_version.proposal:
+                    proposals_to_resync.add(line.proposal_version.proposal)
+                line.is_deleted = True
+                line.save(update_fields=['is_deleted', 'updated_at'])
+
+            # 2. Delete equipment and staffing recommendations for this location
+            ContractEquipmentRequirement.objects.filter(location=location).update(is_deleted=True)
+            AssessmentStaffingRecommendation.objects.filter(location=location).update(is_deleted=True)
+
+            # 3. Cascade to OperationalSites in Operations
+            matching_sites = list(OperationalSite.objects.filter(
+                company=company,
+                crm_entity=customer,
+                name__iexact=loc_name
+            ))
+            for s in matching_sites:
+                s.is_active = False
+                s.is_deleted = True
+                s.save(update_fields=['is_active', 'is_deleted', 'updated_at'])
+
+                SecurityPost.objects.filter(site=s).update(is_active=False, is_deleted=True)
+                SiteStaffingRequirement.objects.filter(site=s).update(is_active=False, is_deleted=True)
+                Deployment.objects.filter(site=s).update(is_deleted=True)
+                DutyRoster.objects.filter(site=s).update(is_deleted=True)
+                DutyAssignment.objects.filter(site=s).update(is_deleted=True)
+                DailyDutyPay.objects.filter(site=s).update(is_deleted=True)
+
+                for contract in s.service_contracts.all():
+                    contract.sites.remove(s)
+
+            # 4. Trigger re-sync on customer proposals
+            if not proposals_to_resync and customer:
+                for prop in SecurityProposal.objects.filter(customer=customer, is_deleted=False):
+                    proposals_to_resync.add(prop)
+
+            for prop in proposals_to_resync:
+                try:
+                    cls.sync_proposal_and_locations_to_operations(prop)
+                except Exception as e:
+                    logger.warning(f"Error re-syncing proposal {prop.id} during cascade location delete: {e}")
+
 
 
 

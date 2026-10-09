@@ -104,10 +104,36 @@ class MonthlyMusterService:
         is_current_month = (today.year == year and today.month == month)
         current_day = today.day if is_current_month else (32 if today > end_date else 0)
 
-        # 1. Fetch active operational sites
+        # 1. Fetch active operational sites strictly mirroring active CRM entities and active locations
+        from security_crm.models import ClientLocation, ProposalServiceLine
+
         sites_qs = list(OperationalSite.objects.filter(
             company=company, is_active=True, is_deleted=False
         ).select_related('crm_entity').order_by('name'))
+
+        # Only keep sites belonging to an active CRM customer and matching an active ClientLocation
+        active_locs_qs = list(ClientLocation.objects.filter(
+            company=company, is_deleted=False, is_active=True
+        ).values('customer_id', 'name'))
+        
+        entities_with_locations = set(str(l['customer_id']) for l in active_locs_qs if l.get('customer_id'))
+        active_loc_pairs = {(str(l['customer_id']), l['name'].strip().lower()) for l in active_locs_qs if l.get('customer_id') and l.get('name')}
+
+        valid_sites = []
+        for s in sites_qs:
+            if s.crm_entity:
+                if s.crm_entity.is_deleted or not s.crm_entity.active:
+                    continue
+                c_id_str = str(s.crm_entity_id)
+                if c_id_str in entities_with_locations:
+                    if (c_id_str, s.name.strip().lower()) not in active_loc_pairs:
+                        continue
+            else:
+                # Discard operational sites with no CRM entity in security operations
+                continue
+            valid_sites.append(s)
+
+        sites_qs = valid_sites
         if site_id:
             sites_qs = [s for s in sites_qs if str(s.id) == str(site_id)]
 
@@ -123,6 +149,10 @@ class MonthlyMusterService:
         # 3. Bulk pre-fetch SecurityPosts and Deployments across all sites (avoids N+1 queries)
         all_posts = list(SecurityPost.objects.filter(
             site_id__in=site_ids, is_active=True, is_deleted=False
+        ).exclude(
+            service_contract__is_deleted=True
+        ).exclude(
+            service_contract__status='CANCELLED'
         ).select_related('required_designation'))
         posts_by_site = defaultdict(list)
         for p in all_posts:
@@ -140,11 +170,12 @@ class MonthlyMusterService:
         for dep in all_deployments:
             deployments_by_site[dep.site_id].append(dep)
 
-        # 4. Bulk pre-fetch CRM ProposalServiceLines
-        from security_crm.models import ProposalServiceLine
+        # 4. Bulk pre-fetch CRM ProposalServiceLines (only active proposals & active locations)
         all_service_lines = list(ProposalServiceLine.objects.filter(
             company=company,
-            is_deleted=False
+            is_deleted=False,
+            location__is_deleted=False,
+            proposal_version__proposal__is_deleted=False
         ).select_related('service_type', 'location', 'location__customer'))
         lines_by_loc_name = defaultdict(list)
         lines_by_cust_id = defaultdict(list)

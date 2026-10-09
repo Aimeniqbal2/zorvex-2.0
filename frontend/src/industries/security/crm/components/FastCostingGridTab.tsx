@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { useToastStore } from '../../../../stores/toastStore';
-import { fetchCostingGrid, syncCostingGrid, importCostingExcel, getClientLocations } from '../api';
+import { fetchCostingGrid, syncCostingGrid, deleteCostingGridRow, importCostingExcel, getClientLocations } from '../api';
 import type { CostingGridRow } from '../api';
 import { getEntities } from '../../../../modules/crm/api';
 import type { CRMEntity } from '../../../../modules/crm/types';
@@ -327,8 +327,32 @@ export const FastCostingGridTab: React.FC = () => {
         }));
     };
 
-    const handleDeleteRow = (targetRow: CostingGridRow) => {
-        setRows(prevRows => prevRows.filter(r => r !== targetRow && (!r.id || r.id !== targetRow.id)));
+    const handleDeleteRow = async (targetRow: CostingGridRow) => {
+        const locName = targetRow.location_name || targetRow.client_name || 'this location';
+        if (!window.confirm(`Are you sure you want to delete "${locName}" and remove all its requirements from CRM and Operations?`)) {
+            return;
+        }
+
+        // If it's an unsaved row without backend references
+        if (!targetRow.location_id && !targetRow.proposal_version_id && !targetRow.client_id) {
+            setRows(prevRows => prevRows.filter(r => r !== targetRow && (!r.id || r.id !== targetRow.id)));
+            return;
+        }
+
+        try {
+            await deleteCostingGridRow({
+                client_id: targetRow.client_id,
+                client_name: targetRow.client_name,
+                location_id: targetRow.location_id,
+                location_name: targetRow.location_name,
+                proposal_version_id: targetRow.proposal_version_id
+            });
+            useToastStore.getState().success(`"${locName}" and its requirements deleted successfully!`);
+            setRows(prevRows => prevRows.filter(r => r !== targetRow && (!r.id || r.id !== targetRow.id)));
+            await loadGrid();
+        } catch (err: any) {
+            useToastStore.getState().error(err?.response?.data?.error || err?.message || 'Failed to delete row.');
+        }
     };
 
     const handleSaveSync = async () => {

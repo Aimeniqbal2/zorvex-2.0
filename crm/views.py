@@ -71,6 +71,41 @@ class CRMEntityViewSet(BaseCRMViewSet):
                 company_id = comp.id
         serializer.save(company_id=company_id, created_by=self.request.user)
 
+    def destroy(self, request, *args, **kwargs):
+        entity = self.get_object()
+        entity.is_deleted = True
+        entity.active = False
+        entity.save(update_fields=['is_deleted', 'active', 'updated_at'])
+
+        try:
+            from security_crm.models import ClientLocation, SecurityProposal, ProposalServiceLine
+            from security_crm.services.workflow import SecurityProposalWorkflowService
+            from operations.models import OperationalSite, SecurityPost, ServiceContract, SiteStaffingRequirement, Deployment
+
+            locations = list(ClientLocation.objects.filter(customer=entity))
+            for loc in locations:
+                SecurityProposalWorkflowService.cascade_delete_client_location(loc)
+
+            ClientLocation.objects.filter(customer=entity).update(is_deleted=True, is_active=False)
+            sites = OperationalSite.objects.filter(crm_entity=entity)
+            for s in sites:
+                s.is_deleted = True
+                s.is_active = False
+                s.save(update_fields=['is_deleted', 'is_active', 'updated_at'])
+                SecurityPost.objects.filter(site=s).update(is_deleted=True, is_active=False)
+                SiteStaffingRequirement.objects.filter(site=s).update(is_deleted=True, is_active=False)
+                Deployment.objects.filter(site=s).update(is_deleted=True)
+
+            ProposalServiceLine.objects.filter(proposal_version__proposal__customer=entity).update(is_deleted=True)
+            SecurityProposal.objects.filter(customer=entity).update(is_deleted=True, status='CANCELLED')
+            ServiceContract.objects.filter(crm_entity=entity).update(is_deleted=True, status='CANCELLED')
+        except Exception:
+            pass
+
+        from rest_framework.response import Response
+        from rest_framework import status
+        return Response({'status': 'deleted', 'id': str(entity.id)}, status=status.HTTP_200_OK)
+
 
 class CRMContactViewSet(BaseCRMViewSet):
     queryset = CRMContact.objects.select_related('entity').all()

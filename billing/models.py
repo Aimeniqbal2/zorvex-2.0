@@ -168,7 +168,7 @@ class ServiceInvoiceLine(BaseModel):
     )
     operational_site = models.ForeignKey(
         'operations.OperationalSite',
-        on_delete=models.RESTRICT,
+        on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='invoice_lines'
     )
@@ -585,7 +585,7 @@ class BillingSheetLine(BaseModel):
     description = models.CharField(max_length=255)
     site = models.ForeignKey(
         'operations.OperationalSite',
-        on_delete=models.RESTRICT,
+        on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='billing_lines'
     )
@@ -665,7 +665,7 @@ class BillingAdjustment(BaseModel):
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     site = models.ForeignKey(
         'operations.OperationalSite',
-        on_delete=models.RESTRICT,
+        on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='billing_adjustments'
     )
@@ -897,7 +897,7 @@ class ClientInvoiceLine(BaseModel):
     description = models.CharField(max_length=255)
     site = models.ForeignKey(
         'operations.OperationalSite',
-        on_delete=models.RESTRICT,
+        on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='client_invoice_lines'
     )

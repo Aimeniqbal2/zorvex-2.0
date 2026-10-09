@@ -39,7 +39,7 @@ class SecurityProposal(BaseModel):
     """
     Represents the commercial proposal associated with an existing universal CRM customer.
     """
-    customer = models.ForeignKey('crm.CRMEntity', on_delete=models.RESTRICT, related_name='security_proposals')
+    customer = models.ForeignKey('crm.CRMEntity', on_delete=models.CASCADE, related_name='security_proposals')
     proposal_number = models.CharField(max_length=100, db_index=True, blank=True)
     title = models.CharField(max_length=255)
     status = models.CharField(max_length=50, choices=SecurityProposalStatus.choices, default=SecurityProposalStatus.DRAFT)
@@ -246,7 +246,7 @@ class ProposalVersion(BaseModel):
     @property
     def total_guard_strength(self):
         """Col AA: Total Contracted Strength = SUM(quantity) across active service lines."""
-        lines = self.service_lines.filter(is_deleted=False)
+        lines = self.service_lines.filter(is_deleted=False).exclude(location__is_deleted=True).exclude(location__is_active=False)
         return sum(l.quantity for l in lines)
 
     @property
@@ -257,7 +257,7 @@ class ProposalVersion(BaseModel):
     @property
     def total_monthly_salary(self):
         """Col Z: Total Guard Direct Salaries = SUM(guard_salary * quantity)."""
-        lines = self.service_lines.filter(is_deleted=False)
+        lines = self.service_lines.filter(is_deleted=False).exclude(location__is_deleted=True).exclude(location__is_active=False)
         from decimal import Decimal
         return sum(
             (Decimal(str(l.quantity)) * Decimal(str(getattr(l, 'guard_salary', 0) or 0)))
@@ -345,7 +345,7 @@ class ProposalVersion(BaseModel):
 
     @property
     def monthly_services_total(self):
-        lines = self.service_lines.filter(is_deleted=False)
+        lines = self.service_lines.filter(is_deleted=False).exclude(location__is_deleted=True).exclude(location__is_active=False)
         return sum(
             l.quantity * l.client_rate
             for l in lines
@@ -354,7 +354,7 @@ class ProposalVersion(BaseModel):
 
     @property
     def one_time_services_total(self):
-        lines = self.service_lines.filter(is_deleted=False)
+        lines = self.service_lines.filter(is_deleted=False).exclude(location__is_deleted=True).exclude(location__is_active=False)
         return sum(
             l.quantity * l.client_rate
             for l in lines
@@ -515,7 +515,7 @@ class ProposalServiceLine(BaseModel):
     Client rates are owned by Security CRM. Employee salaries are NOT stored here.
     """
     proposal_version = models.ForeignKey(ProposalVersion, on_delete=models.CASCADE, related_name='service_lines')
-    location = models.ForeignKey(ClientLocation, on_delete=models.RESTRICT, related_name='service_lines', null=True, blank=True)
+    location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, related_name='service_lines', null=True, blank=True)
     service_type = models.ForeignKey(SecurityServiceType, on_delete=models.RESTRICT)
     quantity = models.PositiveIntegerField(default=1)
     
@@ -612,7 +612,7 @@ class SecurityAssessment(BaseModel):
     Belongs to a Proposal, Client Location, and Company.
     """
     proposal = models.ForeignKey(SecurityProposal, on_delete=models.CASCADE, related_name='assessments')
-    client_location = models.ForeignKey(ClientLocation, on_delete=models.RESTRICT, related_name='assessments')
+    client_location = models.ForeignKey(ClientLocation, on_delete=models.CASCADE, related_name='assessments')
     assessment_date = models.DateField(null=True, blank=True)
     assessed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='conducted_assessments')
     status = models.CharField(max_length=50, choices=SecurityAssessmentStatus.choices, default=SecurityAssessmentStatus.DRAFT)
@@ -690,7 +690,7 @@ class AssessmentStaffingRecommendation(BaseModel):
     """
     assessment = models.ForeignKey(SecurityAssessment, on_delete=models.CASCADE, related_name='staffing_recommendations')
     service_type = models.ForeignKey(SecurityServiceType, on_delete=models.RESTRICT, related_name='assessment_staffing_recommendations')
-    location = models.ForeignKey(ClientLocation, on_delete=models.RESTRICT, null=True, blank=True, related_name='assessment_staffing_recommendations')
+    location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True, related_name='assessment_staffing_recommendations')
     quantity = models.PositiveIntegerField(default=1)
     shift_coverage_notes = models.CharField(max_length=255, blank=True, default='')
     post_area = models.CharField(max_length=255, blank=True, default='')
@@ -767,7 +767,7 @@ class ContractEquipmentRequirement(BaseModel):
     It DOES NOT perform inventory issuance.
     """
     proposal_version = models.ForeignKey(ProposalVersion, on_delete=models.CASCADE, related_name='equipment_requirements')
-    location = models.ForeignKey(ClientLocation, on_delete=models.RESTRICT, related_name='equipment_requirements')
+    location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True, related_name='equipment_requirements')
     inventory_item = models.ForeignKey('inventory.Item', on_delete=models.SET_NULL, null=True, blank=True, related_name='security_equipment_requirements')
     item_name = models.CharField(max_length=255, blank=True, default='')
     description = models.CharField(max_length=255, blank=True, default='')

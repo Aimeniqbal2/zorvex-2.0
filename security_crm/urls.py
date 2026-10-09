@@ -10,7 +10,8 @@ from .views import (
     AssessmentEquipmentRecommendationViewSet,
     AssessmentAttachmentViewSet, ContractEquipmentRequirementViewSet,
     ProposalAdditionalChargeViewSet, ProposalSignedDocumentViewSet,
-    CostingGridView, CostingGridBatchSyncView, CostingGridImportExcelView
+    CostingGridView, CostingGridBatchSyncView, CostingGridImportExcelView,
+    CostingGridDeleteRowView
 )
 
 router = DefaultRouter()
@@ -43,6 +44,7 @@ app_name = 'security_crm'
 urlpatterns = [
     path('costing-grid/', CostingGridView.as_view(), name='costing-grid'),
     path('costing-grid/batch-sync/', CostingGridBatchSyncView.as_view(), name='costing-grid-batch-sync'),
+    path('costing-grid/delete-row/', CostingGridDeleteRowView.as_view(), name='costing-grid-delete-row'),
     path('costing-grid/import-excel/', CostingGridImportExcelView.as_view(), name='costing-grid-import-excel'),
     path('', include(router.urls)),
 ]
