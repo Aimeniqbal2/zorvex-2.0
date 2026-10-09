@@ -128,7 +128,10 @@ class SecurityProposalAdmin(admin.ModelAdmin):
 class ProposalServiceLineInline(admin.TabularInline):
     model = ProposalServiceLine
     extra = 0
-    fields = ('location', 'service_type', 'quantity', 'client_rate', 'single_ot_rate', 'double_ot_rate', 'billing_unit')
+    fields = ('location', 'service_type', 'quantity', 'client_rate', 'single_ot_rate', 'double_ot_rate', 'billing_unit', 'is_deleted')
+
+    def get_queryset(self, request):
+        return self.model.all_objects.all()
 
 
 class ContractEquipmentRequirementInline(admin.TabularInline):
@@ -149,6 +152,9 @@ class ProposalVersionAdmin(admin.ModelAdmin):
     list_filter = ('is_frozen', 'status', 'billing_cycle', 'payment_terms', 'company')
     inlines = [ProposalServiceLineInline, ContractEquipmentRequirementInline, ProposalAdditionalChargeInline]
 
+    def get_queryset(self, request):
+        return self.model.all_objects.all()
+
 
 @admin.register(SecurityServiceType)
 class SecurityServiceTypeAdmin(admin.ModelAdmin):
@@ -159,18 +165,36 @@ class SecurityServiceTypeAdmin(admin.ModelAdmin):
 
 @admin.register(ClientLocation)
 class ClientLocationAdmin(admin.ModelAdmin):
-    list_display = ('name', 'customer', 'company', 'is_active')
-    list_filter = ('is_active', 'company')
+    list_display = ('name', 'customer', 'company', 'is_active', 'is_deleted')
+    list_filter = ('is_deleted', 'is_active', 'company')
     search_fields = ('name', 'customer__name')
+    actions = ['restore_selected_locations']
 
     class Media:
         js = ('admin/js/filter_customers.js',)
 
+    def get_queryset(self, request):
+        return self.model.all_objects.all()
+
+    @admin.action(description="Restore selected locations (Undelete)")
+    def restore_selected_locations(self, request, queryset):
+        count = queryset.filter(is_deleted=True).update(is_deleted=False, is_active=True)
+        self.message_user(request, f"Successfully restored {count} locations.")
+
 
 @admin.register(ProposalServiceLine)
 class ProposalServiceLineAdmin(admin.ModelAdmin):
-    list_display = ('proposal_version', 'service_type', 'location', 'quantity', 'client_rate', 'billing_unit')
-    list_filter = ('service_type', 'billing_unit', 'company')
+    list_display = ('proposal_version', 'service_type', 'location', 'quantity', 'client_rate', 'is_deleted', 'billing_unit')
+    list_filter = ('is_deleted', 'service_type', 'billing_unit', 'company')
+    actions = ['restore_selected_lines']
+
+    def get_queryset(self, request):
+        return self.model.all_objects.all()
+
+    @admin.action(description="Restore selected requirements (Undelete)")
+    def restore_selected_lines(self, request, queryset):
+        count = queryset.filter(is_deleted=True).update(is_deleted=False)
+        self.message_user(request, f"Successfully restored {count} proposal service lines.")
 
 
 @admin.register(ProposalAdditionalCharge)

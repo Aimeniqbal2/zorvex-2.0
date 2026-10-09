@@ -6,6 +6,15 @@ class OperationalSiteAdmin(admin.ModelAdmin):
     list_display = ('name', 'company', 'crm_entity', 'is_active', 'is_deleted')
     list_filter = ('company', 'is_active', 'is_deleted')
     search_fields = ('name', 'crm_entity__name')
+    actions = ['restore_selected_sites']
+
+    def get_queryset(self, request):
+        return self.model.all_objects.all()
+
+    @admin.action(description="Restore selected sites (Undelete)")
+    def restore_selected_sites(self, request, queryset):
+        count = queryset.filter(is_deleted=True).update(is_deleted=False, is_active=True)
+        self.message_user(request, f"Successfully restored {count} operational sites.")
 
 @admin.register(ServiceContract)
 class ServiceContractAdmin(admin.ModelAdmin):
