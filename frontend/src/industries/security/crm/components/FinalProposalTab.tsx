@@ -64,10 +64,10 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         tax_rate: number | string;
         overhead_per_guard: number | string;
         service_charges_per_guard: number | string;
-        sales_tax_basis: 'SERVICE_CHARGES' | 'TOTAL_SALE' | 'MANUAL';
+        sales_tax_basis: 'TOTAL_SALE' | 'SERVICE_CHARGES' | 'MANUAL';
         sales_tax_override: number | string;
         withholding_tax_rate: number | string;
-        withholding_tax_basis: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT' | 'MANUAL';
+        withholding_tax_basis: 'INVOICE_AMOUNT' | 'SERVICE_CHARGES' | 'MANUAL';
         withholding_tax_override: number | string;
         total_sessi: number | string;
         total_eobi: number | string;
@@ -85,10 +85,10 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
         tax_rate: 8,
         overhead_per_guard: 6000,
         service_charges_per_guard: 3000,
-        sales_tax_basis: 'SERVICE_CHARGES',
+        sales_tax_basis: 'TOTAL_SALE',
         sales_tax_override: '',
         withholding_tax_rate: 7,
-        withholding_tax_basis: 'SERVICE_CHARGES',
+        withholding_tax_basis: 'INVOICE_AMOUNT',
         withholding_tax_override: '',
         total_sessi: 0,
         total_eobi: 0,
@@ -132,10 +132,10 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                 tax_rate: activeVersion.tax_rate ?? 8,
                 overhead_per_guard: activeVersion.overhead_per_guard ?? 6000,
                 service_charges_per_guard: activeVersion.service_charges_per_guard ?? 3000,
-                sales_tax_basis: (activeVersion.sales_tax_basis as any) || (activeVersion.sales_tax_override !== null && activeVersion.sales_tax_override !== undefined ? 'MANUAL' : 'SERVICE_CHARGES'),
+                sales_tax_basis: (activeVersion.sales_tax_basis as any) === 'INVOICE_AMOUNT' ? 'TOTAL_SALE' : ((activeVersion.sales_tax_basis as any) || (activeVersion.sales_tax_override !== null && activeVersion.sales_tax_override !== undefined ? 'MANUAL' : 'TOTAL_SALE')),
                 sales_tax_override: activeVersion.sales_tax_override ?? '',
                 withholding_tax_rate: activeVersion.withholding_tax_rate ?? 7,
-                withholding_tax_basis: (activeVersion.withholding_tax_basis as any) || (activeVersion.withholding_tax_override !== null && activeVersion.withholding_tax_override !== undefined ? 'MANUAL' : 'SERVICE_CHARGES'),
+                withholding_tax_basis: (activeVersion.withholding_tax_basis as any) || (activeVersion.withholding_tax_override !== null && activeVersion.withholding_tax_override !== undefined ? 'MANUAL' : 'INVOICE_AMOUNT'),
                 withholding_tax_override: activeVersion.withholding_tax_override ?? '',
                 total_sessi: activeVersion.total_sessi ?? 0,
                 total_eobi: activeVersion.total_eobi ?? 0,
@@ -856,6 +856,24 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
 
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
+                                        Sales Tax Rate (%)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        disabled={isFrozen || termsState.sales_tax_basis === 'MANUAL'}
+                                        value={termsState.tax_rate}
+                                        onChange={(e) => setTermsState({ ...termsState, tax_rate: e.target.value })}
+                                        className="fp-input"
+                                        style={{ fontFamily: 'monospace' }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="fp-form-row-3">
+                                <div className="fp-form-field">
+                                    <label className="fp-field-label">
                                         Sales Tax Basis
                                     </label>
                                     <select
@@ -864,9 +882,9 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         onChange={(e) => setTermsState({ ...termsState, sales_tax_basis: e.target.value as any })}
                                         className="fp-select"
                                     >
-                                        <option value="SERVICE_CHARGES">On Service Charges</option>
-                                        <option value="TOTAL_SALE">On Total Monthly Sale</option>
-                                        <option value="MANUAL">Manual Entry (From Fast Costing Grid)</option>
+                                        <option value="TOTAL_SALE">Total Monthly Sale × %</option>
+                                        <option value="SERVICE_CHARGES">On Service Charges × %</option>
+                                        <option value="MANUAL">Manual Entry (PKR)</option>
                                     </select>
                                     {termsState.sales_tax_basis === 'MANUAL' && (
                                         <input
@@ -883,9 +901,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         />
                                     )}
                                 </div>
-                            </div>
 
-                            <div className="fp-form-row-3">
                                 <div className="fp-form-field">
                                     <label className="fp-field-label">
                                         Withholding Tax Rate (%)
@@ -894,7 +910,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         type="number"
                                         min="0"
                                         step="0.1"
-                                        disabled={isFrozen}
+                                        disabled={isFrozen || termsState.withholding_tax_basis === 'MANUAL'}
                                         value={termsState.withholding_tax_rate}
                                         onChange={(e) => setTermsState({ ...termsState, withholding_tax_rate: e.target.value })}
                                         className="fp-input"
@@ -912,9 +928,9 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         onChange={(e) => setTermsState({ ...termsState, withholding_tax_basis: e.target.value as any })}
                                         className="fp-select"
                                     >
-                                        <option value="SERVICE_CHARGES">On Service Charges</option>
-                                        <option value="INVOICE_AMOUNT">On Invoice Amount</option>
-                                        <option value="MANUAL">Manual Entry (From Fast Costing Grid)</option>
+                                        <option value="INVOICE_AMOUNT">Invoice Amount × %</option>
+                                        <option value="SERVICE_CHARGES">Total Count × Service Charges × %</option>
+                                        <option value="MANUAL">Manual Entry (PKR)</option>
                                     </select>
                                     {termsState.withholding_tax_basis === 'MANUAL' && (
                                         <input

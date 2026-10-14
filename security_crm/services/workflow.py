@@ -881,7 +881,9 @@ class SecurityProposalWorkflowService:
 
         # 4. Sync Location Rates and SecurityPosts from ProposalServiceLines
         if active_ver and service_contract:
-            for line in active_ver.service_lines.filter(is_deleted=False):
+            active_site_desig_pairs = set()
+
+            for line in active_ver.service_lines.filter(is_deleted=False, quantity__gt=0):
                 st_name = line.service_type.name if line.service_type else 'Security Guard'
                 desig = Designation.objects.filter(
                     company=proposal.company,
@@ -925,6 +927,7 @@ class SecurityProposalWorkflowService:
                         cr.pay_rate = sal
                     cr.save(update_fields=['billing_rate', 'pay_rate'])
 
+                target_site = None
                 if line.location:
                     target_site = OperationalSite.objects.filter(
                         company=proposal.company,
@@ -932,86 +935,110 @@ class SecurityProposalWorkflowService:
                         name=line.location.name,
                         is_deleted=False
                     ).first()
-                    if target_site and desig:
-                        post_name = f"{line.service_type.name}"
-                        # Match by designation first to prevent duplicates like 'Security Guard (Civil)' vs 'Security Guard Civil'
+                if not target_site and operational_sites:
+                    target_site = operational_sites[0]
+
+                if target_site and desig:
+                    active_site_desig_pairs.add((target_site.id, desig.id))
+                    post_name = f"{line.service_type.name}"
+                    # Match by designation first to prevent duplicates like 'Security Guard (Civil)' vs 'Security Guard Civil'
+                    sp = SecurityPost.objects.filter(
+                        company=proposal.company,
+                        site=target_site,
+                        required_designation=desig,
+                        is_deleted=False
+                    ).first()
+                    if not sp:
                         sp = SecurityPost.objects.filter(
                             company=proposal.company,
                             site=target_site,
-                            required_designation=desig,
+                            post_name=post_name,
                             is_deleted=False
                         ).first()
-                        if not sp:
-                            sp = SecurityPost.objects.filter(
-                                company=proposal.company,
-                                site=target_site,
-                                post_name=post_name,
-                                is_deleted=False
-                            ).first()
 
-                        daily_pay = (sal / Decimal('30.00')).quantize(Decimal('0.01')) if sal else None
-                        if not sp:
-                            SecurityPost.objects.create(
+                    daily_pay = (sal / Decimal('30.00')).quantize(Decimal('0.01')) if sal else None
+                    if not sp:
+                        SecurityPost.objects.create(
+                            company=proposal.company,
+                            site=target_site,
+                            service_contract=service_contract,
+                            post_name=post_name,
+                            required_designation=desig,
+                            required_headcount=line.quantity,
+                            daily_pay_rate=daily_pay,
+                            monthly_pay_rate=sal or None,
+                            is_active=True
+                        )
+                    else:
+                        sp.post_name = post_name
+                        sp.required_designation = desig
+                        sp.daily_pay_rate = daily_pay
+                        sp.monthly_pay_rate = sal or None
+                        sp.required_headcount = line.quantity
+                        sp.service_contract = service_contract
+                        sp.is_active = True
+                        sp.save(update_fields=['post_name', 'required_designation', 'daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
+
+                    # Also sync to Operations SiteStaffingRequirement for coverage views
+                    try:
+                        from operations.models import Shift, SiteStaffingRequirement
+                        shift = Shift.objects.filter(company=proposal.company, is_active=True).first()
+                        if not shift:
+                            shift = Shift.objects.filter(company=proposal.company).first()
+                        if not shift:
+                            shift = Shift.objects.create(
                                 company=proposal.company,
-                                site=target_site,
-                                service_contract=service_contract,
-                                post_name=post_name,
-                                required_designation=desig,
-                                required_headcount=line.quantity,
-                                daily_pay_rate=daily_pay,
-                                monthly_pay_rate=sal or None,
+                                name='Standard 12h Shift',
+                                start_time='08:00',
+                                end_time='20:00',
                                 is_active=True
                             )
-                        else:
-                            sp.post_name = post_name
-                            sp.required_designation = desig
-                            sp.daily_pay_rate = daily_pay
-                            sp.monthly_pay_rate = sal or None
-                            sp.required_headcount = line.quantity
-                            sp.service_contract = service_contract
-                            sp.is_active = True
-                            sp.save(update_fields=['post_name', 'required_designation', 'daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
-
-                        # Also sync to Operations SiteStaffingRequirement for coverage views
-                        try:
-                            from operations.models import Shift, SiteStaffingRequirement
-                            shift = Shift.objects.filter(company=proposal.company, is_active=True).first()
-                            if not shift:
-                                shift = Shift.objects.filter(company=proposal.company).first()
-                            if not shift:
-                                shift = Shift.objects.create(
-                                    company=proposal.company,
-                                    name='Standard 12h Shift',
-                                    start_time='08:00',
-                                    end_time='20:00',
-                                    is_active=True
-                                )
-                            if shift:
-                                ssr = SiteStaffingRequirement.objects.filter(
+                        if shift:
+                            ssr = SiteStaffingRequirement.objects.filter(
+                                company=proposal.company,
+                                service_contract=service_contract,
+                                site=target_site,
+                                designation=desig,
+                                shift=shift,
+                                is_deleted=False
+                            ).first()
+                            if not ssr:
+                                SiteStaffingRequirement.objects.create(
                                     company=proposal.company,
                                     service_contract=service_contract,
                                     site=target_site,
                                     designation=desig,
                                     shift=shift,
-                                    is_deleted=False
-                                ).first()
-                                if not ssr:
-                                    SiteStaffingRequirement.objects.create(
-                                        company=proposal.company,
-                                        service_contract=service_contract,
-                                        site=target_site,
-                                        designation=desig,
-                                        shift=shift,
-                                        required_headcount=line.quantity,
-                                        effective_from=eff_date,
-                                        is_active=True
-                                    )
-                                else:
-                                    ssr.required_headcount = line.quantity
-                                    ssr.is_active = True
-                                    ssr.save(update_fields=['required_headcount', 'is_active'])
-                        except Exception as ssr_err:
-                            logger.warning(f"Error syncing SiteStaffingRequirement for {line}: {ssr_err}")
+                                    required_headcount=line.quantity,
+                                    effective_from=eff_date,
+                                    is_active=True
+                                )
+                            else:
+                                ssr.required_headcount = line.quantity
+                                ssr.is_active = True
+                                ssr.save(update_fields=['required_headcount', 'is_active'])
+                    except Exception as ssr_err:
+                        logger.warning(f"Error syncing SiteStaffingRequirement for {line}: {ssr_err}")
+
+            # Deactivate any posts under this contract whose designation is no longer in active proposal lines
+            for sp in SecurityPost.objects.filter(service_contract=service_contract, is_deleted=False):
+                if (sp.site_id, sp.required_designation_id) not in active_site_desig_pairs:
+                    sp.is_active = False
+                    sp.is_deleted = True
+                    sp.required_headcount = 0
+                    sp.save(update_fields=['is_active', 'is_deleted', 'required_headcount'])
+
+            # Deactivate any SiteStaffingRequirement under this contract no longer active
+            try:
+                from operations.models import SiteStaffingRequirement
+                for ssr in SiteStaffingRequirement.objects.filter(service_contract=service_contract, is_deleted=False):
+                    if (ssr.site_id, ssr.designation_id) not in active_site_desig_pairs:
+                        ssr.is_active = False
+                        ssr.is_deleted = True
+                        ssr.required_headcount = 0
+                        ssr.save(update_fields=['is_active', 'is_deleted', 'required_headcount'])
+            except Exception as ssr_clean_err:
+                logger.warning(f"Error deactivating removed SiteStaffingRequirement: {ssr_clean_err}")
 
         # Mark proposal ACTIVE and ready for operations
         if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:

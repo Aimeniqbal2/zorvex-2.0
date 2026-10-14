@@ -6,7 +6,6 @@ from security_crm.models import ClientLocation, SecurityProposal, ProposalVersio
 from operations.models import OperationalSite, SecurityPost
 from security_crm.services.workflow import SecurityProposalWorkflowService
 
-
 class Command(BaseCommand):
     help = "Safely restores soft-deleted CRM client locations, proposal requirements, and syncs them to Operations."
 

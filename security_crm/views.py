@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 from django.utils import timezone
@@ -1551,6 +1552,8 @@ class CostingGridView(APIView):
                     "service_charges_per_guard": float(ver.service_charges_per_guard if ver.service_charges_per_guard is not None else 3000),
                     "tax_wht_rate": float(ver.withholding_tax_rate if ver.withholding_tax_rate is not None else 7),
                     "sales_tax_rate": float(ver.tax_rate if ver.tax_rate is not None else 8),
+                    "sales_tax_basis": ver.sales_tax_basis if (ver and ver.sales_tax_basis and ver.sales_tax_basis != "INVOICE_AMOUNT") else "TOTAL_SALE",
+                    "withholding_tax_basis": ver.withholding_tax_basis if (ver and ver.withholding_tax_basis) else "INVOICE_AMOUNT",
                     "sales_tax_override": float(ver.sales_tax_override) if ver.sales_tax_override is not None else None,
                     "withholding_tax_override": float(ver.withholding_tax_override) if ver.withholding_tax_override is not None else None,
                     "sessi": float(ver.total_sessi if ver.total_sessi is not None else 0),
@@ -1653,6 +1656,8 @@ class CostingGridView(APIView):
                 "service_charges_per_guard": float(ver.service_charges_per_guard if (ver and ver.service_charges_per_guard is not None) else 3000),
                 "tax_wht_rate": float(ver.withholding_tax_rate if (ver and ver.withholding_tax_rate is not None) else 7),
                 "sales_tax_rate": float(ver.tax_rate if (ver and ver.tax_rate is not None) else 8),
+                "sales_tax_basis": ver.sales_tax_basis if (ver and ver.sales_tax_basis and ver.sales_tax_basis != "INVOICE_AMOUNT") else "TOTAL_SALE",
+                "withholding_tax_basis": ver.withholding_tax_basis if (ver and ver.withholding_tax_basis) else "INVOICE_AMOUNT",
                 "sales_tax_override": float(ver.sales_tax_override) if (ver and ver.sales_tax_override is not None) else None,
                 "withholding_tax_override": float(ver.withholding_tax_override) if (ver and ver.withholding_tax_override is not None) else None,
                 "sessi": float(ver.total_sessi if (ver and ver.total_sessi is not None) else 0),
@@ -1704,6 +1709,8 @@ class CostingGridView(APIView):
                     "service_charges_per_guard": float(ver.service_charges_per_guard if (ver and ver.service_charges_per_guard is not None) else 3000),
                     "tax_wht_rate": float(ver.withholding_tax_rate if (ver and ver.withholding_tax_rate is not None) else 7),
                     "sales_tax_rate": float(ver.tax_rate if (ver and ver.tax_rate is not None) else 8),
+                    "sales_tax_basis": ver.sales_tax_basis if (ver and ver.sales_tax_basis and ver.sales_tax_basis != "INVOICE_AMOUNT") else "TOTAL_SALE",
+                    "withholding_tax_basis": ver.withholding_tax_basis if (ver and ver.withholding_tax_basis) else "INVOICE_AMOUNT",
                     "sales_tax_override": float(ver.sales_tax_override) if (ver and ver.sales_tax_override is not None) else None,
                     "withholding_tax_override": float(ver.withholding_tax_override) if (ver and ver.withholding_tax_override is not None) else None,
                     "sessi": float(ver.total_sessi if (ver and ver.total_sessi is not None) else 0),
@@ -1868,8 +1875,10 @@ class CostingGridBatchSyncView(APIView):
                     eobi = _parse_dec(row.get('eobi'), 0)
                     ot_rate_val = _parse_dec(row.get('ot_rate'), 0)
 
-                    st_basis = 'MANUAL' if sales_tax_override is not None else row.get('sales_tax_basis', 'SERVICE_CHARGES')
-                    wht_basis = 'MANUAL' if withholding_tax_override is not None else row.get('withholding_tax_basis', 'SERVICE_CHARGES')
+                    st_basis = 'MANUAL' if sales_tax_override is not None else row.get('sales_tax_basis', 'TOTAL_SALE')
+                    if st_basis == 'INVOICE_AMOUNT':
+                        st_basis = 'TOTAL_SALE'
+                    wht_basis = 'MANUAL' if withholding_tax_override is not None else row.get('withholding_tax_basis', 'INVOICE_AMOUNT')
 
                     version = ProposalVersion.objects.filter(
                         company=company,
@@ -1900,11 +1909,12 @@ class CostingGridBatchSyncView(APIView):
                         version.tax_rate = st_rate
                         version.sales_tax_override = sales_tax_override
                         version.withholding_tax_override = withholding_tax_override
-                        if sales_tax_override is not None:
+                        if sales_tax_override is not None and row.get('sales_tax_basis') == 'MANUAL':
                             version.sales_tax_basis = 'MANUAL'
                         elif row.get('sales_tax_basis'):
-                            version.sales_tax_basis = row.get('sales_tax_basis')
-                        if withholding_tax_override is not None:
+                            raw_st = row.get('sales_tax_basis')
+                            version.sales_tax_basis = 'TOTAL_SALE' if raw_st == 'INVOICE_AMOUNT' else raw_st
+                        if withholding_tax_override is not None and row.get('withholding_tax_basis') == 'MANUAL':
                             version.withholding_tax_basis = 'MANUAL'
                         elif row.get('withholding_tax_basis'):
                             version.withholding_tax_basis = row.get('withholding_tax_basis')
@@ -1912,10 +1922,14 @@ class CostingGridBatchSyncView(APIView):
                         version.total_eobi = eobi
                         version.save()
 
+                    loc_q = Q(location=location)
+                    if loc_name:
+                        loc_q |= Q(location__name__iexact=loc_name)
+                    loc_q |= Q(location__isnull=True)
+
                     existing_version_lines = list(ProposalServiceLine.objects.filter(
-                        company=company,
-                        proposal_version=version,
-                        location=location
+                        Q(company=company) & Q(proposal_version=version) & loc_q,
+                        is_deleted=False
                     ).select_related('service_type'))
 
                     for prefix, role_name, role_code, default_weapon in role_definitions:
@@ -1946,7 +1960,7 @@ class CostingGridBatchSyncView(APIView):
                             )
 
                         # Match existing line by canonical role category
-                        target_line = None
+                        matched_lines = []
                         for cand in existing_version_lines:
                             cand_name = (cand.service_type.name or '').lower() if cand.service_type else ''
                             cand_code = (cand.service_type.code or '').upper() if cand.service_type else ''
@@ -1984,14 +1998,13 @@ class CostingGridBatchSyncView(APIView):
                                 matched_role = 'guard_civ'
 
                             if matched_role == prefix:
-                                if not target_line:
-                                    target_line = cand
-                                else:
-                                    cand.delete()
+                                matched_lines.append(cand)
 
                         if qty > 0:
-                            if target_line:
+                            if matched_lines:
+                                target_line = matched_lines[0]
                                 target_line.service_type = st
+                                target_line.location = location
                                 target_line.quantity = qty
                                 target_line.client_rate = rate
                                 target_line.guard_salary = sal
@@ -1999,8 +2012,12 @@ class CostingGridBatchSyncView(APIView):
                                     target_line.single_ot_rate = ot_rate_val
                                     target_line.double_ot_rate = ot_rate_val
                                 target_line.save()
+                                for extra in matched_lines[1:]:
+                                    extra.delete()
+                                    if extra in existing_version_lines:
+                                        existing_version_lines.remove(extra)
                             else:
-                                ProposalServiceLine.objects.create(
+                                new_line = ProposalServiceLine.objects.create(
                                     company=company,
                                     proposal_version=version,
                                     service_type=st,
@@ -2014,9 +2031,16 @@ class CostingGridBatchSyncView(APIView):
                                     shift_hours='12_HOURS',
                                     billing_unit='MONTHLY'
                                 )
+                                existing_version_lines.append(new_line)
                         else:
-                            if target_line:
-                                target_line.delete()
+                            for ml in matched_lines:
+                                ml.delete()
+                                if ml in existing_version_lines:
+                                    existing_version_lines.remove(ml)
+                            ProposalServiceLine.objects.filter(
+                                Q(company=company) & Q(proposal_version=version) & Q(service_type=st) & loc_q,
+                                is_deleted=False
+                            ).delete()
 
                     proposals_to_sync.add(proposal)
                     synced_count += 1

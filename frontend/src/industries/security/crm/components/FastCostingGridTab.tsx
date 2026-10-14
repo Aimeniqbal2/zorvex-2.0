@@ -176,16 +176,33 @@ export const FastCostingGridTab: React.FC = () => {
 
         const expense = totalStrength * overheadPerGuard; // Col AB
 
-        // Check for manual overrides or compute formula default
-        const salesTax = (r.sales_tax_override !== undefined && r.sales_tax_override !== null && r.sales_tax_override !== '')
-            ? Number(r.sales_tax_override)
-            : (serviceCharges * (salesTaxRate / 100)); // Col AH
+        // Dynamic Sales Tax Engine: Formula selection or manual PKR override
+        const rawStBasis = r.sales_tax_basis || (r.sales_tax_override !== undefined && r.sales_tax_override !== null && r.sales_tax_override !== '' ? 'MANUAL' : 'TOTAL_SALE');
+        const stBasis = rawStBasis === 'INVOICE_AMOUNT' ? 'TOTAL_SALE' : rawStBasis;
+        let salesTax = 0;
+        if (stBasis === 'MANUAL') {
+            salesTax = Number(r.sales_tax_override) || 0;
+        } else if (stBasis === 'SERVICE_CHARGES') {
+            salesTax = (totalStrength * serviceCharges) * (salesTaxRate / 100);
+        } else {
+            // TOTAL_SALE: standard service sales tax computed on billing base
+            salesTax = monthlySale * (salesTaxRate / 100);
+        }
 
-        const wht = (r.withholding_tax_override !== undefined && r.withholding_tax_override !== null && r.withholding_tax_override !== '')
-            ? Number(r.withholding_tax_override)
-            : (serviceCharges * (taxWhtRate / 100)); // Col AC
+        const invoiceAmount = monthlySale + salesTax; // Col AI: Gross Invoiced Amount
 
-        const invoiceAmount = monthlySale + salesTax; // Col AI
+        // Dynamic Withholding Tax Engine: Formula selection or manual PKR override
+        const whtBasis = r.withholding_tax_basis || (r.withholding_tax_override !== undefined && r.withholding_tax_override !== null && r.withholding_tax_override !== '' ? 'MANUAL' : 'INVOICE_AMOUNT');
+        let wht = 0;
+        if (whtBasis === 'MANUAL') {
+            wht = Number(r.withholding_tax_override) || 0;
+        } else if (whtBasis === 'SERVICE_CHARGES') {
+            wht = (totalStrength * serviceCharges) * (taxWhtRate / 100);
+        } else {
+            // INVOICE_AMOUNT: standard income tax withholding on gross invoice amount
+            wht = invoiceAmount * (taxWhtRate / 100);
+        }
+
         const difference = monthlySale - monthlySalary - wht - sessi - eobi; // Col AJ
         const diffPerHead = totalStrength > 0 ? (difference / totalStrength) : 0; // Col AK
         const profitLoss = monthlySale - monthlySalary - expense - wht; // Col AD
@@ -215,6 +232,7 @@ export const FastCostingGridTab: React.FC = () => {
         let totalExpense = 0;
         let totalServiceCharges = 0;
         let totalSalesTax = 0;
+        let totalInvoiceAmount = 0;
         let totalWht = 0;
         let totalSessi = 0;
         let totalEobi = 0;
@@ -230,6 +248,7 @@ export const FastCostingGridTab: React.FC = () => {
             totalExpense += calc.expense;
             totalServiceCharges += calc.serviceCharges;
             totalSalesTax += calc.salesTax;
+            totalInvoiceAmount += calc.invoiceAmount;
             totalWht += calc.wht;
             totalSessi += calc.sessi;
             totalEobi += calc.eobi;
@@ -251,6 +270,7 @@ export const FastCostingGridTab: React.FC = () => {
             totalExpense,
             totalServiceCharges,
             totalSalesTax,
+            totalInvoice: totalInvoiceAmount,
             totalWht,
             totalSessi,
             totalEobi,
@@ -517,6 +537,24 @@ export const FastCostingGridTab: React.FC = () => {
                     </div>
                     <div style={{ fontSize: '16px', fontWeight: 800, color: '#3b82f6' }}>
                         PKR {summary.totalSale.toLocaleString()}
+                    </div>
+                </div>
+
+                <div style={{
+                    background: 'var(--color-surface)',
+                    border: '1.5px solid rgba(139, 92, 246, 0.4)',
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 8px rgba(139, 92, 246, 0.08)'
+                }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.04em', color: '#8b5cf6', fontWeight: 700 }}>
+                        Total Invoice Amount
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: '#8b5cf6' }}>
+                        PKR {Math.round(summary.totalInvoice).toLocaleString()}
                     </div>
                 </div>
 
@@ -800,7 +838,7 @@ export const FastCostingGridTab: React.FC = () => {
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={13} style={{ 
+                            <th colSpan={15} style={{ 
                                 padding: '10px 16px', 
                                 textAlign: 'center', 
                                 backgroundColor: 'var(--color-surface)',
@@ -808,14 +846,14 @@ export const FastCostingGridTab: React.FC = () => {
                                 color: 'var(--color-text)',
                                 borderBottom: '1px solid var(--color-border)', 
                                 fontWeight: 700, 
-                                minWidth: '1355px', 
+                                minWidth: '1550px', 
                                 position: 'sticky', 
                                 top: 0, 
                                 zIndex: 35, 
                                 boxSizing: 'border-box', 
                                 height: '42px' 
                             }}>
-                                Live Costing, Tax & Margins
+                                Live Costing, Taxes & Invoicing
                             </th>
                             <th style={{ padding: '10px 8px', width: '50px', minWidth: '50px', position: 'sticky', top: 0, zIndex: 35, background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', boxSizing: 'border-box', height: '42px' }}></th>
                         </tr>
@@ -842,20 +880,26 @@ export const FastCostingGridTab: React.FC = () => {
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overhead Exp</th>
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>OT / Hr</th>
                             <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Service Charges</th>
-                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: '#fbbf24', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Sales Tax</th>
-                            <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Tax</th>
+                            {/* Statutory Taxes moved next to Service Charges */}
                             <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>SESSI</th>
                             <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>EOBI</th>
-                            <th style={{ padding: '9px 10px', width: '125px', minWidth: '125px', textAlign: 'right', color: '#34d399', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Gross Margin</th>
-                            <th style={{ padding: '9px 8px', width: '100px', minWidth: '100px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Diff / Head</th>
-                            <th style={{ padding: '9px 10px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#34d399', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Net Profit</th>
+                            {/* WHT 3-Element Control Set */}
+                            <th style={{ padding: '9px 6px', width: '150px', minWidth: '150px', textAlign: 'center', color: '#a855f7', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Formula</th>
+                            <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', color: '#a855f7', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT %</th>
+                            <th style={{ padding: '9px 8px', width: '105px', minWidth: '105px', textAlign: 'right', color: '#a855f7', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Tax</th>
+                            {/* ST 3-Element Control Set */}
+                            <th style={{ padding: '9px 6px', width: '140px', minWidth: '140px', textAlign: 'center', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>ST Formula</th>
+                            <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>ST %</th>
+                            <th style={{ padding: '9px 8px', width: '105px', minWidth: '105px', textAlign: 'right', color: '#f59e0b', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Sales Tax</th>
+                            {/* Total Invoice Amount (Prominent Column) */}
+                            <th style={{ padding: '9px 10px', width: '140px', minWidth: '140px', textAlign: 'right', color: '#8b5cf6', fontWeight: 800, position: 'sticky', top: '42px', zIndex: 35, background: 'rgba(139, 92, 246, 0.1)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Total Invoice Amount</th>
                             <th style={{ padding: '9px 6px', width: '50px', minWidth: '50px', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}></th>
                         </tr>
                     </thead>
                     <tbody>
                         {filteredRows.length === 0 ? (
                             <tr>
-                                <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 14} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 16} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                                     {isLoading ? 'Loading costing matrix...' : 'No client locations found. Click "+ Add Client / Location Row" or "Import Excel Sheet" to begin.'}
                                 </td>
                             </tr>
@@ -1131,56 +1175,8 @@ export const FastCostingGridTab: React.FC = () => {
                                             />
                                         </td>
 
-                                        {/* Col AH: Sales Tax (Editable input with default 8% on Col AG) */}
-                                        <td style={{ padding: '6px 4px' }}>
-                                            <input 
-                                                type="number"
-                                                step="any"
-                                                value={row.sales_tax_override !== undefined && row.sales_tax_override !== null ? row.sales_tax_override : (calc.salesTax !== undefined ? Math.round(calc.salesTax) : '')}
-                                                onChange={(e) => handleUpdateRow(row, 'sales_tax_override', e.target.value)}
-                                                placeholder="240"
-                                                title="Sales Tax in PKR (Auto-calculates from formula, or enter custom amount)"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 8px',
-                                                    fontSize: '12px',
-                                                    textAlign: 'right',
-                                                    borderRadius: '6px',
-                                                    border: (row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? '1.5px solid #f59e0b' : '1px solid var(--color-border)',
-                                                    background: (row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? 'rgba(245, 158, 11, 0.08)' : 'var(--color-surface)',
-                                                    color: '#f59e0b',
-                                                    fontWeight: 700
-                                                }}
-                                            />
-                                        </td>
-
-                                        {/* Col AC: Tax WHT 7% (Editable input with default 7% on Col AG) */}
-                                        <td style={{ padding: '6px 4px' }}>
-                                            <input 
-                                                type="number"
-                                                step="any"
-                                                value={row.withholding_tax_override !== undefined && row.withholding_tax_override !== null ? row.withholding_tax_override : (calc.wht !== undefined ? Math.round(calc.wht) : '')}
-                                                onChange={(e) => handleUpdateRow(row, 'withholding_tax_override', e.target.value)}
-                                                placeholder="210"
-                                                title="Income Tax / WHT in PKR (Auto-calculates from formula, or enter custom amount)"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 8px',
-                                                    fontSize: '12px',
-                                                    textAlign: 'right',
-                                                    borderRadius: '6px',
-                                                    border: (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '') ? '1.5px solid #a855f7' : '1px solid var(--color-border)',
-                                                    background: (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '') ? 'rgba(168, 85, 247, 0.08)' : 'var(--color-surface)',
-                                                    color: 'var(--color-text)',
-                                                    fontWeight: 700
-                                                }}
-                                            />
-                                        </td>
-
                                         {/* Col AE: SESSI (Editable inline cell) */}
-                                        <td style={{ padding: '6px 4px' }}>
+                                        <td style={{ padding: '6px 4px', width: '85px', minWidth: '85px' }}>
                                             <input 
                                                 type="number"
                                                 step="any"
@@ -1202,7 +1198,7 @@ export const FastCostingGridTab: React.FC = () => {
                                         </td>
 
                                         {/* Col AF: EOBI (Editable inline cell) */}
-                                        <td style={{ padding: '6px 4px' }}>
+                                        <td style={{ padding: '6px 4px', width: '85px', minWidth: '85px' }}>
                                             <input 
                                                 type="number"
                                                 step="any"
@@ -1223,29 +1219,242 @@ export const FastCostingGridTab: React.FC = () => {
                                             />
                                         </td>
 
-                                        {/* Col AJ: Gross Margin / Difference */}
-                                        <td style={{ padding: '10px 12px', textAlign: 'right', background: 'rgba(16, 185, 129, 0.04)' }}>
-                                            <span style={{
-                                                display: 'inline-block',
-                                                padding: '3px 8px',
-                                                borderRadius: '6px',
-                                                fontWeight: 800,
-                                                fontSize: '12.5px',
-                                                background: calc.difference >= 0 ? 'rgba(16, 185, 129, 0.14)' : 'rgba(239, 68, 68, 0.14)',
-                                                color: calc.difference >= 0 ? '#10b981' : '#ef4444'
-                                            }}>
-                                                PKR {Math.round(calc.difference).toLocaleString()}
-                                            </span>
+                                        {/* Col WHT Formula: Dropdown (Invoice Amount %, Service Charges %, Manual) */}
+                                        <td style={{ padding: '6px 4px', width: '150px', minWidth: '150px' }}>
+                                            <select
+                                                value={row.withholding_tax_basis || (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '' ? 'MANUAL' : 'INVOICE_AMOUNT')}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (val === 'MANUAL') {
+                                                        handleUpdateRow(row, 'withholding_tax_basis', 'MANUAL');
+                                                        if (row.withholding_tax_override === undefined || row.withholding_tax_override === null || row.withholding_tax_override === '') {
+                                                            handleUpdateRow(row, 'withholding_tax_override', Math.round(calc.wht));
+                                                        }
+                                                    } else {
+                                                        handleUpdateRow(row, 'withholding_tax_basis', val);
+                                                        handleUpdateRow(row, 'withholding_tax_override', null);
+                                                    }
+                                                }}
+                                                style={{
+                                                    width: '100%',
+                                                    height: '34px',
+                                                    padding: '0 6px',
+                                                    fontSize: '11px',
+                                                    fontWeight: 600,
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: 'var(--color-surface)',
+                                                    color: 'var(--color-text)'
+                                                }}
+                                            >
+                                                <option value="INVOICE_AMOUNT">Invoice Amount × %</option>
+                                                <option value="SERVICE_CHARGES">Total Count × SC × %</option>
+                                                <option value="MANUAL">Manual</option>
+                                            </select>
                                         </td>
 
-                                        {/* Col AK: Diff / Head */}
-                                        <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, fontSize: '13px', color: calc.diffPerHead >= 0 ? 'var(--color-text)' : '#ef4444' }}>
-                                            PKR {Math.round(calc.diffPerHead).toLocaleString()}
+                                        {/* Col WHT % */}
+                                        <td style={{ padding: '6px 4px', width: '65px', minWidth: '65px' }}>
+                                            <input 
+                                                type="number"
+                                                step="any"
+                                                min="0"
+                                                max="100"
+                                                disabled={row.withholding_tax_basis === 'MANUAL' || (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '' && row.withholding_tax_basis !== 'INVOICE_AMOUNT' && row.withholding_tax_basis !== 'SERVICE_CHARGES')}
+                                                value={row.tax_wht_rate !== undefined && row.tax_wht_rate !== null ? row.tax_wht_rate : 7}
+                                                onChange={(e) => handleUpdateRow(row, 'tax_wht_rate', e.target.value)}
+                                                placeholder="7"
+                                                title="Withholding Tax %"
+                                                style={{
+                                                    width: '100%',
+                                                    height: '34px',
+                                                    padding: '0 6px',
+                                                    fontSize: '12px',
+                                                    textAlign: 'center',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--color-border)',
+                                                    background: (row.withholding_tax_basis === 'MANUAL' || (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '' && row.withholding_tax_basis !== 'INVOICE_AMOUNT' && row.withholding_tax_basis !== 'SERVICE_CHARGES')) ? 'var(--color-surface-secondary)' : 'var(--color-surface)',
+                                                    color: 'var(--color-text)',
+                                                    fontWeight: 700,
+                                                    opacity: (row.withholding_tax_basis === 'MANUAL' || (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '' && row.withholding_tax_basis !== 'INVOICE_AMOUNT' && row.withholding_tax_basis !== 'SERVICE_CHARGES')) ? 0.5 : 1
+                                                }}
+                                            />
                                         </td>
 
-                                        {/* Col AD: Net Profit / Loss */}
-                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, fontSize: '13px', color: calc.profitLoss >= 0 ? '#10b981' : '#ef4444' }}>
-                                            PKR {Math.round(calc.profitLoss).toLocaleString()}
+                                        {/* Col WHT (PKR) */}
+                                        <td style={{ padding: '6px 4px', width: '105px', minWidth: '105px' }}>
+                                            {(() => {
+                                                const isManual = row.withholding_tax_basis === 'MANUAL' || (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '' && row.withholding_tax_basis !== 'INVOICE_AMOUNT' && row.withholding_tax_basis !== 'SERVICE_CHARGES');
+                                                return isManual ? (
+                                                    <input 
+                                                        type="number"
+                                                        step="any"
+                                                        value={row.withholding_tax_override !== undefined && row.withholding_tax_override !== null ? row.withholding_tax_override : Math.round(calc.wht)}
+                                                        onChange={(e) => handleUpdateRow(row, 'withholding_tax_override', e.target.value)}
+                                                        placeholder="0"
+                                                        title="Manual Withholding Tax in PKR"
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '34px',
+                                                            padding: '0 8px',
+                                                            fontSize: '12px',
+                                                            textAlign: 'right',
+                                                            borderRadius: '6px',
+                                                            border: '1.5px solid #a855f7',
+                                                            background: 'rgba(168, 85, 247, 0.08)',
+                                                            color: 'var(--color-text)',
+                                                            fontWeight: 700
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <div style={{
+                                                        height: '34px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'flex-end',
+                                                        padding: '0 8px',
+                                                        fontSize: '12.5px',
+                                                        fontWeight: 700,
+                                                        color: 'var(--color-text-muted)',
+                                                        background: 'rgba(168, 85, 247, 0.04)',
+                                                        borderRadius: '6px'
+                                                    }}>
+                                                        {Math.round(calc.wht).toLocaleString()}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </td>
+
+                                        {/* Col ST Formula: Dropdown (Total Sale %, On Service Charges %, Manual) */}
+                                        <td style={{ padding: '6px 4px', width: '140px', minWidth: '140px' }}>
+                                            {(() => {
+                                                const currentStBasis = (row.sales_tax_basis && row.sales_tax_basis !== 'INVOICE_AMOUNT') ? row.sales_tax_basis : ((row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? 'MANUAL' : 'TOTAL_SALE');
+                                                return (
+                                                    <select
+                                                        value={currentStBasis}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            if (val === 'MANUAL') {
+                                                                handleUpdateRow(row, 'sales_tax_basis', 'MANUAL');
+                                                                if (row.sales_tax_override === undefined || row.sales_tax_override === null || row.sales_tax_override === '') {
+                                                                    handleUpdateRow(row, 'sales_tax_override', Math.round(calc.salesTax));
+                                                                }
+                                                            } else {
+                                                                handleUpdateRow(row, 'sales_tax_basis', val);
+                                                                handleUpdateRow(row, 'sales_tax_override', null);
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '34px',
+                                                            padding: '0 6px',
+                                                            fontSize: '11.5px',
+                                                            fontWeight: 600,
+                                                            borderRadius: '6px',
+                                                            border: '1px solid var(--color-border)',
+                                                            background: 'var(--color-surface)',
+                                                            color: 'var(--color-text)'
+                                                        }}
+                                                    >
+                                                        <option value="TOTAL_SALE">Total Sale × %</option>
+                                                        <option value="SERVICE_CHARGES">On Service Charges × %</option>
+                                                        <option value="MANUAL">Manual</option>
+                                                    </select>
+                                                );
+                                            })()}
+                                        </td>
+
+                                        {/* Col ST % */}
+                                        <td style={{ padding: '6px 4px', width: '65px', minWidth: '65px' }}>
+                                            {(() => {
+                                                const currentStBasis = (row.sales_tax_basis && row.sales_tax_basis !== 'INVOICE_AMOUNT') ? row.sales_tax_basis : ((row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? 'MANUAL' : 'TOTAL_SALE');
+                                                const isStManual = currentStBasis === 'MANUAL';
+                                                return (
+                                                    <input 
+                                                        type="number"
+                                                        step="any"
+                                                        min="0"
+                                                        max="100"
+                                                        disabled={isStManual}
+                                                        value={row.sales_tax_rate !== undefined && row.sales_tax_rate !== null ? row.sales_tax_rate : 8}
+                                                        onChange={(e) => handleUpdateRow(row, 'sales_tax_rate', e.target.value)}
+                                                        placeholder="8"
+                                                        title="Sales Tax %"
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '34px',
+                                                            padding: '0 6px',
+                                                            fontSize: '12px',
+                                                            textAlign: 'center',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid var(--color-border)',
+                                                            background: isStManual ? 'var(--color-surface-secondary)' : 'var(--color-surface)',
+                                                            color: 'var(--color-text)',
+                                                            fontWeight: 700,
+                                                            opacity: isStManual ? 0.5 : 1
+                                                        }}
+                                                    />
+                                                );
+                                            })()}
+                                        </td>
+
+                                        {/* Col ST (PKR) */}
+                                        <td style={{ padding: '6px 4px', width: '105px', minWidth: '105px' }}>
+                                            {(() => {
+                                                const currentStBasis = (row.sales_tax_basis && row.sales_tax_basis !== 'INVOICE_AMOUNT') ? row.sales_tax_basis : ((row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '') ? 'MANUAL' : 'TOTAL_SALE');
+                                                const isStManual = currentStBasis === 'MANUAL';
+                                                return isStManual ? (
+                                                    <input 
+                                                        type="number"
+                                                        step="any"
+                                                        value={row.sales_tax_override !== undefined && row.sales_tax_override !== null ? row.sales_tax_override : Math.round(calc.salesTax)}
+                                                        onChange={(e) => handleUpdateRow(row, 'sales_tax_override', e.target.value)}
+                                                        placeholder="0"
+                                                        title="Manual Sales Tax in PKR"
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '34px',
+                                                            padding: '0 8px',
+                                                            fontSize: '12px',
+                                                            textAlign: 'right',
+                                                            borderRadius: '6px',
+                                                            border: '1.5px solid #f59e0b',
+                                                            background: 'rgba(245, 158, 11, 0.08)',
+                                                            color: '#f59e0b',
+                                                            fontWeight: 700
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <div style={{
+                                                        height: '34px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'flex-end',
+                                                        padding: '0 8px',
+                                                        fontSize: '12.5px',
+                                                        fontWeight: 700,
+                                                        color: '#f59e0b',
+                                                        background: 'rgba(245, 158, 11, 0.04)',
+                                                        borderRadius: '6px'
+                                                    }}>
+                                                        {Math.round(calc.salesTax).toLocaleString()}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </td>
+
+                                        {/* Total Invoice Amount Column (Prominent) */}
+                                        <td style={{
+                                            padding: '8px 12px',
+                                            textAlign: 'right',
+                                            fontWeight: 800,
+                                            fontSize: '13.5px',
+                                            color: '#8b5cf6',
+                                            background: 'rgba(139, 92, 246, 0.06)',
+                                            width: '140px',
+                                            minWidth: '140px'
+                                        }}>
+                                            PKR {Math.round(calc.invoiceAmount).toLocaleString()}
                                         </td>
 
                                         {/* Delete Action */}
@@ -1336,26 +1545,39 @@ export const FastCostingGridTab: React.FC = () => {
                                 <td style={{ padding: '14px 10px', textAlign: 'right', color: '#60a5fa', fontWeight: 800 }}>
                                     PKR {Math.round(summary.totalServiceCharges).toLocaleString()}
                                 </td>
-                                <td style={{ padding: '14px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 800 }}>
-                                    PKR {Math.round(summary.totalSalesTax).toLocaleString()}
-                                </td>
-                                <td style={{ padding: '14px 10px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
-                                    PKR {Math.round(summary.totalWht).toLocaleString()}
-                                </td>
                                 <td style={{ padding: '14px 8px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
                                     PKR {Math.round(summary.totalSessi).toLocaleString()}
                                 </td>
                                 <td style={{ padding: '14px 8px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
                                     PKR {Math.round(summary.totalEobi).toLocaleString()}
                                 </td>
-                                <td style={{ padding: '14px 12px', textAlign: 'right', color: summary.totalDifference >= 0 ? '#10b981' : '#ef4444' }}>
-                                    PKR {Math.round(summary.totalDifference).toLocaleString()}
+                                <td style={{ padding: '14px 6px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                    -
                                 </td>
-                                <td style={{ padding: '14px 10px', textAlign: 'right', color: 'var(--color-text)' }}>
-                                    PKR {summary.totalGuards > 0 ? Math.round(summary.totalDifference / summary.totalGuards).toLocaleString() : 0}
+                                <td style={{ padding: '14px 6px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                    -
                                 </td>
-                                <td style={{ padding: '14px 12px', textAlign: 'right', color: summary.totalProfit >= 0 ? '#10b981' : '#ef4444' }}>
-                                    PKR {Math.round(summary.totalProfit).toLocaleString()}
+                                <td style={{ padding: '14px 10px', textAlign: 'right', color: 'var(--color-text-muted)', fontWeight: 700 }}>
+                                    PKR {Math.round(summary.totalWht).toLocaleString()}
+                                </td>
+                                <td style={{ padding: '14px 6px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                    -
+                                </td>
+                                <td style={{ padding: '14px 6px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                    -
+                                </td>
+                                <td style={{ padding: '14px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 800 }}>
+                                    PKR {Math.round(summary.totalSalesTax).toLocaleString()}
+                                </td>
+                                <td style={{ 
+                                    padding: '14px 12px', 
+                                    textAlign: 'right', 
+                                    color: '#8b5cf6', 
+                                    fontWeight: 800,
+                                    fontSize: '13.5px',
+                                    background: 'rgba(139, 92, 246, 0.08)'
+                                }}>
+                                    PKR {Math.round(summary.totalInvoice).toLocaleString()}
                                 </td>
                                 <td></td>
                             </tr>

@@ -49,6 +49,45 @@ interface MonthlyMusterSheetTabProps {
     onBack?: () => void;
 }
 
+export const normalizeDesigCode = (nameOrTitle?: string, explicitCode?: string): string => {
+    if (explicitCode) {
+        const c = explicitCode.trim().toUpperCase();
+        if (['SUP', 'GD', 'CPO', 'LADY', 'CCTV', 'DEO', 'DVR', 'AG'].includes(c)) return c;
+        if (c.includes('SUP')) return 'SUP';
+        if (c.includes('CPO')) return 'CPO';
+        if (c.includes('LADY')) return 'LADY';
+        if (c.includes('CCTV')) return 'CCTV';
+        if (c.includes('DEO')) return 'DEO';
+    }
+    const title = (nameOrTitle || '').toLowerCase().trim();
+    if (title.includes('supervisor') || title.split(/\s+/).includes('sup')) return 'SUP';
+    if (title.includes('close protection') || title.includes('cpo')) return 'CPO';
+    if (title.includes('lady') || title.includes('searcher')) return 'LADY';
+    if (title.includes('cctv')) return 'CCTV';
+    if (title.includes('data entry') || title.includes('deo')) return 'DEO';
+    if (title.includes('driver')) return 'DVR';
+    if (title.includes('gunman') || title.includes('armed guard')) return 'AG';
+    return 'GD';
+};
+
+export const getDesigBadgeStyle = (code: string) => {
+    switch (code) {
+        case 'SUP':
+            return { bg: '#f3e8ff', color: '#7e22ce', border: '#d8b4fe' };
+        case 'CPO':
+            return { bg: '#ecfdf5', color: '#059669', border: '#6ee7b7' };
+        case 'LADY':
+            return { bg: '#fdf2f8', color: '#db2777', border: '#fbcfe8' };
+        case 'CCTV':
+            return { bg: '#fffbeb', color: '#b45309', border: '#fde68a' };
+        case 'DEO':
+            return { bg: '#e0e7ff', color: '#4338ca', border: '#c7d2fe' };
+        case 'GD':
+        default:
+            return { bg: '#f0f9ff', color: '#0369a1', border: '#bae6fd' };
+    }
+};
+
 export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ onBack }) => {
     const { addToast } = useToastStore();
     const today = new Date();
@@ -340,7 +379,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             return;
         }
 
-        const desigCode = req.designation_code || 'GD';
+        const desigCode = normalizeDesigCode(req.designation_name, req.designation_code);
         const desigTitle = req.designation_name || 'Security Guard';
 
         const initialDays: Record<string, string> = {};
@@ -801,10 +840,47 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ fontSize: '0.85rem', background: 'rgba(0, 0, 0, 0.2)', padding: '6px 14px', borderRadius: '6px', fontWeight: 600 }}>
+                            <div style={{ fontSize: '0.85rem', background: 'rgba(0, 0, 0, 0.2)', padding: '6px 14px', borderRadius: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span>Requirements: </span>
-                                <strong>{site.supervisors_req > 0 ? `${site.supervisors_req} SUP ` : ''}{site.guards_req} GD</strong>
-                                <span style={{ marginLeft: '10px', borderLeft: '1px solid rgba(255,255,255,0.4)', paddingLeft: '10px' }}>OT Rate: Rs. {(site.overtime_rate || 0).toLocaleString()}</span>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    {(() => {
+                                        if (site.requirements && site.requirements.length > 0) {
+                                            const countByCode = new Map<string, number>();
+                                            site.requirements.forEach(r => {
+                                                const code = normalizeDesigCode(r.designation_name, r.designation_code);
+                                                countByCode.set(code, (countByCode.get(code) || 0) + (r.required_headcount || 0));
+                                            });
+
+                                            const preferredOrder = ['SUP', 'GD', 'CPO', 'LADY', 'CCTV', 'DEO', 'DVR', 'AG'];
+                                            const sorted = Array.from(countByCode.entries()).sort((a, b) => {
+                                                const idxA = preferredOrder.indexOf(a[0]);
+                                                const idxB = preferredOrder.indexOf(b[0]);
+                                                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                                                if (idxA !== -1) return -1;
+                                                if (idxB !== -1) return 1;
+                                                return a[0].localeCompare(b[0]);
+                                            });
+
+                                            return sorted.map(([code, count]) => (
+                                                <strong key={code} style={{ 
+                                                    background: 'rgba(255, 255, 255, 0.18)', 
+                                                    padding: '2px 8px', 
+                                                    borderRadius: '4px',
+                                                    fontSize: '0.84rem',
+                                                    letterSpacing: '0.3px'
+                                                }}>
+                                                    {count} {code}
+                                                </strong>
+                                            ));
+                                        }
+
+                                        const fallbackParts: string[] = [];
+                                        if (site.supervisors_req > 0) fallbackParts.push(`${site.supervisors_req} SUP`);
+                                        if (site.guards_req > 0) fallbackParts.push(`${site.guards_req} GD`);
+                                        const fallbackStr = fallbackParts.length > 0 ? fallbackParts.join(' ') : '0 GD';
+                                        return <strong>{fallbackStr}</strong>;
+                                    })()}
+                                </div>
                             </div>
 
                             <button
@@ -912,17 +988,23 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                 {guard.employee_code}
                                             </td>
                                             <td style={{ padding: '6px 4px', position: 'sticky', left: '97px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2 }}>
-                                                <span style={{ 
-                                                    padding: '2px 7px', 
-                                                    borderRadius: '4px', 
-                                                    fontSize: '0.72rem', 
-                                                    fontWeight: 800,
-                                                    background: guard.designation === 'SUP' ? '#f3e8ff' : guard.designation === 'CPO' ? '#ecfdf5' : guard.designation === 'LADY' ? '#fdf2f8' : '#f0f9ff',
-                                                    color: guard.designation === 'SUP' ? '#7e22ce' : guard.designation === 'CPO' ? '#059669' : guard.designation === 'LADY' ? '#db2777' : '#0369a1',
-                                                    border: '1px solid ' + (guard.designation === 'SUP' ? '#d8b4fe' : guard.designation === 'CPO' ? '#6ee7b7' : guard.designation === 'LADY' ? '#fbcfe8' : '#bae6fd')
-                                                }}>
-                                                    {guard.designation}
-                                                </span>
+                                                {(() => {
+                                                    const dCode = normalizeDesigCode(guard.designation_full, guard.designation);
+                                                    const style = getDesigBadgeStyle(dCode);
+                                                    return (
+                                                        <span style={{ 
+                                                            padding: '2px 7px', 
+                                                            borderRadius: '4px', 
+                                                            fontSize: '0.72rem', 
+                                                            fontWeight: 800,
+                                                            background: style.bg,
+                                                            color: style.color,
+                                                            border: `1px solid ${style.border}`
+                                                        }}>
+                                                            {dCode}
+                                                        </span>
+                                                    );
+                                                })()}
                                             </td>
                                             <td style={{ padding: '6px 12px', position: 'sticky', left: '152px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, textAlign: 'left', fontWeight: 700, color: 'var(--color-text, #0f172a)', whiteSpace: 'nowrap' }}>
                                                 {guard.name}
@@ -1118,27 +1200,33 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    {reqList.map((req, idx) => (
-                                        <option key={idx} value={idx}>
-                                            {req.designation_name} ({req.designation_code}) — Req: {req.required_headcount} | Salary: Rs. {req.monthly_pay_rate.toLocaleString()}/mo | OT: Rs. {req.overtime_rate.toLocaleString()}/day
-                                        </option>
-                                    ))}
+                                    {reqList.map((req, idx) => {
+                                        const dCode = normalizeDesigCode(req.designation_name, req.designation_code);
+                                        return (
+                                            <option key={idx} value={idx}>
+                                                {req.designation_name} ({dCode}) — Req: {req.required_headcount} | Salary: Rs. {req.monthly_pay_rate.toLocaleString()}/mo | OT: Rs. {req.overtime_rate.toLocaleString()}/day
+                                            </option>
+                                        );
+                                    })}
                                 </select>
                             </div>
 
                             {/* Selected Position Compensation & Details Pill (Uneditable) */}
-                            {activeReq && (
-                                <div style={{ background: activeReq.designation_code === 'SUP' ? 'rgba(126, 34, 206, 0.06)' : 'rgba(2, 132, 199, 0.06)', border: `1px solid ${activeReq.designation_code === 'SUP' ? '#d8b4fe' : '#bae6fd'}`, borderRadius: '10px', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            {activeReq && (() => {
+                                const activeCode = normalizeDesigCode(activeReq.designation_name, activeReq.designation_code);
+                                const pillStyle = getDesigBadgeStyle(activeCode);
+                                return (
+                                <div style={{ background: pillStyle.bg, border: `1px solid ${pillStyle.border}`, borderRadius: '10px', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                         <span style={{
                                             padding: '4px 10px',
                                             borderRadius: '6px',
                                             fontWeight: 800,
                                             fontSize: '0.82rem',
-                                            background: activeReq.designation_code === 'SUP' ? '#7e22ce' : '#0284c7',
+                                            background: pillStyle.color,
                                             color: '#ffffff'
                                         }}>
-                                            {activeReq.designation_code}
+                                            {activeCode}
                                         </span>
                                         <div>
                                             <strong style={{ fontSize: '0.9rem', color: 'var(--color-text, #0f172a)' }}>{activeReq.designation_name}</strong>
@@ -1156,7 +1244,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                         </div>
                                     </div>
                                 </div>
-                            )}
+                                );
+                            })()}
 
                             {/* Workforce Personnel Search Input */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

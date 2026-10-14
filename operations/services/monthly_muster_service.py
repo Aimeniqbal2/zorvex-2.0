@@ -25,6 +25,45 @@ class MonthlyMusterService:
     """
 
     @staticmethod
+    def normalize_designation_code(name_or_title: str, explicit_code: str = '') -> str:
+        """
+        Normalizes any designation title or code into standardized industry badges:
+        SUP, GD, CPO, LADY, CCTV, DEO, DVR, AG.
+        """
+        if explicit_code:
+            c = str(explicit_code).strip().upper()
+            if c in ['SUP', 'GD', 'CPO', 'LADY', 'CCTV', 'DEO', 'DVR', 'AG']:
+                return c
+            if 'SUP' in c:
+                return 'SUP'
+            if 'CPO' in c:
+                return 'CPO'
+            if 'LADY' in c:
+                return 'LADY'
+            if 'CCTV' in c:
+                return 'CCTV'
+            if 'DEO' in c:
+                return 'DEO'
+
+        title = (name_or_title or '').strip().lower()
+        if 'supervisor' in title or 'sup' in title.split():
+            return 'SUP'
+        elif 'close protection' in title or 'cpo' in title.split() or 'cpo' in title:
+            return 'CPO'
+        elif 'lady' in title or 'searcher' in title:
+            return 'LADY'
+        elif 'cctv' in title:
+            return 'CCTV'
+        elif 'data entry' in title or 'deo' in title.split() or 'deo' in title:
+            return 'DEO'
+        elif 'driver' in title:
+            return 'DVR'
+        elif 'gunman' in title or 'armed guard' in title:
+            return 'AG'
+        else:
+            return 'GD'
+
+    @staticmethod
     def get_site_overtime_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None, fallback_monthly_salary=None):
         """
         Resolves the overtime rate for this site and requirement.
@@ -305,24 +344,18 @@ class MonthlyMusterService:
             for p in deduped_posts:
                 desig_obj = p.required_designation
                 desig_title = desig_obj.name if desig_obj else (p.post_name or 'Security Guard')
-                desig_code = 'GD'
-                dl = desig_title.lower()
-                if 'supervisor' in dl:
-                    desig_code = 'SUP'
+                explicit_code = getattr(desig_obj, 'code', '') or ''
+                desig_code = MonthlyMusterService.normalize_designation_code(desig_title, explicit_code)
+
+                if desig_code == 'SUP':
                     supervisors_req += p.required_headcount
                     if p.monthly_pay_rate and p.monthly_pay_rate > supervisors_sal:
                         supervisors_sal = p.monthly_pay_rate
-                elif 'lady' in dl:
-                    desig_code = 'LADY'
+                elif desig_code == 'GD':
                     guards_req += p.required_headcount
-                elif 'cctv' in dl:
-                    desig_code = 'CCTV'
-                    guards_req += p.required_headcount
-                elif 'cpo' in dl:
-                    desig_code = 'CPO'
-                    guards_req += p.required_headcount
+                    if p.monthly_pay_rate and p.monthly_pay_rate > guards_sal:
+                        guards_sal = p.monthly_pay_rate
                 else:
-                    guards_req += p.required_headcount
                     if p.monthly_pay_rate and p.monthly_pay_rate > guards_sal:
                         guards_sal = p.monthly_pay_rate
 
@@ -417,24 +450,21 @@ class MonthlyMusterService:
                 dep = item.get('deployment')
                 
                 # PREFER DEPLOYMENT DESIGNATION/ROLE AT THIS SPECIFIC SITE
+                desig_code_explicit = ''
                 if dep and dep.designation:
                     desig_title = dep.designation.name
+                    desig_code_explicit = getattr(dep.designation, 'code', '') or ''
                 elif dep and dep.post and dep.post.required_designation:
                     desig_title = dep.post.required_designation.name
+                    desig_code_explicit = getattr(dep.post.required_designation, 'code', '') or ''
+                elif dep and dep.post and dep.post.post_name:
+                    desig_title = dep.post.post_name
                 else:
                     desig_title = emp.designation.name if emp.designation else 'Guard'
+                    desig_code_explicit = getattr(emp.designation, 'code', '') or ''
                 
                 # Abbreviate designation for compact table badge
-                desig_code = 'GD'
-                desig_lower = desig_title.lower()
-                if 'supervisor' in desig_lower:
-                    desig_code = 'SUP'
-                elif 'lady' in desig_lower:
-                    desig_code = 'LADY'
-                elif 'cctv' in desig_lower:
-                    desig_code = 'CCTV'
-                elif 'cpo' in desig_lower:
-                    desig_code = 'CPO'
+                desig_code = MonthlyMusterService.normalize_designation_code(desig_title, desig_code_explicit)
 
                 days_map = {}
                 count_p = 0

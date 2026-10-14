@@ -110,10 +110,10 @@ export interface ProposalVersion {
     tax_rate?: string | number;
     overhead_per_guard?: string | number;
     service_charges_per_guard?: string | number;
-    sales_tax_basis?: 'SERVICE_CHARGES' | 'TOTAL_SALE' | 'MANUAL';
+    sales_tax_basis?: 'TOTAL_SALE' | 'SERVICE_CHARGES' | 'MANUAL';
     sales_tax_override?: string | number | null;
     withholding_tax_rate?: string | number;
-    withholding_tax_basis?: 'SERVICE_CHARGES' | 'INVOICE_AMOUNT' | 'MANUAL';
+    withholding_tax_basis?: 'INVOICE_AMOUNT' | 'SERVICE_CHARGES' | 'MANUAL';
     withholding_tax_override?: string | number | null;
     total_sessi?: string | number;
     total_eobi?: string | number;
