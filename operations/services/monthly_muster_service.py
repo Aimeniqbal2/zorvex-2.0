@@ -9,10 +9,12 @@ from django.core.exceptions import ValidationError
 
 from erp_core.models import BaseModel
 from operations.models import (
-    OperationalSite, SecurityPost, Deployment, DailyDutyPay,
-    DailyPayRateSource, DailyPayCalculationStatus, DeploymentStatus
+    OperationalSite, SecurityPost, Deployment, DailyDutyPay, DutyType,
+    DailyPayRateSource, DailyPayCalculationStatus, DeploymentStatus,
+    DeploymentAssignmentType
 )
 from hrm.models import Employee, WorkforceAttendance, AttendanceStatus, Designation
+from operations.services.attendance_validation_service import AttendanceValidationService, normalize_attendance_code
 import openpyxl
 
 
@@ -23,7 +25,7 @@ class MonthlyMusterService:
     """
 
     @staticmethod
-    def get_site_overtime_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None):
+    def get_site_overtime_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None, fallback_monthly_salary=None):
         """
         Resolves the overtime rate for this site and requirement.
         If an explicit overtime rate is configured in CRM (single_ot_rate or double_ot_rate), uses that.
@@ -92,8 +94,9 @@ class MonthlyMusterService:
         if p_first and p_first.monthly_pay_rate and p_first.monthly_pay_rate > Decimal('0.00'):
             return (p_first.monthly_pay_rate / div).quantize(Decimal('0.01'))
 
-        # 4. Fallback baseline: 35,000 / days_in_month
-        return (Decimal('35000.00') / div).quantize(Decimal('0.01'))
+        # 4. Fallback baseline: fallback_monthly_salary or 35,000 / days_in_month
+        fallback_sal = fallback_monthly_salary or Decimal('35000.00')
+        return (fallback_sal / div).quantize(Decimal('0.01'))
 
     @staticmethod
     def get_monthly_muster_grid(company, year: int, month: int, site_id=None):
@@ -201,9 +204,9 @@ class MonthlyMusterService:
         ).select_related('employee', 'site')
 
         # Map: (employee_id, date) -> list of duties across all sites
-        # Map: (employee_id, site_id, date) -> duty record
+        # Map: (employee_id, site_id, date) -> dict with 'primary' and 'overtime'
         global_duty_by_emp_date = defaultdict(list)
-        duty_by_emp_site_date = {}
+        duty_by_emp_site_date = defaultdict(lambda: {'primary': None, 'overtime': None, 'notes': ''})
 
         for att in attendances:
             key_global = (str(att.employee_id), att.date.day)
@@ -216,22 +219,26 @@ class MonthlyMusterService:
 
             if att.site_id:
                 key_site = (str(att.employee_id), str(att.site_id), att.date.day)
-                duty_by_emp_site_date[key_site] = {
-                    'status': att.status,
-                    'is_ot': False,
-                    'notes': att.notes
-                }
+                entry = duty_by_emp_site_date[key_site]
+                if att.status == AttendanceStatus.OVERTIME:
+                    entry['overtime'] = att
+                else:
+                    if not entry['primary']:
+                        entry['primary'] = att.status
+                if att.notes and not entry['notes']:
+                    entry['notes'] = att.notes
 
         for dp in duty_pays:
             key_global = (str(dp.employee_id), dp.duty_date.day)
-            is_ot = (dp.attendance_status == 'OVERTIME' or dp.rate_source == 'OVERTIME' or 'overtime' in (dp.notes or '').lower())
-            is_ds = ('double shift' in (dp.notes or '').lower() or 'wo+ot' in (dp.notes or '').lower())
+            is_ot = (dp.duty_type == DutyType.OVERTIME or dp.attendance_status == 'OVERTIME' or dp.rate_source == 'OVERTIME' or 'overtime' in (dp.notes or '').lower())
+            is_wp = (dp.attendance_status == AttendanceStatus.WORKED_WEEKLY_OFF or 'worked on week off' in (dp.notes or '').lower() or 'double shift' in (dp.notes or '').lower() or 'wo+ot' in (dp.notes or '').lower())
 
             global_duty_by_emp_date[key_global].append({
                 'type': 'duty_pay',
+                'duty_type': dp.duty_type,
                 'status': dp.attendance_status,
                 'is_ot': is_ot,
-                'is_ds': is_ds,
+                'is_wp': is_wp,
                 'site_id': str(dp.site_id) if dp.site_id else None,
                 'site_name': dp.site.name if dp.site else 'Unlinked',
                 'amount': float(dp.payable_amount)
@@ -239,14 +246,14 @@ class MonthlyMusterService:
 
             if dp.site_id:
                 key_site = (str(dp.employee_id), str(dp.site_id), dp.duty_date.day)
-                existing = duty_by_emp_site_date.get(key_site, {})
-                duty_by_emp_site_date[key_site] = {
-                    'status': dp.attendance_status,
-                    'is_ot': is_ot,
-                    'is_ds': is_ds,
-                    'amount': float(dp.payable_amount),
-                    'notes': dp.notes or existing.get('notes', '')
-                }
+                entry = duty_by_emp_site_date[key_site]
+                if is_ot:
+                    entry['overtime'] = dp
+                else:
+                    entry['primary'] = dp.attendance_status
+                    entry['primary_dp'] = dp
+                if dp.notes:
+                    entry['notes'] = dp.notes
 
         # Pre-fetch any extra employees that have duty records outside their current deployment
         all_site_emp_ids_from_duties = {k[0] for k in duty_by_emp_site_date.keys()}
@@ -277,7 +284,25 @@ class MonthlyMusterService:
                 site, days_in_month=days_in_month, prefetched_lines=site_lines, prefetched_posts=posts
             )
 
-            for p in posts:
+            # Deduplicate posts by required_designation_id / normalized title to prevent duplicate rows
+            deduped_posts = []
+            seen_post_keys = set()
+            # Prioritize posts with active deployments or clean non-parenthesized names
+            sorted_posts = sorted(
+                posts,
+                key=lambda p: (
+                    0 if '(' not in (p.post_name or '') else 1,
+                    -p.required_headcount
+                )
+            )
+            for p in sorted_posts:
+                key = str(p.required_designation_id) if p.required_designation_id else (p.post_name or '').strip().lower().replace('(', '').replace(')', '').replace('-', ' ').strip()
+                if key in seen_post_keys:
+                    continue
+                seen_post_keys.add(key)
+                deduped_posts.append(p)
+
+            for p in deduped_posts:
                 desig_obj = p.required_designation
                 desig_title = desig_obj.name if desig_obj else (p.post_name or 'Security Guard')
                 desig_code = 'GD'
@@ -345,9 +370,10 @@ class MonthlyMusterService:
             for dep in site_deployments:
                 emp = dep.employee
                 if emp and not emp.is_deleted:
+                    is_perm = (dep.assignment_type == DeploymentAssignmentType.PERMANENT)
                     employee_dict[str(emp.id)] = {
                         'employee': emp,
-                        'is_primary': True,
+                        'is_primary': is_perm,
                         'deployment': dep
                     }
 
@@ -413,82 +439,55 @@ class MonthlyMusterService:
                 days_map = {}
                 count_p = 0
                 count_ot = 0
+                count_po = 0
                 count_wo = 0
-                count_ds = 0
+                count_wp = 0
                 count_a = 0
                 count_l = 0
 
                 for d in range(1, days_in_month + 1):
                     site_duty = duty_by_emp_site_date.get((emp_id_str, site_id_str, d))
-                    global_duties = global_duty_by_emp_date.get((emp_id_str, d), [])
 
                     code = ''
                     if site_duty:
-                        status = site_duty.get('status')
-                        is_ot = site_duty.get('is_ot', False)
-                        is_ds = site_duty.get('is_ds', False)
+                        has_prim = site_duty.get('primary') is not None
+                        has_ot = site_duty.get('overtime') is not None
+                        prim_st = site_duty.get('primary')
 
-                        if is_ds:
-                            code = 'D'
-                            count_ds += 1
+                        if has_prim and has_ot and prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                            code = 'PO'
+                            count_po += 1
                             daily_totals[d] += 1
-                        elif is_ot:
+                        elif has_ot and (not has_prim or prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']):
                             code = 'O'
                             count_ot += 1
                             daily_totals[d] += 1
-                        elif status in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
-                            code = 'P'
-                            count_p += 1
-                            daily_totals[d] += 1
-                        elif status in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO']:
-                            code = 'W'
-                            count_wo += 1
-                            daily_vacations[d] += 1
-                        elif status in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
-                            code = 'A'
-                            count_a += 1
-                        elif status in ['LEAVE', 'PAID_LEAVE', 'SICK_LEAVE', 'L', 'PL', AttendanceStatus.ON_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.UNPAID_LEAVE]:
-                            code = 'L'
-                            count_l += 1
-                            daily_vacations[d] += 1
-                    else:
-                        # No duty explicitly at this site
-                        has_duty_elsewhere = any(
-                            gd.get('site_id') and gd.get('site_id') != site_id_str
-                            for gd in global_duties
-                        )
-                        if has_duty_elsewhere:
-                            code = ''  # Active at another location
-                        elif d <= current_day and item['is_primary']:
-                            # Carry forward attendance state from previous day as per business rule
-                            prev_code = days_map.get(str(d - 1)) if d > 1 else None
-                            if prev_code == 'P':
+                        elif has_prim:
+                            if prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']:
+                                code = 'O'
+                                count_ot += 1
+                                daily_totals[d] += 1
+                            elif prim_st in [AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP', 'DOUBLE_SHIFT']:
+                                code = 'WP'
+                                count_wp += 1
+                                daily_totals[d] += 1
+                            elif prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
                                 code = 'P'
                                 count_p += 1
                                 daily_totals[d] += 1
-                            elif prev_code == 'A':
+                            elif prim_st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO']:
+                                code = 'W'
+                                count_wo += 1
+                                daily_vacations[d] += 1
+                            elif prim_st in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
                                 code = 'A'
                                 count_a += 1
-                            elif prev_code == 'L':
+                            elif prim_st in ['LEAVE', 'PAID_LEAVE', 'SICK_LEAVE', 'L', 'PL', AttendanceStatus.ON_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.UNPAID_LEAVE]:
                                 code = 'L'
                                 count_l += 1
                                 daily_vacations[d] += 1
-                            elif prev_code in ['W', 'D']:
-                                # Following weekly off or double shift, returns to regular Present
-                                code = 'P'
-                                count_p += 1
-                                daily_totals[d] += 1
-                            elif prev_code == 'O':
-                                # Following overtime shift, defaults to Absent
-                                code = 'A'
-                                count_a += 1
-                            else:
-                                # Day 1 or unassigned prior day for deployed guard defaults to Present
-                                code = 'P'
-                                count_p += 1
-                                daily_totals[d] += 1
-                        else:
-                            code = ''
+                    else:
+                        code = ''
 
                     days_map[str(d)] = code
 
@@ -503,13 +502,15 @@ class MonthlyMusterService:
                     'designation_id': str(dep.designation_id) if dep and dep.designation_id else None,
                     'is_primary': item['is_primary'],
                     'days': days_map,
-                    'total_present': count_p,
-                    'total_ot': count_ot,
+                    'total_present': count_p + count_po,
+                    'total_ot': count_ot + count_po,
                     'total_wo': count_wo,
-                    'total_ds': count_ds,
+                    'total_wp': count_wp,
+                    'total_ds': count_wp,
+                    'total_po': count_po,
                     'total_absent': count_a,
                     'total_leave': count_l,
-                    'payable_days': count_p + count_wo + count_ds + count_l,
+                    'payable_days': count_p + count_po + count_wo + (count_wp * 2),
                 })
 
             site_blocks.append({
@@ -539,106 +540,28 @@ class MonthlyMusterService:
     def save_monthly_muster_updates(company, user, year: int, month: int, updates: list, added_guards: list = None, removed_guards: list = None):
         """
         Atomically saves cell updates into WorkforceAttendance and DailyDutyPay.
-        Enforces strict cross-location validation (No duplicate Present on same day).
-        Handles newly added guards (persisting deployments with specific post/designation roles) and removed guards.
+        Enforces strict cross-location validation (AttendanceValidationService).
+        Handles newly added guards and removed guards.
         """
         days_in_month = calendar.monthrange(year, month)[1]
         updates = updates or []
         added_guards = added_guards or []
         removed_guards = removed_guards or []
 
-        # Comprehensive cross-location validation on the payload:
-        # Rule 1: No multiple 'P' on the same day across different locations (1 primary P allowed).
-        # Rule 2: 'D' (Double Shift) consumes 24h capacity; cannot co-exist with any other shift.
-        # Rule 3: Max 1 Overtime 'O' shift per day across all sites.
-        # Rule 4: If marked on Leave 'L', cannot perform active duty (P, O, D) on the same day.
-        # Rule 5: If on Weekly Off 'W', cannot have separate 'P' on the same day (should be 'D').
-        emp_day_codes = defaultdict(dict)  # (emp_id, day) -> { site_id: code }
-        for up in updates:
-            emp_id = str(up.get('employee_id'))
-            day = int(up.get('day'))
-            site_id = str(up.get('site_id'))
-            code = str(up.get('code', '')).strip().upper()
-            if code in ['1', 'P']: code = 'P'
-            elif code in ['O', 'OT']: code = 'O'
-            elif code in ['D', 'DS', 'WO+OT', '2']: code = 'D'
-            elif code in ['W', 'WO', 'OFF']: code = 'W'
-            elif code in ['L', 'PL', 'SL']: code = 'L'
-            elif code == 'A': code = 'A'
-
-            if code:
-                emp_day_codes[(emp_id, day)][site_id] = code
-
-        # Validate within the incoming batch
-        for (emp_id, day), site_code_map in emp_day_codes.items():
-            if len(site_code_map) > 1:
-                emp = Employee.objects.filter(id=emp_id).first()
-                emp_name = f"{emp.first_name} ({emp.display_code})" if emp else emp_id
-                codes_list = list(site_code_map.values())
-
-                if codes_list.count('P') > 1:
-                    raise ValidationError(
-                        f"Guard {emp_name} cannot be marked Present (P) at multiple locations on Day {day}. Only 1 primary shift (P) allowed; mark Overtime (O) for extra locations."
-                    )
-                if codes_list.count('O') > 1:
-                    raise ValidationError(
-                        f"Guard {emp_name} cannot have multiple Overtime (O) shifts on Day {day}. Maximum 1 overtime shift allowed per day."
-                    )
-                if 'D' in codes_list:
-                    raise ValidationError(
-                        f"Guard {emp_name} has Double Shift (D) on Day {day}, which consumes their full 24h capacity. No additional duties can be marked on this date."
-                    )
-                if 'L' in codes_list and ('P' in codes_list or 'O' in codes_list or 'D' in codes_list):
-                    raise ValidationError(
-                        f"Guard {emp_name} is marked on Leave (L) on Day {day}. Cannot assign active duty (P/O/D) while on leave."
-                    )
-
-        # Validate against existing database duties at other sites not in this payload
-        if updates:
-            update_emp_days = set(emp_day_codes.keys())
-            emp_ids = list({k[0] for k in update_emp_days})
-            days = list({k[1] for k in update_emp_days})
-            dates_to_check = [date(year, month, d) for d in days]
-
-            existing_db_duties = DailyDutyPay.objects.filter(
-                company=company,
-                employee_id__in=emp_ids,
-                duty_date__in=dates_to_check,
-                is_deleted=False
-            ).exclude(
-                site_id__in=[up.get('site_id') for up in updates]
-            ).select_related('employee', 'site')
-
-            for db_dp in existing_db_duties:
-                key = (str(db_dp.employee_id), db_dp.duty_date.day)
-                incoming_codes = emp_day_codes.get(key, {})
-                for inc_site_id, inc_code in incoming_codes.items():
-                    db_status = db_dp.attendance_status
-                    db_is_ot = (db_status == 'OVERTIME' or db_dp.rate_source == 'OVERTIME')
-                    db_is_ds = ('double shift' in (db_dp.notes or '').lower() or 'wo+ot' in (db_dp.notes or '').lower())
-                    db_code = 'D' if db_is_ds else ('O' if db_is_ot else ('P' if db_status == AttendanceStatus.PRESENT else 'OTHER'))
-
-                    emp_name = f"{db_dp.employee.first_name} ({db_dp.employee.display_code})"
-                    other_site_name = db_dp.site.name if db_dp.site else "another site"
-
-                    if inc_code == 'P' and db_code == 'P':
-                        raise ValidationError(
-                            f"Guard {emp_name} is already marked Present (P) at '{other_site_name}' on Day {db_dp.duty_date.day}. Mark Overtime (O) for extra location."
-                        )
-                    if inc_code == 'D' or db_code == 'D':
-                        raise ValidationError(
-                            f"Guard {emp_name} has Double Shift (D) at '{other_site_name}' on Day {db_dp.duty_date.day}. Full 24h capacity reached."
-                        )
-                    if inc_code == 'O' and db_code == 'O':
-                        raise ValidationError(
-                            f"Guard {emp_name} already has Overtime (O) at '{other_site_name}' on Day {db_dp.duty_date.day}. Maximum 1 overtime shift allowed per day."
-                        )
+        # 1. Authoritative cross-location validation
+        val_res = AttendanceValidationService.validate_monthly_muster_batch(
+            company=company,
+            year=year,
+            month=month,
+            updates=updates
+        )
+        normalized_updates = val_res.get('normalized_updates', [])
 
         with transaction.atomic():
             start_date = date(year, month, 1)
             end_date = date(year, month, days_in_month)
 
-            # 1. Process Removed Guards: clean up duty pays, attendances, and deployments for this site in this month
+            # 2. Process Removed Guards
             for rm in removed_guards:
                 rm_site_id = rm.get('site_id')
                 rm_emp_id = rm.get('employee_id')
@@ -666,7 +589,7 @@ class MonthlyMusterService:
                         is_deleted=False
                     ).update(is_deleted=True)
 
-            # 2. Process Added Guards: ensure active Deployment exists for this site with chosen post and role
+            # 3. Process Added Guards
             for add_item in added_guards:
                 add_site_id = add_item.get('site_id')
                 add_emp_id = add_item.get('employee_id')
@@ -685,7 +608,7 @@ class MonthlyMusterService:
                             post_obj = SecurityPost.objects.filter(site=site_obj, is_active=True, is_deleted=False).first()
 
                         contract_obj = post_obj.service_contract if post_obj else None
-                        
+
                         desig_obj = None
                         if add_desig_id:
                             desig_obj = Designation.objects.filter(id=add_desig_id, company=company, is_deleted=False).first()
@@ -698,13 +621,23 @@ class MonthlyMusterService:
                             post_obj.monthly_pay_rate if (post_obj and post_obj.monthly_pay_rate) else None
                         )
 
+                        emp_days = [
+                            int(up['day']) for up in normalized_updates
+                            if str(up.get('employee_id')) == str(add_emp_id)
+                            and str(up.get('site_id')) == str(add_site_id)
+                            and str(up.get('code', '')).strip()
+                        ]
+                        earliest_day = min(emp_days) if emp_days else 1
+                        guard_start_date = date(year, month, earliest_day)
+
                         dep, created = Deployment.objects.get_or_create(
                             company=company,
                             site=site_obj,
                             employee=emp_obj,
                             is_deleted=False,
                             defaults={
-                                'start_date': start_date,
+                                'start_date': guard_start_date,
+                                'assignment_type': DeploymentAssignmentType.TEMPORARY,
                                 'status': DeploymentStatus.ACTIVE,
                                 'post': post_obj,
                                 'service_contract': contract_obj,
@@ -727,24 +660,31 @@ class MonthlyMusterService:
                                 update_cols.append('location_monthly_salary')
                             dep.save(update_fields=update_cols)
 
-            # 3. Process Cell Updates
-            for up in updates:
+            # 4. Pre-fetch sites, employees, deployments to optimize processing
+            site_ids = list({up['site_id'] for up in normalized_updates if up.get('site_id')})
+            emp_ids = list({up['employee_id'] for up in normalized_updates if up.get('employee_id')})
+
+            sites_map = {str(s.id): s for s in OperationalSite.objects.filter(id__in=site_ids, company=company).select_related('crm_entity')}
+            emps_map = {str(e.id): e for e in Employee.objects.filter(id__in=emp_ids, company=company).select_related('designation')}
+            deployments_qs = Deployment.objects.filter(
+                company=company, site_id__in=site_ids, employee_id__in=emp_ids, is_deleted=False
+            ).select_related('post', 'designation')
+            deployments_map = {(str(d.site_id), str(d.employee_id)): d for d in deployments_qs}
+
+            # 5. Process Normalized Cell Updates
+            for up in normalized_updates:
                 site_id = up.get('site_id')
                 emp_id = up.get('employee_id')
                 day = int(up.get('day'))
-                raw_code = str(up.get('code', '')).strip().upper()
+                code = up.get('code', '')
                 target_date = date(year, month, day)
 
-                site = OperationalSite.objects.filter(id=site_id, company=company).first()
-                emp = Employee.objects.filter(id=emp_id, company=company).first()
+                site = sites_map.get(str(site_id))
+                emp = emps_map.get(str(emp_id))
                 if not site or not emp:
                     continue
 
-                # Rate resolution for this guard at this specific site
-                guard_dep = Deployment.objects.filter(
-                    company=company, site=site, employee=emp, is_deleted=False
-                ).select_related('post', 'designation').first()
-
+                guard_dep = deployments_map.get((str(site.id), str(emp.id)))
                 effective_post = guard_dep.post if guard_dep and guard_dep.post else None
                 effective_desig = guard_dep.designation if guard_dep and guard_dep.designation else emp.designation
 
@@ -756,59 +696,34 @@ class MonthlyMusterService:
                     site_monthly_sal = Decimal('35000.00')
 
                 daily_rate = (site_monthly_sal / Decimal(str(days_in_month))).quantize(Decimal('0.01'))
-                ot_rate = MonthlyMusterService.get_site_overtime_rate(site, desig=effective_desig, days_in_month=days_in_month)
+                ot_rate = MonthlyMusterService.get_site_overtime_rate(
+                    site, desig=effective_desig, days_in_month=days_in_month,
+                    fallback_monthly_salary=site_monthly_sal
+                )
                 if ot_rate <= Decimal('0.00'):
                     ot_rate = daily_rate
 
-                # Canonicalize duty code
-                code = raw_code
-                if code in ['P', '1']:
-                    code = 'P'
-                elif code in ['O', 'OT']:
-                    code = 'O'
-                elif code in ['D', 'WO+OT', 'DS', '2']:
-                    code = 'D'
-                elif code in ['W', 'WO', 'OFF']:
-                    code = 'W'
-                elif code == 'A':
-                    code = 'A'
-                elif code in ['L', 'PL', 'SL']:
-                    code = 'L'
-
                 if code == 'P':
-                    # Check database for collision with another site on this same date
-                    existing_att = WorkforceAttendance.objects.filter(
-                        company=company,
-                        employee=emp,
-                        date=target_date,
-                        is_deleted=False,
-                        status=AttendanceStatus.PRESENT
-                    ).exclude(site=site).first()
-
-                    if existing_att and existing_att.site:
-                        raise ValidationError(
-                            f"Guard {emp.first_name} ({emp.display_code}) is already marked Present at '{existing_att.site.name}' on Day {day}. You can only mark Overtime (O) at '{site.name}'."
-                        )
-
-                    # 1. Update/Create primary WorkforceAttendance
+                    # 1. Primary WorkforceAttendance
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
                         date=target_date,
+                        status=AttendanceStatus.PRESENT,
                         defaults={
-                            'status': AttendanceStatus.PRESENT,
                             'site': site,
                             'is_finalized': True,
-                            'recorded_by': user,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
                             'notes': f'Muster: Present at {site.name}'
                         }
                     )
-
-                    # 2. Update/Create DailyDutyPay
+                    # 2. Primary DailyDutyPay
                     DailyDutyPay.objects.update_or_create(
                         company=company,
                         employee=emp,
                         duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
                         defaults={
                             'site': site,
                             'attendance_status': AttendanceStatus.PRESENT,
@@ -820,16 +735,113 @@ class MonthlyMusterService:
                             'notes': f'Muster: Primary Duty at {site.name}'
                         }
                     )
+                    # Clean up overtime records at THIS site
+                    DailyDutyPay.objects.filter(
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
+                    ).delete()
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                    ).delete()
 
                 elif code == 'O':
-                    # Overtime duty at this site
+                    # Standalone Overtime duty at this site (primary shift is at another location)
+                    # 1. Overtime WorkforceAttendance
+                    WorkforceAttendance.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        date=target_date,
+                        status=AttendanceStatus.OVERTIME,
+                        defaults={
+                            'site': site,
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Overtime Shift at {site.name}'
+                        }
+                    )
+                    # 2. Overtime DailyDutyPay
                     DailyDutyPay.objects.update_or_create(
                         company=company,
                         employee=emp,
                         duty_date=target_date,
+                        duty_type=DutyType.OVERTIME,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.OVERTIME,
+                            'rate_source': DailyPayRateSource.POST_RATE,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': ot_rate,
+                            'payable_percentage': Decimal('100.00'),
+                            'payable_amount': ot_rate,
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Overtime Shift at {site.name}'
+                        }
+                    )
+                    # Delete any primary duty pay at THIS site
+                    DailyDutyPay.objects.filter(
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.PRIMARY
+                    ).delete()
+                    # Delete any primary attendance at THIS site
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site
+                    ).exclude(status=AttendanceStatus.OVERTIME).delete()
+
+                elif code == 'PO':
+                    # Present + Overtime at the SAME site
+                    # 1. Primary WorkforceAttendance
+                    WorkforceAttendance.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        date=target_date,
+                        status=AttendanceStatus.PRESENT,
+                        defaults={
+                            'site': site,
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Present Shift at {site.name}'
+                        }
+                    )
+                    # 2. Overtime WorkforceAttendance
+                    WorkforceAttendance.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        date=target_date,
+                        status=AttendanceStatus.OVERTIME,
+                        defaults={
+                            'site': site,
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Overtime Shift at {site.name}'
+                        }
+                    )
+                    # 3. Primary DailyDutyPay
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
                         defaults={
                             'site': site,
                             'attendance_status': AttendanceStatus.PRESENT,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': daily_rate,
+                            'payable_percentage': Decimal('100.00'),
+                            'payable_amount': daily_rate,
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Primary Shift at {site.name}'
+                        }
+                    )
+                    # 4. Overtime DailyDutyPay
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.OVERTIME,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.OVERTIME,
                             'rate_source': DailyPayRateSource.POST_RATE,
                             'client': site.crm_entity,
                             'daily_payable_rate': ot_rate,
@@ -840,99 +852,191 @@ class MonthlyMusterService:
                         }
                     )
 
-                elif code == 'D':
-                    # Double Shift on Paid Off Day: Earns paid off allowance + duty pay
-                    double_rate = ot_rate if ot_rate > Decimal('0.00') else daily_rate
+                elif code == 'WP':
+                    # Worked on Week Off (Policy A: Double Pay = Base + Base = 2x daily rate)
+                    wp_total_pay = (daily_rate * Decimal('2.00')).quantize(Decimal('0.01'))
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
                         date=target_date,
+                        status=AttendanceStatus.WORKED_WEEKLY_OFF,
                         defaults={
-                            'status': AttendanceStatus.WEEKLY_OFF,
                             'site': site,
-                            'recorded_by': user,
-                            'notes': f'Muster: Double Shift (Off Day Worked) at {site.name}'
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Worked on Week Off at {site.name}'
                         }
                     )
                     DailyDutyPay.objects.update_or_create(
                         company=company,
                         employee=emp,
                         duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
                         defaults={
                             'site': site,
-                            'attendance_status': AttendanceStatus.PRESENT,
+                            'attendance_status': AttendanceStatus.WORKED_WEEKLY_OFF,
                             'rate_source': DailyPayRateSource.POST_RATE,
                             'client': site.crm_entity,
-                            'daily_payable_rate': double_rate,
-                            'payable_percentage': Decimal('100.00'),
-                            'payable_amount': double_rate,
+                            'daily_payable_rate': daily_rate,
+                            'payable_percentage': Decimal('200.00'),
+                            'payable_amount': wp_total_pay,
                             'calculation_status': DailyPayCalculationStatus.CALCULATED,
-                            'notes': f'Muster: Double Shift on Weekly Off at {site.name}'
+                            'notes': f'Muster: Worked on Week Off (Double Pay: Base {daily_rate} + Base {daily_rate}) at {site.name}'
                         }
                     )
+                    DailyDutyPay.objects.filter(
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
+                    ).delete()
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                    ).delete()
 
                 elif code == 'W':
-                    # Scheduled Weekly Off
+                    # Scheduled Weekly Off (Base salary covers this day; 100% daily rate)
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
                         date=target_date,
+                        status=AttendanceStatus.WEEKLY_OFF,
                         defaults={
-                            'status': AttendanceStatus.WEEKLY_OFF,
                             'site': site,
-                            'recorded_by': user,
-                            'notes': 'Muster: Scheduled Weekly Off'
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Scheduled Weekly Off at {site.name}'
                         }
                     )
-                    # Off day has 0.00 variable duty pay since base salary covers it
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.WEEKLY_OFF,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': daily_rate,
+                            'payable_percentage': Decimal('100.00'),
+                            'payable_amount': daily_rate,
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Scheduled Weekly Off at {site.name}'
+                        }
+                    )
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
+                    ).delete()
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
                     ).delete()
 
                 elif code == 'A':
-                    # Absent
+                    # Genuine Absence (0% payable)
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
                         date=target_date,
+                        status=AttendanceStatus.ABSENT,
                         defaults={
-                            'status': AttendanceStatus.ABSENT,
                             'site': site,
-                            'recorded_by': user,
-                            'notes': 'Muster: Absent'
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Absent at {site.name}'
+                        }
+                    )
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.ABSENT,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': daily_rate,
+                            'payable_percentage': Decimal('0.00'),
+                            'payable_amount': Decimal('0.00'),
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Absent at {site.name}'
                         }
                     )
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
+                    ).delete()
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
                     ).delete()
 
                 elif code == 'L':
-                    # Leave
+                    # Unpaid Leave (0% payable)
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
                         date=target_date,
+                        status=AttendanceStatus.UNPAID_LEAVE,
                         defaults={
-                            'status': AttendanceStatus.PAID_LEAVE,
                             'site': site,
-                            'recorded_by': user,
-                            'notes': 'Muster: Leave'
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Unpaid Leave at {site.name}'
+                        }
+                    )
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.UNPAID_LEAVE,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': daily_rate,
+                            'payable_percentage': Decimal('0.00'),
+                            'payable_amount': Decimal('0.00'),
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Unpaid Leave at {site.name}'
                         }
                     )
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
+                    ).delete()
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
                     ).delete()
 
                 elif code == '':
-                    # Cleared cell: remove duty pay and attendance for this site on this date
+                    # Cleared cell: remove duty pay ONLY for THIS site!
                     DailyDutyPay.objects.filter(
-                        company=company, employee=emp, duty_date=target_date
-                    ).delete()
-                    WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date
+                        company=company, employee=emp, duty_date=target_date, site=site
                     ).delete()
 
-        return {'status': 'success', 'saved_updates': len(updates), 'added_guards': len(added_guards), 'removed_guards': len(removed_guards)}
+                    # Remove attendance records recorded for this site
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site
+                    ).delete()
+
+                    # If guard has remaining duty at another site on this date, ensure primary attendance is synced
+                    other_site_duty = DailyDutyPay.objects.filter(
+                        company=company, employee=emp, duty_date=target_date, duty_type=DutyType.PRIMARY
+                    ).exclude(site=site).first()
+
+                    if other_site_duty:
+                        WorkforceAttendance.objects.update_or_create(
+                            company=company,
+                            employee=emp,
+                            date=target_date,
+                            status=other_site_duty.attendance_status,
+                            defaults={
+                                'site': other_site_duty.site,
+                                'is_finalized': True,
+                                'recorded_by': user if (user and user.is_authenticated) else None,
+                                'notes': f'Muster: Synchronized from primary duty at {other_site_duty.site.name if other_site_duty.site else "Other Site"}'
+                            }
+                        )
+
+        return {'status': 'success', 'saved_updates': len(normalized_updates), 'added_guards': len(added_guards), 'removed_guards': len(removed_guards)}
 
     @staticmethod
     def import_monthly_muster_excel(company, user, file_obj, year: int, month: int):
@@ -1023,24 +1127,7 @@ class MonthlyMusterService:
                     break
                 cell_val = str(row[col_idx] or '').strip().upper()
 
-                code = ''
-                if cell_val in ['1', 'P']:
-                    code = '1'
-                elif cell_val == 'OT':
-                    code = 'OT'
-                elif cell_val in ['WO+OT', 'DS']:
-                    code = 'WO+OT'
-                elif cell_val in ['WO', 'OFF']:
-                    code = 'WO'
-                elif cell_val in ['L', 'PL', 'SL']:
-                    code = 'L'
-                elif cell_val in ['A', '0']:
-                    code = 'A'
-                elif cell_val == '':
-                    if d <= current_day:
-                        code = 'A'
-                    else:
-                        code = ''
+                code = normalize_attendance_code(cell_val)
 
                 if code:
                     updates_to_save.append({
@@ -1118,16 +1205,28 @@ class MonthlyMusterService:
             if d_str not in date_records:
                 date_records[d_str] = []
             
-            is_ot = (dp.attendance_status == 'OVERTIME' or dp.rate_source == 'OVERTIME')
-            is_ds = (dp.attendance_status == 'DOUBLE_SHIFT')
+            is_ot = (dp.attendance_status == AttendanceStatus.OVERTIME or dp.rate_source == 'OVERTIME' or dp.duty_type == DutyType.OVERTIME)
+            is_ds = (dp.attendance_status in [AttendanceStatus.DOUBLE_SHIFT, AttendanceStatus.WORKED_WEEKLY_OFF, 'DOUBLE_SHIFT', 'WORKED_WEEKLY_OFF'])
+            is_leave = (dp.attendance_status in [AttendanceStatus.UNPAID_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.ON_LEAVE, 'UNPAID_LEAVE', 'PAID_LEAVE', 'LEAVE'])
+            is_absent = (dp.attendance_status in [AttendanceStatus.ABSENT, 'ABSENT'])
+            is_wo = (dp.attendance_status in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF'])
             
             if is_ot:
                 total_ot_shifts += 1
+                record_duty_type = 'OVERTIME'
             elif is_ds:
                 total_double_shifts += 1
                 total_days_worked += 1
+                record_duty_type = 'WORKED_WEEKLY_OFF'
+            elif is_leave:
+                record_duty_type = 'UNPAID_LEAVE'
+            elif is_absent:
+                record_duty_type = 'ABSENT'
+            elif is_wo:
+                record_duty_type = 'WEEKLY_OFF'
             else:
                 total_days_worked += 1
+                record_duty_type = 'PRESENT'
 
             total_earned += dp.payable_amount
 
@@ -1135,7 +1234,7 @@ class MonthlyMusterService:
                 'date': d_str,
                 'site_name': dp.site.name if dp.site else 'Central',
                 'customer_name': dp.client.name if dp.client else '',
-                'duty_type': 'OVERTIME' if is_ot else ('DOUBLE_SHIFT' if is_ds else 'PRESENT'),
+                'duty_type': record_duty_type,
                 'amount': float(dp.payable_amount),
                 'notes': dp.notes or ''
             })

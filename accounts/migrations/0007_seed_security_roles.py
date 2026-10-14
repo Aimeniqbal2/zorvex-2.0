@@ -2,10 +2,15 @@
 from django.db import migrations
 
 def seed_roles(apps, schema_editor):
+    Company = apps.get_model('companies', 'Company')
     CompanyRole = apps.get_model('accounts', 'CompanyRole')
+    company = Company.objects.first()
+    if not company:
+        return
     roles = [{'name': 'CEO', 'code': 'ceo', 'permissions': ['operations.read', 'operations.write', 'operations.all_sites', 'hrm.read', 'hrm.write', 'finance.read', 'finance.write', 'inventory.read', 'inventory.write', 'crm.read', 'crm.write']}, {'name': 'COO', 'code': 'coo', 'permissions': ['operations.read', 'operations.write', 'operations.all_sites', 'hrm.read', 'inventory.read']}, {'name': 'General Manager', 'code': 'gm', 'permissions': ['operations.read', 'operations.write', 'operations.all_sites', 'hrm.read', 'inventory.read']}, {'name': 'Operations Manager', 'code': 'ops_manager', 'permissions': ['operations.read', 'operations.write', 'operations.all_sites']}, {'name': 'HR Manager', 'code': 'hr_manager', 'permissions': ['hrm.read', 'hrm.write']}, {'name': 'Finance Manager', 'code': 'finance_manager', 'permissions': ['finance.read', 'finance.write']}, {'name': 'Warehouse Manager', 'code': 'warehouse_manager', 'permissions': ['inventory.read', 'inventory.write']}, {'name': 'Site Supervisor', 'code': 'site_supervisor', 'permissions': ['operations.read', 'operations.write', 'operations.assigned_sites']}]
     for i, role in enumerate(roles):
         CompanyRole.objects.create(
+            company=company,
             name=role['name'],
             code=role['code'],
             permissions=role['permissions'],

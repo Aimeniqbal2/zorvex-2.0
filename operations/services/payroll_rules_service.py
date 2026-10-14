@@ -10,10 +10,11 @@ from django.utils import timezone
 from hrm.models import (
     Employee, EmployeeSalaryAssignment, CompanyPayrollPolicy,
     StatutoryScheme, StatutorySchemeType, StatutoryRule,
-    EmployeeStatutoryEnrollment, OvertimeRecord, OvertimeStatus, OvertimeType
+    EmployeeStatutoryEnrollment, OvertimeRecord, OvertimeStatus, OvertimeType,
+    AttendanceStatus
 )
 from operations.models import (
-    DailyDutyPay, DailyPayCalculationStatus,
+    DailyDutyPay, DutyType, DailyPayCalculationStatus,
     PayrollAddition, PayrollAdditionType, PayrollAdditionFrequency,
     PayrollDeduction, PayrollDeductionType, PayrollDeductionFrequency,
     PayrollCalculationStatus, EmployeePayrollCalculation, PayrollCalculationLine
@@ -120,34 +121,54 @@ class PayrollRulesService:
         duty_earnings_total = Decimal('0.00')
         duty_days_count = 0
         unresolved_duty_count = 0
+        muster_ot_amount = Decimal('0.00')
 
         for duty in daily_duties:
-            duty_days_count += 1
             duty_amt = _quantize_decimal(duty.payable_amount)
             duty_rate = _quantize_decimal(duty.daily_payable_rate)
 
-            # Check for unresolved duty pay blocker
-            if duty.calculation_status == DailyPayCalculationStatus.UNRESOLVED or duty_rate <= Decimal('0.00'):
+            # Check for unresolved duty pay blocker (exempting genuine absences and unpaid leaves)
+            if duty.calculation_status == DailyPayCalculationStatus.UNRESOLVED or (
+                duty_rate <= Decimal('0.00') and duty.attendance_status not in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]
+            ):
                 unresolved_duty_count += 1
                 reason = duty.unresolved_reason or "Missing rate setup"
                 blockers.append(f"Unresolved daily duty pay on {duty.duty_date}: {reason}")
 
-            duty_earnings_total += duty_amt
-
             worked_ctx = duty.post.post_name if duty.post else (duty.site.name if duty.site else "General Duty")
-            lines_to_create.append(PayrollCalculationLine(
-                company_id=company_id,
-                calculation=calc,
-                line_type='DUTY_EARNING',
-                category='EARNING',
-                description=f"Duty: {worked_ctx} ({duty.attendance_status} - {float(duty.payable_percentage):.0f}%)",
-                duty_date=duty.duty_date,
-                units=Decimal('1.00'),
-                rate=duty_rate,
-                amount=duty_amt,
-                reference_id=str(duty.id),
-                notes=f"Rate source: {duty.get_rate_source_display()}"
-            ))
+
+            if duty.duty_type == DutyType.OVERTIME:
+                muster_ot_amount += duty_amt
+                lines_to_create.append(PayrollCalculationLine(
+                    company_id=company_id,
+                    calculation=calc,
+                    line_type='OVERTIME',
+                    category='EARNING',
+                    description=f"Overtime Duty: {worked_ctx} (₨ {duty_rate})",
+                    duty_date=duty.duty_date,
+                    units=Decimal('1.00'),
+                    rate=duty_rate,
+                    amount=duty_amt,
+                    reference_id=str(duty.id),
+                    notes=f"Overtime shift performed at {duty.site.name if duty.site else 'Central'}"
+                ))
+            else:
+                if duty.attendance_status not in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]:
+                    duty_days_count += 1
+                duty_earnings_total += duty_amt
+                lines_to_create.append(PayrollCalculationLine(
+                    company_id=company_id,
+                    calculation=calc,
+                    line_type='DUTY_EARNING',
+                    category='EARNING',
+                    description=f"Duty: {worked_ctx} ({duty.attendance_status} - {float(duty.payable_percentage):.0f}%)",
+                    duty_date=duty.duty_date,
+                    units=Decimal('1.00'),
+                    rate=duty_rate,
+                    amount=duty_amt,
+                    reference_id=str(duty.id),
+                    notes=f"Rate source: {duty.get_rate_source_display()}"
+                ))
 
         calc.duty_earnings = _quantize_decimal(duty_earnings_total)
         calc.duty_days_count = duty_days_count
@@ -278,7 +299,7 @@ class PayrollRulesService:
         calc.single_ot_amount = single_ot_amt
         calc.double_ot_hours = double_ot_hrs
         calc.double_ot_amount = double_ot_amt
-        calc.total_ot_amount = _quantize_decimal(single_ot_amt + double_ot_amt)
+        calc.total_ot_amount = _quantize_decimal(single_ot_amt + double_ot_amt + muster_ot_amount)
 
         # ----------------------------------------------------------------------
         # 4. Allowances & Configurable Additions (One-time and Recurring)

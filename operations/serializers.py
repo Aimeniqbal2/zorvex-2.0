@@ -41,9 +41,13 @@ class OperationalSiteSerializer(BaseModelValidatorMixin, serializers.ModelSerial
         read_only_fields = ('id', 'company', 'created_at', 'updated_at', 'is_deleted')
 
     def get_contract_codes(self, obj):
+        if hasattr(obj, '_prefetched_objects_cache') and 'service_contracts' in obj._prefetched_objects_cache:
+            return [c.contract_code for c in obj.service_contracts.all() if not c.is_deleted]
         return list(obj.service_contracts.filter(is_deleted=False).values_list('contract_code', flat=True))
 
     def get_active_posts_count(self, obj):
+        if hasattr(obj, '_prefetched_objects_cache') and 'security_posts' in obj._prefetched_objects_cache:
+            return len([p for p in obj.security_posts.all() if not p.is_deleted and p.is_active])
         return obj.security_posts.filter(is_deleted=False, is_active=True).count()
 
 
@@ -370,15 +374,6 @@ class SecurityAttendanceSerializer(BaseModelValidatorMixin, serializers.ModelSer
     def get_site_name(self, obj):
         if obj.site:
             return obj.site.name
-        # Fallback to DutyAssignment
-        duty = DutyAssignment.objects.filter(
-            company_id=obj.company_id,
-            employee_id=obj.employee_id,
-            date=obj.date,
-            is_deleted=False
-        ).select_related('site').first()
-        if duty and duty.site:
-            return duty.site.name
         return None
 
 

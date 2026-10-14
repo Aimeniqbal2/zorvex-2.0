@@ -137,45 +137,160 @@ class LogEntryAdmin(admin.ModelAdmin):
 
 class UniversalAuditMixin:
     """
-    Mixin applied to ModelAdmin classes that injects:
-    1. Exact Created Date, Time, Second
-    2. Exact Updated Date, Time, Second
-    3. Created By User (with badge)
-    4. Last Updated By User (with badge)
-    5. Complete Chronological Audit Trail & Activity History Table
+    Mixin dynamically injected into all ModelAdmin classes across all 151+ ERP models.
+    Guarantees:
+    1. Exact Created Date, Time & Second (YYYY-MM-DD HH:MM:SS)
+    2. Exact Created By User (Username, Full Name badge)
+    3. Exact Updated Date, Time & Second (YYYY-MM-DD HH:MM:SS)
+    4. Exact Last Updated / Edited / Deleted By User (Action & Username badge)
+    5. Complete Chronological Audit Trail & Activity History Table on Detail Views
     """
+
+    def _resolve_creator_user(self, obj):
+        if not obj:
+            return None
+        # 1. Direct model attribute check
+        for attr in ('created_by', 'recorded_by', 'assigned_by', 'author', 'user'):
+            u = getattr(obj, attr, None)
+            if u:
+                return u
+        # 2. LogEntry check for ADDITION
+        try:
+            ct = ContentType.objects.get_for_model(obj.__class__)
+            entry = LogEntry.objects.filter(
+                content_type=ct, object_id=str(obj.pk), action_flag=ADDITION
+            ).select_related('user').order_by('action_time').first()
+            if entry and entry.user:
+                return entry.user
+            # Earliest LogEntry of any flag
+            entry = LogEntry.objects.filter(
+                content_type=ct, object_id=str(obj.pk)
+            ).select_related('user').order_by('action_time').first()
+            if entry and entry.user:
+                return entry.user
+        except Exception:
+            pass
+        return None
+
+    def _resolve_updater_user(self, obj):
+        if not obj:
+            return None
+        # 1. Direct model attribute check
+        for attr in ('updated_by', 'modified_by'):
+            u = getattr(obj, attr, None)
+            if u:
+                return u
+        # 2. LogEntry check for latest CHANGE or DELETION
+        try:
+            ct = ContentType.objects.get_for_model(obj.__class__)
+            entry = LogEntry.objects.filter(
+                content_type=ct, object_id=str(obj.pk), action_flag__in=[CHANGE, DELETION]
+            ).select_related('user').order_by('-action_time').first()
+            if entry and entry.user:
+                return (entry.user, entry.action_flag)
+            # Latest LogEntry of any flag
+            entry = LogEntry.objects.filter(
+                content_type=ct, object_id=str(obj.pk)
+            ).select_related('user').order_by('-action_time').first()
+            if entry and entry.user:
+                return (entry.user, entry.action_flag)
+        except Exception:
+            pass
+        return None
+
+    def _format_user_badge(self, user, role_prefix=""):
+        if not user:
+            return mark_safe('<span style="background: #f1f5f9; color: #475569; padding: 2px 7px; border-radius: 5px; font-size: 11px; font-weight: 500; white-space: nowrap;">👤 System (Initial Import)</span>')
+        username = getattr(user, 'username', str(user))
+        first_name = getattr(user, 'first_name', '')
+        last_name = getattr(user, 'last_name', '')
+        full = f"{first_name} {last_name}".strip()
+        email = getattr(user, 'email', '')
+        display = f"{username} ({full})" if full else username
+        title_text = f"{display} &lt;{email}&gt;" if email else display
+        prefix_html = f"<strong>{role_prefix}:</strong> " if role_prefix else ""
+        return format_html(
+            '<span style="background: #e0e7ff; color: #3730a3; padding: 2px 7px; border-radius: 5px; font-weight: 500; font-size: 11px; white-space: nowrap;" title="{}">'
+            '👤 {}{}</span>',
+            title_text, prefix_html, display
+        )
+
+    # -----------------------------------------------------------------------
+    # Table List Display Columns (Visible in ChangeList Table for Every Model)
+    # -----------------------------------------------------------------------
 
     @admin.display(description='Created At (Sec)', ordering='created_at')
     def audit_created_sec(self, obj):
-        dt = getattr(obj, 'created_at', None)
+        dt = getattr(obj, 'created_at', None) or getattr(obj, 'created_on', None) or getattr(obj, 'date_created', None) or getattr(obj, 'timestamp', None)
         if dt:
             local_dt = timezone.localtime(dt) if timezone.is_aware(dt) else dt
             return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            ct = ContentType.objects.get_for_model(obj.__class__)
+            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).order_by('action_time').first()
+            if entry and entry.action_time:
+                local_dt = timezone.localtime(entry.action_time) if timezone.is_aware(entry.action_time) else entry.action_time
+                return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            pass
         return '-'
+
+    @admin.display(description='Created By')
+    def audit_created_by_user(self, obj):
+        u = self._resolve_creator_user(obj)
+        return self._format_user_badge(u)
 
     @admin.display(description='Updated At (Sec)', ordering='updated_at')
     def audit_updated_sec(self, obj):
-        dt = getattr(obj, 'updated_at', None)
+        dt = getattr(obj, 'updated_at', None) or getattr(obj, 'updated_on', None) or getattr(obj, 'date_updated', None) or getattr(obj, 'modified_at', None)
         if dt:
             local_dt = timezone.localtime(dt) if timezone.is_aware(dt) else dt
             return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            ct = ContentType.objects.get_for_model(obj.__class__)
+            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).order_by('-action_time').first()
+            if entry and entry.action_time:
+                local_dt = timezone.localtime(entry.action_time) if timezone.is_aware(entry.action_time) else entry.action_time
+                return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            pass
         return '-'
+
+    @admin.display(description='Updated / Action By')
+    def audit_updated_by_user(self, obj):
+        if getattr(obj, 'is_deleted', False):
+            updater_res = self._resolve_updater_user(obj)
+            u = updater_res[0] if isinstance(updater_res, tuple) else updater_res
+            u_str = getattr(u, 'username', 'System') if u else 'System'
+            return format_html(
+                '<span style="background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 5px; font-weight: 600; font-size: 11px; white-space: nowrap;">'
+                '🔴 DELETED by {}</span>',
+                u_str
+            )
+        updater_res = self._resolve_updater_user(obj)
+        if updater_res:
+            u = updater_res[0] if isinstance(updater_res, tuple) else updater_res
+            return self._format_user_badge(u)
+        return mark_safe('<span style="color: #64748b; font-size: 11px; font-style: italic;">Original (No edits)</span>')
+
+    # -----------------------------------------------------------------------
+    # Detail Change Form Section (Visible on Detail Page of Every Single Entry)
+    # -----------------------------------------------------------------------
 
     @admin.display(description='Created Date & Time (Seconds)')
     def audit_created_at_display(self, obj):
         if not obj:
             return '-'
-        dt = getattr(obj, 'created_at', None)
+        dt = getattr(obj, 'created_at', None) or getattr(obj, 'created_on', None) or getattr(obj, 'date_created', None)
         if dt:
             local_dt = timezone.localtime(dt) if timezone.is_aware(dt) else dt
             return format_html(
                 '<span style="font-family: monospace; font-size: 13px; font-weight: 600; color: #0f172a;">🕒 {}</span>',
                 local_dt.strftime('%Y-%m-%d %H:%M:%S')
             )
-        # Fallback to earliest LogEntry
         try:
             ct = ContentType.objects.get_for_model(obj.__class__)
-            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk), action_flag=ADDITION).order_by('action_time').first()
+            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).order_by('action_time').first()
             if entry and entry.action_time:
                 local_dt = timezone.localtime(entry.action_time) if timezone.is_aware(entry.action_time) else entry.action_time
                 return format_html(
@@ -190,14 +305,13 @@ class UniversalAuditMixin:
     def audit_updated_at_display(self, obj):
         if not obj:
             return '-'
-        dt = getattr(obj, 'updated_at', None)
+        dt = getattr(obj, 'updated_at', None) or getattr(obj, 'updated_on', None) or getattr(obj, 'modified_at', None)
         if dt:
             local_dt = timezone.localtime(dt) if timezone.is_aware(dt) else dt
             return format_html(
                 '<span style="font-family: monospace; font-size: 13px; font-weight: 600; color: #0f172a;">🕒 {}</span>',
                 local_dt.strftime('%Y-%m-%d %H:%M:%S')
             )
-        # Fallback to latest LogEntry
         try:
             ct = ContentType.objects.get_for_model(obj.__class__)
             entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).order_by('-action_time').first()
@@ -215,47 +329,29 @@ class UniversalAuditMixin:
     def audit_created_by_display(self, obj):
         if not obj:
             return '-'
-        # 1. Model field check
-        u = getattr(obj, 'created_by', None)
+        u = self._resolve_creator_user(obj)
         if u:
             return self._format_user_badge(u, 'Created By')
-
-        # 2. LogEntry check for ADDITION
-        try:
-            ct = ContentType.objects.get_for_model(obj.__class__)
-            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk), action_flag=ADDITION).order_by('action_time').first()
-            if entry and entry.user:
-                return self._format_user_badge(entry.user, 'Created By')
-            # If only CHANGE exists, check earliest
-            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).order_by('action_time').first()
-            if entry and entry.user:
-                return self._format_user_badge(entry.user, 'Initial Entry By')
-        except Exception:
-            pass
-        return mark_safe('<span style="color: #94a3b8; font-style: italic;">System / Not Recorded</span>')
+        return mark_safe('<span style="background: #f1f5f9; color: #475569; padding: 3px 8px; border-radius: 6px; font-size: 11px;">👤 System (Initial Import)</span>')
 
     @admin.display(description='Last Edited / Updated By User')
     def audit_updated_by_display(self, obj):
         if not obj:
             return '-'
-        # 1. Model field check
-        u = getattr(obj, 'updated_by', None)
-        if u:
-            return self._format_user_badge(u, 'Updated By')
-
-        # 2. LogEntry check for latest CHANGE
-        try:
-            ct = ContentType.objects.get_for_model(obj.__class__)
-            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk), action_flag=CHANGE).order_by('-action_time').first()
-            if entry and entry.user:
-                return self._format_user_badge(entry.user, 'Last Updated By')
-            # Fallback to latest entry
-            entry = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).order_by('-action_time').first()
-            if entry and entry.user:
-                return self._format_user_badge(entry.user, 'Last Modified By')
-        except Exception:
-            pass
-        return mark_safe('<span style="color: #94a3b8; font-style: italic;">No edits recorded</span>')
+        if getattr(obj, 'is_deleted', False):
+            updater_res = self._resolve_updater_user(obj)
+            u = updater_res[0] if isinstance(updater_res, tuple) else updater_res
+            u_str = getattr(u, 'username', 'System') if u else 'System'
+            return format_html(
+                '<span style="background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 12.5px;">'
+                '🔴 Soft-Deleted by {}</span>',
+                u_str
+            )
+        updater_res = self._resolve_updater_user(obj)
+        if updater_res:
+            u = updater_res[0] if isinstance(updater_res, tuple) else updater_res
+            return self._format_user_badge(u, 'Last Modified By')
+        return mark_safe('<span style="color: #64748b; font-size: 12px; font-style: italic;">Original entry (No subsequent edits)</span>')
 
     @admin.display(description='Complete Record Modification History')
     def audit_history_table(self, obj):
@@ -264,11 +360,26 @@ class UniversalAuditMixin:
 
         try:
             ct = ContentType.objects.get_for_model(obj.__class__)
-            entries = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).select_related('user').order_by('-action_time')[:25]
+            entries = LogEntry.objects.filter(content_type=ct, object_id=str(obj.pk)).select_related('user').order_by('-action_time')[:50]
+
+            is_deleted = getattr(obj, 'is_deleted', False)
+            deleted_banner = ""
+            if is_deleted:
+                updater_res = self._resolve_updater_user(obj)
+                del_user = updater_res[0] if isinstance(updater_res, tuple) else updater_res
+                del_username = getattr(del_user, 'username', 'System') if del_user else 'System'
+                deleted_banner = f"""
+                <div style="background: #fef2f2; border: 1px solid #f87171; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; color: #991b1b; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 16px;">🔴</span>
+                    <span>ATTENTION: This record is marked as DELETED (Soft-Deleted) by <u>{del_username}</u>. It is deactivated across operational workflows.</span>
+                </div>
+                """
+
             if not entries.exists():
                 return mark_safe(
+                    f"{deleted_banner}"
                     '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; color: #64748b; font-size: 13px;">'
-                    'No modification history records logged for this item yet. Future edits, updates, and deletes will appear here in real-time.'
+                    'Initial system entry. All subsequent creations, edits, updates, and deletions will appear here in real-time with exact seconds and user attribution.'
                     '</div>'
                 )
 
@@ -282,11 +393,11 @@ class UniversalAuditMixin:
                 user_label = f"{user_str} ({user_full})" if user_full else user_str
 
                 if entry.action_flag == ADDITION:
-                    action_html = '<span style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 11px;">🟢 CREATED</span>'
+                    action_html = '<span style="background: #dcfce7; color: #166534; padding: 2px 7px; border-radius: 4px; font-weight: 600; font-size: 11px;">🟢 CREATED</span>'
                 elif entry.action_flag == CHANGE:
-                    action_html = '<span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 11px;">🟡 EDITED / UPDATED</span>'
+                    action_html = '<span style="background: #fef3c7; color: #92400e; padding: 2px 7px; border-radius: 4px; font-weight: 600; font-size: 11px;">🟡 EDITED / UPDATED</span>'
                 elif entry.action_flag == DELETION:
-                    action_html = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 11px;">🔴 DELETED</span>'
+                    action_html = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 4px; font-weight: 600; font-size: 11px;">🔴 DELETED</span>'
                 else:
                     action_html = f'<span>{entry.get_action_flag_display()}</span>'
 
@@ -302,6 +413,7 @@ class UniversalAuditMixin:
                 """)
 
             table_html = f"""
+                {deleted_banner}
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-top: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-weight: 600; font-size: 13px; color: #1e293b; display: flex; justify-content: space-between; align-items: center;">
                         <span>Record Modification History & User Audit Trail</span>
@@ -326,21 +438,6 @@ class UniversalAuditMixin:
         except Exception as e:
             return format_html('<div style="color: #ef4444;">Could not load history: {}</div>', str(e))
 
-    def _format_user_badge(self, user, role_prefix=""):
-        username = getattr(user, 'username', str(user))
-        first_name = getattr(user, 'first_name', '')
-        last_name = getattr(user, 'last_name', '')
-        full = f"{first_name} {last_name}".strip()
-        email = getattr(user, 'email', '')
-        display = f"{username} ({full})" if full else username
-        if email:
-            display += f" &lt;{email}&gt;"
-        return format_html(
-            '<span style="background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 12.5px;">'
-            '👤 {}</span>',
-            display
-        )
-
 
 # ---------------------------------------------------------------------------
 # 3. Dynamic Universal Registration & Enhancement
@@ -362,6 +459,8 @@ def enhance_all_registered_admins():
 
     # 1. Register LogEntry in admin.site if not already registered
     try:
+        LogEntry._meta.verbose_name = "Master System Audit Log (User Entries, Edits & Deletes)"
+        LogEntry._meta.verbose_name_plural = "Master System Audit Logs (User Entries, Edits & Deletes)"
         if LogEntry in admin.site._registry:
             admin.site.unregister(LogEntry)
         admin.site.register(LogEntry, LogEntryAdmin)
@@ -432,17 +531,208 @@ def enhance_all_registered_admins():
 
         admin_cls.get_fieldsets = make_get_fieldsets(original_get_fieldsets)
 
-        # Wrap get_list_display to include formatted timestamps with seconds
+        # Wrap get_list_display to include formatted timestamps with seconds AND users
         original_get_list_display = admin_cls.get_list_display
 
         def make_get_list_display(orig_func):
             def custom_get_list_display(self, request):
                 cols = list(orig_func(self, request))
-                if hasattr(self.model, 'created_at') and 'audit_created_sec' not in cols and 'created_at' not in cols:
+
+                # Created Time Column (with exact seconds)
+                if 'created_at' in cols:
+                    cols = [c if c != 'created_at' else 'audit_created_sec' for c in cols]
+                elif 'audit_created_sec' not in cols:
                     cols.append('audit_created_sec')
-                if hasattr(self.model, 'updated_at') and 'audit_updated_sec' not in cols and 'updated_at' not in cols:
+
+                # Created By User Column
+                if 'audit_created_by_user' not in cols and 'created_by' not in cols:
+                    cols.append('audit_created_by_user')
+
+                # Updated Time Column (with exact seconds)
+                if 'updated_at' in cols:
+                    cols = [c if c != 'updated_at' else 'audit_updated_sec' for c in cols]
+                elif 'audit_updated_sec' not in cols:
                     cols.append('audit_updated_sec')
+
+                # Updated / Action By User Column
+                if 'audit_updated_by_user' not in cols and 'updated_by' not in cols:
+                    cols.append('audit_updated_by_user')
+
                 return tuple(cols)
             return custom_get_list_display
 
         admin_cls.get_list_display = make_get_list_display(original_get_list_display)
+
+        # 3. Universal Safe Soft-Delete for models with is_deleted
+        # Prevents ProtectedError / RestrictedError when deleting in Django Admin
+        if hasattr(model, 'is_deleted'):
+            orig_get_deleted_objects = admin_cls.get_deleted_objects
+            def make_get_deleted_objects(orig_func):
+                def custom_get_deleted_objects(self, objs, request):
+                    if hasattr(self.model, 'is_deleted'):
+                        deletable_objects = [str(o) for o in objs]
+                        model_count = {str(self.model._meta.verbose_name_plural): len(objs)}
+                        perms_needed = set()
+                        protected = []  # Bypass Django hard-delete RESTRICT/PROTECT blockers
+                        return deletable_objects, model_count, perms_needed, protected
+                    return orig_func(self, objs, request)
+                return custom_get_deleted_objects
+
+            admin_cls.get_deleted_objects = make_get_deleted_objects(orig_get_deleted_objects)
+
+            orig_delete_model = admin_cls.delete_model
+            def make_delete_model(orig_func):
+                def custom_delete_model(self, request, obj):
+                    if hasattr(obj, 'is_deleted'):
+                        safe_cascade_soft_delete(obj, user=request.user)
+                    else:
+                        orig_func(self, request, obj)
+                return custom_delete_model
+
+            admin_cls.delete_model = make_delete_model(orig_delete_model)
+
+            orig_delete_queryset = admin_cls.delete_queryset
+            def make_delete_queryset(orig_func):
+                def custom_delete_queryset(self, request, queryset):
+                    if hasattr(self.model, 'is_deleted'):
+                        for obj in queryset:
+                            safe_cascade_soft_delete(obj, user=request.user)
+                    else:
+                        orig_func(self, request, queryset)
+                return custom_delete_queryset
+
+            admin_cls.delete_queryset = make_delete_queryset(orig_delete_queryset)
+
+
+def safe_cascade_soft_delete(obj, user=None):
+    """
+    Safely cascades soft-deletion across CRM and Operations entities
+    without triggering SQL RESTRICT/PROTECT errors.
+    Also logs explicit DELETION LogEntry with exact user attribution and timestamps.
+    """
+    if not user:
+        from erp_core.middleware import get_current_user
+        user = get_current_user()
+    if not user:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user = User.objects.filter(is_superuser=True).first()
+
+    def log_soft_delete_event(target_obj, message=""):
+        try:
+            target_ct = ContentType.objects.get_for_model(target_obj.__class__)
+            username = getattr(user, 'username', 'System') if user else 'System'
+            LogEntry.objects.create(
+                user=user,
+                content_type=target_ct,
+                object_id=str(target_obj.pk),
+                object_repr=str(target_obj)[:200],
+                action_flag=DELETION,
+                change_message=message or f"Soft-deleted (is_deleted=True) by {username} via Django Admin / Cascade"
+            )
+        except Exception as e:
+            logger.debug(f"Could not record deletion LogEntry: {e}")
+
+    model_name = obj.__class__.__name__
+
+    try:
+        if model_name == 'OperationalSite':
+            from operations.models import (
+                SecurityPost, SiteStaffingRequirement, Deployment,
+                DutyRoster, DutyAssignment, DailyDutyPay
+            )
+            from security_crm.models import ClientLocation
+            from security_crm.services.workflow import SecurityProposalWorkflowService
+
+            obj.is_active = False
+            obj.is_deleted = True
+            obj.save(update_fields=['is_active', 'is_deleted', 'updated_at'])
+            log_soft_delete_event(obj, f"Operational site soft-deleted by {getattr(user, 'username', 'System')}")
+
+            posts = list(SecurityPost.objects.filter(site=obj))
+            SecurityPost.objects.filter(site=obj).update(is_active=False, is_deleted=True)
+            for p in posts:
+                log_soft_delete_event(p, f"Cascaded soft-delete from site '{obj.name}'")
+
+            SiteStaffingRequirement.objects.filter(site=obj).update(is_active=False, is_deleted=True)
+            Deployment.objects.filter(site=obj).update(is_deleted=True)
+            DutyRoster.objects.filter(site=obj).update(is_deleted=True)
+            DutyAssignment.objects.filter(site=obj).update(is_deleted=True)
+            DailyDutyPay.objects.filter(site=obj).update(is_deleted=True)
+
+            for contract in obj.service_contracts.all():
+                contract.sites.remove(obj)
+
+            if obj.crm_entity_id:
+                loc = ClientLocation.objects.filter(
+                    customer=obj.crm_entity,
+                    name__iexact=obj.name,
+                    company=obj.company,
+                    is_deleted=False
+                ).first()
+                if loc:
+                    SecurityProposalWorkflowService.cascade_delete_client_location(loc)
+
+        elif model_name == 'ClientLocation':
+            from security_crm.services.workflow import SecurityProposalWorkflowService
+            SecurityProposalWorkflowService.cascade_delete_client_location(obj)
+            log_soft_delete_event(obj, f"Client location soft-deleted by {getattr(user, 'username', 'System')}")
+
+        elif model_name == 'CRMEntity':
+            from security_crm.models import ClientLocation, SecurityProposal
+            from operations.models import OperationalSite, ServiceContract
+            from security_crm.services.workflow import SecurityProposalWorkflowService
+
+            obj.active = False
+            obj.is_deleted = True
+            obj.save(update_fields=['active', 'is_deleted', 'updated_at'])
+            log_soft_delete_event(obj, f"CRM Entity soft-deleted by {getattr(user, 'username', 'System')}")
+
+            for loc in ClientLocation.objects.filter(customer=obj, is_deleted=False):
+                SecurityProposalWorkflowService.cascade_delete_client_location(loc)
+
+            for site in OperationalSite.objects.filter(crm_entity=obj, is_deleted=False):
+                safe_cascade_soft_delete(site, user=user)
+
+            SecurityProposal.objects.filter(customer=obj).update(is_deleted=True, status='CANCELLED')
+            ServiceContract.objects.filter(crm_entity=obj).update(is_deleted=True, status='TERMINATED')
+
+        elif model_name == 'SecurityProposal':
+            from security_crm.models import ProposalServiceLine
+            obj.is_deleted = True
+            obj.status = 'CANCELLED'
+            obj.save(update_fields=['is_deleted', 'status', 'updated_at'])
+            log_soft_delete_event(obj, f"Proposal cancelled & soft-deleted by {getattr(user, 'username', 'System')}")
+            for v in obj.versions.all():
+                v.is_deleted = True
+                v.save(update_fields=['is_deleted', 'updated_at'])
+                ProposalServiceLine.objects.filter(proposal_version=v).update(is_deleted=True)
+
+        elif model_name == 'ServiceContract':
+            from operations.models import SecurityPost, ContractRate
+            obj.is_deleted = True
+            obj.status = 'TERMINATED'
+            obj.save(update_fields=['is_deleted', 'status', 'updated_at'])
+            log_soft_delete_event(obj, f"Contract terminated & soft-deleted by {getattr(user, 'username', 'System')}")
+            SecurityPost.objects.filter(service_contract=obj).update(is_active=False, is_deleted=True)
+            ContractRate.objects.filter(service_contract=obj).update(is_deleted=True)
+
+        elif hasattr(obj, 'is_deleted'):
+            obj.is_deleted = True
+            if hasattr(obj, 'is_active'):
+                obj.is_active = False
+                obj.save(update_fields=['is_deleted', 'is_active', 'updated_at'])
+            elif hasattr(obj, 'active'):
+                obj.active = False
+                obj.save(update_fields=['is_deleted', 'active', 'updated_at'])
+            else:
+                obj.save(update_fields=['is_deleted', 'updated_at'])
+            log_soft_delete_event(obj, f"Soft-deleted by {getattr(user, 'username', 'System')}")
+
+    except Exception as e:
+        logger.error(f"Error in safe_cascade_soft_delete for {model_name} {getattr(obj, 'pk', None)}: {e}")
+        if hasattr(obj, 'is_deleted'):
+            obj.is_deleted = True
+            obj.save(update_fields=['is_deleted', 'updated_at'])
+            log_soft_delete_event(obj, f"Soft-deleted (fallback) by {getattr(user, 'username', 'System')}")
+

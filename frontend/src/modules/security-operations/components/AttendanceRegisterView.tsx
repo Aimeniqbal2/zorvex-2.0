@@ -63,7 +63,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
 
         const loadEmployees = async () => {
             try {
-                const empsRes = await apiClient.get('/api/hrm/employees/?page_size=1000&status=ACTIVE');
+                const empsRes = await apiClient.get('/api/hrm/employees/directory/?status=ACTIVE');
                 const empList = empsRes.data?.results || empsRes.data || [];
                 if (isMounted) {
                     setAllEmployees(empList);
@@ -72,7 +72,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                     }
                 }
             } catch (err) {
-                console.error('Failed to load active employee workforce:', err);
+                console.error('Failed to load active employee workforce directory:', err);
             }
         };
 
@@ -95,10 +95,19 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
         );
     }, [sites, siteSearch]);
 
-    // Filter employees by search
+    // Debounce employee search filter to prevent UI lag on typing
+    const [debouncedEmployeeSearch, setDebouncedEmployeeSearch] = useState<string>('');
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedEmployeeSearch(employeeSearch);
+        }, 250);
+        return () => clearTimeout(timer);
+    }, [employeeSearch]);
+
+    // Filter employees by debounced search
     const filteredEmployees = useMemo(() => {
-        if (!employeeSearch.trim()) return allEmployees;
-        const q = employeeSearch.toLowerCase().trim();
+        if (!debouncedEmployeeSearch.trim()) return allEmployees;
+        const q = debouncedEmployeeSearch.toLowerCase().trim();
         const qNoZero = q.replace(/^0+/, '');
         return allEmployees.filter(emp => {
             const fullName = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
@@ -120,7 +129,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                 desig.includes(q)
             );
         });
-    }, [allEmployees, employeeSearch]);
+    }, [allEmployees, debouncedEmployeeSearch]);
 
     // Auto-select first matching employee when search filter changes
     useEffect(() => {
@@ -648,7 +657,15 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                             badgeBg = '#f1f5f9';
                                             badgeColor = '#64748b';
                                             badgeBorder = '#e2e8f0';
-                                        } else if (st === 'LEAVE') {
+                                        } else if (st === 'WORKED_WEEKLY_OFF' || st === 'DOUBLE_SHIFT') {
+                                            badgeBg = '#ccfbf1';
+                                            badgeColor = '#0f766e';
+                                            badgeBorder = '#5eead4';
+                                        } else if (st === 'OVERTIME') {
+                                            badgeBg = '#dbeafe';
+                                            badgeColor = '#1d4ed8';
+                                            badgeBorder = '#bfdbfe';
+                                        } else if (st === 'LEAVE' || st === 'PAID_LEAVE') {
                                             badgeBg = '#f3e8ff';
                                             badgeColor = '#7e22ce';
                                             badgeBorder = '#d8b4fe';
@@ -891,10 +908,10 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                             badgeBg = '#dbeafe';
                                             badgeColor = '#1d4ed8';
                                             badgeBorder = '#bfdbfe';
-                                        } else if (r.duty_type === 'DOUBLE_SHIFT') {
-                                            badgeBg = '#fef3c7';
-                                            badgeColor = '#b45309';
-                                            badgeBorder = '#fde68a';
+                                        } else if (r.duty_type === 'DOUBLE_SHIFT' || r.duty_type === 'WORKED_WEEKLY_OFF') {
+                                            badgeBg = '#ccfbf1';
+                                            badgeColor = '#0f766e';
+                                            badgeBorder = '#99f6e4';
                                         } else if (r.duty_type === 'WEEKLY_OFF') {
                                             badgeBg = '#f1f5f9';
                                             badgeColor = '#64748b';
@@ -903,6 +920,10 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                             badgeBg = '#fee2e2';
                                             badgeColor = '#b91c1c';
                                             badgeBorder = '#fecaca';
+                                        } else if (r.duty_type === 'UNPAID_LEAVE' || r.duty_type === 'LEAVE' || r.duty_type === 'PAID_LEAVE') {
+                                            badgeBg = '#ffedd5';
+                                            badgeColor = '#c2410c';
+                                            badgeBorder = '#fed7aa';
                                         }
 
                                         return (

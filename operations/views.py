@@ -128,6 +128,8 @@ class OperationalSiteViewSet(BaseSecurityOpsViewSet):
     site_filter_field = 'id'
 
     def get_queryset(self):
+        from django.db.models import Prefetch
+        from operations.models import ServiceContract, SecurityPost
         qs = super().get_queryset()
         status_param = self.request.query_params.get('is_active')
         customer_id = self.request.query_params.get('customer')
@@ -136,6 +138,10 @@ class OperationalSiteViewSet(BaseSecurityOpsViewSet):
         if customer_id:
             qs = qs.filter(crm_entity_id=customer_id)
         qs = qs.exclude(crm_entity__is_deleted=True).exclude(crm_entity__active=False)
+        qs = qs.prefetch_related(
+            Prefetch('service_contracts', queryset=ServiceContract.objects.filter(is_deleted=False).only('id', 'contract_code')),
+            Prefetch('security_posts', queryset=SecurityPost.objects.filter(is_deleted=False, is_active=True).only('id', 'site_id', 'is_active', 'is_deleted'))
+        )
         return qs
 
     @action(detail=True, methods=['get'], url_path='manpower-summary')
@@ -143,6 +149,47 @@ class OperationalSiteViewSet(BaseSecurityOpsViewSet):
         site = self.get_object()
         from operations.services.manpower import calculate_site_manpower
         return Response(calculate_site_manpower(site))
+
+    def perform_destroy(self, instance):
+        from operations.models import (
+            SecurityPost, SiteStaffingRequirement, Deployment,
+            DutyRoster, DutyAssignment, DailyDutyPay
+        )
+        from security_crm.models import ClientLocation
+        from security_crm.services.workflow import SecurityProposalWorkflowService
+
+        # 1. Soft-delete site itself
+        instance.is_active = False
+        instance.is_deleted = True
+        instance.save(update_fields=['is_active', 'is_deleted', 'updated_at'])
+
+        # 2. Cascade soft-delete operational child records
+        SecurityPost.objects.filter(site=instance).update(is_active=False, is_deleted=True)
+        SiteStaffingRequirement.objects.filter(site=instance).update(is_active=False, is_deleted=True)
+        Deployment.objects.filter(site=instance).update(is_deleted=True)
+        DutyRoster.objects.filter(site=instance).update(is_deleted=True)
+        DutyAssignment.objects.filter(site=instance).update(is_deleted=True)
+        DailyDutyPay.objects.filter(site=instance).update(is_deleted=True)
+
+        # 3. Unlink from any active service contracts
+        for contract in instance.service_contracts.all():
+            contract.sites.remove(instance)
+
+        # 4. If matching active ClientLocation exists, cascade delete it as well
+        if instance.crm_entity_id:
+            matching_loc = ClientLocation.objects.filter(
+                customer=instance.crm_entity,
+                name__iexact=instance.name,
+                company=instance.company,
+                is_deleted=False
+            ).first()
+            if matching_loc:
+                SecurityProposalWorkflowService.cascade_delete_client_location(matching_loc)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response({'status': 'deleted', 'id': str(instance.id)}, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------
@@ -4218,7 +4265,13 @@ class MonthlyMusterSaveView(APIView):
             )
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            if hasattr(e, 'messages'):
+                msg = "; ".join(e.messages)
+            elif hasattr(e, 'message'):
+                msg = e.message
+            else:
+                msg = str(e).strip("[]'\"")
+            return Response({'detail': msg}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class MonthlyMusterExcelImportView(APIView):

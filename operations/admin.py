@@ -1,5 +1,20 @@
 from django.contrib import admin
-from .models import OperationalSite, ServiceContract, ContractRate
+from .models import OperationalSite, ServiceContract, ContractRate, SecurityPost
+
+@admin.register(SecurityPost)
+class SecurityPostAdmin(admin.ModelAdmin):
+    list_display = ('post_name', 'site', 'company', 'required_designation', 'required_headcount', 'monthly_pay_rate', 'is_active', 'is_deleted')
+    list_filter = ('company', 'is_active', 'is_deleted')
+    search_fields = ('post_name', 'site__name', 'site__crm_entity__name', 'required_designation__name')
+    actions = ['restore_selected_posts']
+
+    def get_queryset(self, request):
+        return self.model.all_objects.all()
+
+    @admin.action(description="Restore selected posts (Undelete)")
+    def restore_selected_posts(self, request, queryset):
+        count = queryset.filter(is_deleted=True).update(is_deleted=False, is_active=True)
+        self.message_user(request, f"Successfully restored {count} security posts.")
 
 @admin.register(OperationalSite)
 class OperationalSiteAdmin(admin.ModelAdmin):

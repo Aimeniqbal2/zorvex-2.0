@@ -934,12 +934,21 @@ class SecurityProposalWorkflowService:
                     ).first()
                     if target_site and desig:
                         post_name = f"{line.service_type.name}"
+                        # Match by designation first to prevent duplicates like 'Security Guard (Civil)' vs 'Security Guard Civil'
                         sp = SecurityPost.objects.filter(
                             company=proposal.company,
                             site=target_site,
-                            post_name=post_name,
+                            required_designation=desig,
                             is_deleted=False
                         ).first()
+                        if not sp:
+                            sp = SecurityPost.objects.filter(
+                                company=proposal.company,
+                                site=target_site,
+                                post_name=post_name,
+                                is_deleted=False
+                            ).first()
+
                         daily_pay = (sal / Decimal('30.00')).quantize(Decimal('0.01')) if sal else None
                         if not sp:
                             SecurityPost.objects.create(
@@ -954,12 +963,14 @@ class SecurityProposalWorkflowService:
                                 is_active=True
                             )
                         else:
+                            sp.post_name = post_name
+                            sp.required_designation = desig
                             sp.daily_pay_rate = daily_pay
                             sp.monthly_pay_rate = sal or None
                             sp.required_headcount = line.quantity
                             sp.service_contract = service_contract
                             sp.is_active = True
-                            sp.save(update_fields=['daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
+                            sp.save(update_fields=['post_name', 'required_designation', 'daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
 
                         # Also sync to Operations SiteStaffingRequirement for coverage views
                         try:

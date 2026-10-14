@@ -329,9 +329,15 @@ def set_employee_daily_attendance(
                 restore_date=d,
                 notes="Automatically restored upon being marked PRESENT"
             )
-            jump_result = {'restored': True, 'details': restore_result}
         elif status == AttendanceStatus.ABSENT:
             jump_result = evaluate_jump_rule(employee, d)
+
+        # Synchronize DailyDutyPay for operational staff
+        try:
+            from operations.services.duty_pay_service import generate_daily_duty_pay
+            generate_daily_duty_pay(company=company_id, employee=employee, duty_date=d, user=user)
+        except Exception as e:
+            logger.warning(f"Could not auto-generate daily duty pay for {employee.id} on {d}: {e}")
 
     return att, jump_result
 

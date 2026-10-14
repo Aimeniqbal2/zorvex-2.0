@@ -1526,6 +1526,11 @@ class DailyPayCalculationStatus(models.TextChoices):
     FINALIZED = 'FINALIZED', 'Finalized in Payroll'
 
 
+class DutyType(models.TextChoices):
+    PRIMARY = 'PRIMARY', 'Primary Shift'
+    OVERTIME = 'OVERTIME', 'Overtime Shift'
+
+
 class DailyDutyPay(BaseModel):
     """
     Authoritative payroll-input record per employee/day converting actual duty & attendance
@@ -1533,6 +1538,7 @@ class DailyDutyPay(BaseModel):
     """
     employee = models.ForeignKey('hrm.Employee', on_delete=models.CASCADE, related_name='daily_duty_pays')
     duty_date = models.DateField(db_index=True)
+    duty_type = models.CharField(max_length=20, choices=DutyType.choices, default=DutyType.PRIMARY, db_index=True)
     attendance = models.ForeignKey('hrm.WorkforceAttendance', on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_duty_pays')
     attendance_status = models.CharField(max_length=30, choices=AttendanceStatus.choices, default=AttendanceStatus.PRESENT)
 
@@ -1574,7 +1580,7 @@ class DailyDutyPay(BaseModel):
                 name='unique_active_daily_duty_pay_with_roster'
             ),
             models.UniqueConstraint(
-                fields=['company', 'employee', 'duty_date'],
+                fields=['company', 'employee', 'duty_date', 'duty_type'],
                 condition=models.Q(is_deleted=False) & models.Q(roster__isnull=True),
                 name='unique_active_daily_duty_pay_without_roster'
             ),

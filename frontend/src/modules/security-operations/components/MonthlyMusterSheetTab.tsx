@@ -153,9 +153,10 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         // Single letter mapping and aliases
         if (['P', '1'].includes(raw)) val = 'P';
         else if (['O', 'OT'].includes(raw)) val = 'O';
-        else if (['D', 'DS', 'WO+OT', '2'].includes(raw)) val = 'D';
+        else if (['PO', 'P+O', 'P+OT', 'POT'].includes(raw)) val = 'PO';
+        else if (['WP', 'WO+P', 'W+P', 'D', 'DS', 'WO+OT', '2'].includes(raw)) val = 'WP';
         else if (['W', 'WO', 'OFF'].includes(raw)) val = 'W';
-        else if (raw === 'A') val = 'A';
+        else if (['A', '0'].includes(raw)) val = 'A';
         else if (['L', 'PL', 'SL'].includes(raw)) val = 'L';
         else if (raw === '') val = '';
         else {
@@ -163,18 +164,17 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             const lastChar = raw.charAt(raw.length - 1);
             if (['P', '1'].includes(lastChar)) val = 'P';
             else if (lastChar === 'O') val = 'O';
-            else if (lastChar === 'D') val = 'D';
             else if (lastChar === 'W') val = 'W';
             else if (lastChar === 'A') val = 'A';
             else if (lastChar === 'L') val = 'L';
             else {
-                addToast('warning', `Use single-letter shortcuts: P (Present), O (Overtime), D (Double Shift), W (Weekly Off), A (Absent), L (Leave).`);
+                addToast('warning', `Allowed codes: P (Present), O (Overtime), PO (Present+OT), WP (Worked Week Off), W (Weekly Off), A (Absent), L (Leave).`);
                 return;
             }
         }
 
         // Anti-Cheating Cross-Location & Shift Capacity Validation:
-        if (['P', 'O', 'D', 'W', 'L', 'A'].includes(val)) {
+        if (['P', 'O', 'PO', 'WP', 'W', 'L', 'A'].includes(val)) {
             for (const otherSite of sitesData) {
                 if (otherSite.site_id === siteId) continue;
                 const otherGuard = otherSite.guards.find(g => g.employee_id === employeeId);
@@ -188,31 +188,45 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     return;
                 }
 
-                // Rule 2: Double Shift (D) consumes full daily capacity (2 shifts / 24 hours)
-                if (val === 'D') {
-                    addToast('error', `⚠️ Capacity Conflict: Guard ${otherGuard.name} is already assigned at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Double Shift (D) consumes full 24h capacity and cannot co-exist with another site!`);
+                // Rule 2: PO consumes full capacity (2 shifts / 24 hours) at this location
+                if (val === 'PO') {
+                    addToast('error', `⚠️ Capacity Conflict: Guard ${otherGuard.name} is already assigned at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Present + Overtime (PO) consumes their full 2-shift capacity!`);
                     return;
                 }
-                if (['D', 'WO+OT', 'DS', '2'].includes(otherCode)) {
-                    addToast('error', `⚠️ Capacity Reached: Guard ${otherGuard.name} already worked Double Shift (D) at "${otherSite.site_name}" on Day ${day}. No additional duty allowed on this date!`);
+                if (otherCode === 'PO') {
+                    addToast('error', `⚠️ Capacity Reached: Guard ${otherGuard.name} is already marked Present + Overtime (PO) at "${otherSite.site_name}" on Day ${day}. No additional duty allowed!`);
                     return;
                 }
 
-                // Rule 3: Maximum 1 Overtime shift (O) per day across all sites
+                // Rule 3: Worked on Week Off (WP) consumes full daily capacity
+                if (val === 'WP') {
+                    addToast('error', `⚠️ Capacity Conflict: Guard ${otherGuard.name} is already assigned at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Worked on Week Off (WP) consumes full daily capacity!`);
+                    return;
+                }
+                if (['WP', 'D', 'WO+OT', 'DS', '2'].includes(otherCode)) {
+                    addToast('error', `⚠️ Capacity Reached: Guard ${otherGuard.name} already worked on Week Off (WP) at "${otherSite.site_name}" on Day ${day}. No additional duty allowed!`);
+                    return;
+                }
+
+                // Rule 4: Maximum 1 Overtime shift (O) per day across all sites
                 if (val === 'O' && (otherCode === 'O' || otherCode === 'OT')) {
                     addToast('error', `⚠️ Overtime Limit: Guard ${otherGuard.name} is already marked Overtime (O) at "${otherSite.site_name}" on Day ${day}. Maximum 1 overtime shift allowed per day!`);
                     return;
                 }
 
-                // Rule 4: If guard is on Leave (L) at another location, cannot perform active duty (P, O, D)
-                if (['P', 'O'].includes(val) && ['L', 'PL', 'SL'].includes(otherCode)) {
-                    addToast('error', `⚠️ Conflict: Guard ${otherGuard.name} is on Leave (L) at "${otherSite.site_name}" on Day ${day}. Cannot mark active duty while on leave.`);
+                // Rule 5: Absence (A) or Weekly Off (W) cannot co-exist with active duty at another site
+                if ((val === 'A' || val === 'W') && ['P', 'O', 'PO', 'WP'].includes(otherCode)) {
+                    addToast('error', `⚠️ Invariant Conflict: Guard ${otherGuard.name} has active duty at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Cannot mark ${val === 'A' ? 'Absent (A)' : 'Weekly Off (W)'} on another site!`);
+                    return;
+                }
+                if (['A', 'W'].includes(otherCode) && ['P', 'O', 'PO', 'WP'].includes(val)) {
+                    addToast('error', `⚠️ Invariant Conflict: Guard ${otherGuard.name} is marked ${otherCode === 'A' ? 'Absent (A)' : 'Weekly Off (W)'} at "${otherSite.site_name}" on Day ${day}. Cannot mark active duty on another site!`);
                     return;
                 }
 
-                // Rule 5: If guard is Weekly Off (W) at Site A, they cannot be marked normal Present (P) at Site B
-                if (val === 'P' && ['W', 'WO', 'OFF'].includes(otherCode)) {
-                    addToast('error', `⚠️ Conflict: Guard ${otherGuard.name} is on Weekly Off (W) at "${otherSite.site_name}" on Day ${day}. If they worked on off day, mark "D" (Double Shift) at their site instead!`);
+                // Rule 6: If on Leave (L), cannot perform active duty (P, O, PO, WP)
+                if (['P', 'O', 'PO', 'WP'].includes(val) && ['L', 'PL', 'SL'].includes(otherCode)) {
+                    addToast('error', `⚠️ Conflict: Guard ${otherGuard.name} is on Leave (L) at "${otherSite.site_name}" on Day ${day}. Cannot mark active duty while on leave.`);
                     return;
                 }
             }
@@ -226,12 +240,13 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 const updatedDays = { ...guard.days, [String(day)]: val };
 
                 // Recompute counts for this guard
-                let p = 0, ot = 0, wo = 0, ds = 0, a = 0, l = 0;
+                let p = 0, ot = 0, po = 0, wo = 0, wp = 0, a = 0, l = 0;
                 Object.values(updatedDays).forEach(c => {
                     if (c === 'P' || c === '1') p++;
                     else if (c === 'O' || c === 'OT') ot++;
+                    else if (c === 'PO') po++;
+                    else if (c === 'WP' || c === 'D' || c === 'WO+OT' || c === 'DS') wp++;
                     else if (c === 'W' || c === 'WO') wo++;
-                    else if (c === 'D' || c === 'WO+OT' || c === 'DS') ds++;
                     else if (c === 'A') a++;
                     else if (['L', 'PL', 'SL'].includes(c)) l++;
                 });
@@ -239,13 +254,13 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 return {
                     ...guard,
                     days: updatedDays,
-                    total_present: p,
-                    total_ot: ot,
+                    total_present: p + po,
+                    total_ot: ot + po,
                     total_wo: wo,
-                    total_ds: ds,
+                    total_ds: wp,
                     total_absent: a,
                     total_leave: l,
-                    payable_days: p + wo + ds + l
+                    payable_days: p + po + wo + (wp * 2) + l
                 };
             });
 
@@ -257,7 +272,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 let dVac = 0;
                 updatedGuards.forEach(g => {
                     const c = g.days[String(d)];
-                    if (['P', '1', 'O', 'OT', 'D', 'WO+OT', 'DS'].includes(c)) dTot++;
+                    if (['P', '1', 'O', 'OT', 'PO', 'WP', 'D', 'WO+OT', 'DS'].includes(c)) dTot++;
                     if (['W', 'WO', 'L', 'PL', 'SL'].includes(c)) dVac++;
                 });
                 newDailyTotals[String(d)] = dTot;
@@ -294,6 +309,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             return;
         }
 
+        const snapshot = JSON.parse(JSON.stringify(sitesData));
+
         try {
             setSaving(true);
             const updatesArray = Array.from(dirtyUpdates.values());
@@ -305,6 +322,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             await loadMusterData();
         } catch (err: any) {
             console.error('Failed to save muster updates:', err);
+            setSitesData(snapshot);
             addToast('error', err.response?.data?.detail || 'Failed to save muster updates.');
         } finally {
             setSaving(false);
@@ -697,7 +715,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         📅 {daysInMonth} Days in Month
                     </span>
                     <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
-                        <strong>Keystroke Shortcuts:</strong> Type <code>P</code> for Present, <code>O</code> for Overtime, <code>D</code> for Double Shift, <code>W</code> for Weekly Off, <code>A</code> for Absent, <code>L</code> for Leave.
+                        <strong>Keystroke Shortcuts:</strong> Type <code>P</code> (Present), <code>O</code> (Overtime), <code>PO</code> (Present + OT), <code>WP</code> (Worked Week Off), <code>W</code> (Weekly Off), <code>A</code> (Absent), <code>L</code> (Leave).
                     </span>
                 </div>
 
@@ -709,7 +727,10 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dbeafe', border: '1px solid #2563eb' }}></span> <strong>O</strong> Overtime
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fef3c7', border: '1px solid #d97706' }}></span> <strong>D</strong> Double Shift
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f3e8ff', border: '1px solid #7e22ce' }}></span> <strong>PO</strong> Present + OT
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#ccfbf1', border: '1px solid #0f766e' }}></span> <strong>WP</strong> Worked on Week Off
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f1f5f9', border: '1px solid #94a3b8' }}></span> <strong>W</strong> Weekly Off
@@ -718,7 +739,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fee2e2', border: '1px solid #dc2626' }}></span> <strong>A</strong> Absent
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f3e8ff', border: '1px solid #7e22ce' }}></span> <strong>L</strong> Leave
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fdf2f8', border: '1px solid #db2777' }}></span> <strong>L</strong> Leave
                     </span>
                 </div>
             </div>
@@ -866,11 +887,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                         );
                                     })}
 
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '2px solid #cbd5e1', background: '#f8fafc', color: '#059669', fontWeight: 800 }}>P</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }}>O</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#d97706', fontWeight: 800 }}>D</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 800 }}>W/L</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '55px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#059669', fontWeight: 800 }}>Pay Days</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '2px solid #cbd5e1', background: '#f8fafc', color: '#059669', fontWeight: 800 }} title="Total Present shifts">P</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }} title="Total Overtime shifts">O</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#0f766e', fontWeight: 800 }} title="Worked on Weekly Off">WP</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 800 }} title="Weekly Off / Leave">W/L</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '55px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#059669', fontWeight: 800 }} title="Total Payable Days">Pay Days</th>
                                     <th style={{ padding: '8px 6px', width: '36px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc' }}>Act</th>
                                 </tr>
                             </thead>
@@ -885,7 +906,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                     site.guards.map((guard, idx) => (
                                         <tr key={guard.employee_id} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
                                             <td style={{ padding: '6px 4px', position: 'sticky', left: 0, background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, color: '#94a3b8', fontWeight: 600 }}>
-                                                {idx + 1}
+                                              {idx + 1}
                                             </td>
                                             <td style={{ padding: '6px 8px', position: 'sticky', left: '32px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, fontWeight: 800, color: '#0284c7', textAlign: 'left' }}>
                                                 {guard.employee_code}
@@ -921,9 +942,12 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                 } else if (cellVal === 'O' || cellVal === 'OT') {
                                                     cellBg = '#dbeafe';
                                                     cellColor = '#1d4ed8';
-                                                } else if (cellVal === 'D' || cellVal === 'WO+OT' || cellVal === 'DS') {
-                                                    cellBg = '#fef3c7';
-                                                    cellColor = '#b45309';
+                                                } else if (cellVal === 'PO') {
+                                                    cellBg = '#f3e8ff';
+                                                    cellColor = '#7e22ce';
+                                                } else if (cellVal === 'WP' || cellVal === 'D' || cellVal === 'WO+OT' || cellVal === 'DS') {
+                                                    cellBg = '#ccfbf1';
+                                                    cellColor = '#0f766e';
                                                 } else if (cellVal === 'W' || cellVal === 'WO') {
                                                     cellBg = '#f1f5f9';
                                                     cellColor = '#64748b';
@@ -931,8 +955,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                     cellBg = '#fee2e2';
                                                     cellColor = '#b91c1c';
                                                 } else if (['L', 'PL', 'SL'].includes(cellVal)) {
-                                                    cellBg = '#f3e8ff';
-                                                    cellColor = '#7e22ce';
+                                                    cellBg = '#fdf2f8';
+                                                    cellColor = '#db2777';
                                                 }
 
                                                 return (
@@ -968,7 +992,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                                             <td style={{ padding: '6px 4px', borderLeft: '2px solid #cbd5e1', fontWeight: 800, color: '#15803d', background: '#f0fdf4' }}>{guard.total_present}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#2563eb', background: '#eff6ff' }}>{guard.total_ot}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#b45309', background: '#fffbeb' }}>{guard.total_ds}</td>
+                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#0f766e', background: '#f0fdfa' }}>{guard.total_ds}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 700, color: '#64748b' }}>{guard.total_wo + guard.total_leave}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#059669', background: '#ecfdf5' }}>{guard.payable_days}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0' }}>

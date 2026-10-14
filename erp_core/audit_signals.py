@@ -40,10 +40,13 @@ def record_model_audit_event(sender, instance, action_flag, message=""):
     if model_name in EXCLUDED_MODELS or app_label in EXCLUDED_APPS:
         return
 
-    # Django Admin already records LogEntry natively inside its own views
+    # Django Admin natively records LogEntry for add and change views,
+    # but NEVER records DELETION for soft-deletes (is_deleted=True) or bulk actions.
+    # Therefore, DELETION events are ALWAYS recorded.
     req = get_current_request()
     if req and getattr(req, 'path', '').startswith('/admin/'):
-        return
+        if action_flag != DELETION:
+            return
 
     try:
         user = get_current_user()

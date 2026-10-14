@@ -641,6 +641,9 @@ class AttendanceStatus(models.TextChoices):
     HOLIDAY = 'HOLIDAY', 'Holiday'
     WEEKLY_OFF = 'WEEKLY_OFF', 'Weekly Off'
     HALF_DAY = 'HALF_DAY', 'Half Day'
+    OVERTIME = 'OVERTIME', 'Overtime'
+    WORKED_WEEKLY_OFF = 'WORKED_WEEKLY_OFF', 'Worked Weekly Off'
+    DOUBLE_SHIFT = 'DOUBLE_SHIFT', 'Double Shift'
     # Backward compatibility choices
     LATE = 'LATE', 'Late'
     ON_LEAVE = 'ON_LEAVE', 'On Leave'
@@ -668,7 +671,7 @@ class WorkforceAttendance(BaseModel):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['company', 'employee', 'date'],
+                fields=['company', 'employee', 'date', 'status'],
                 condition=models.Q(is_deleted=False),
                 name='unique_active_workforce_attendance'
             )

@@ -70,10 +70,10 @@ from .models import (
 
 @admin.register(WorkforceAttendance)
 class WorkforceAttendanceAdmin(admin.ModelAdmin):
-    list_display = ('employee', 'date', 'check_in', 'check_out', 'status', 'company')
+    list_display = ('employee', 'date', 'site', 'check_in', 'check_out', 'status', 'company')
     list_filter = ('company', 'status', 'date')
     search_fields = ('employee__first_name', 'employee__last_name', 'employee__employee_code')
-    list_select_related = ('company', 'employee')
+    list_select_related = ('company', 'employee', 'site')
     readonly_fields = ('id', 'created_at', 'updated_at')
 
 @admin.register(Shift)

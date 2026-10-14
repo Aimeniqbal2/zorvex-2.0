@@ -311,6 +311,53 @@ class EmployeeViewSet(TenantModelViewSet):
 
         return Response({'exists': False})
 
+    @action(detail=False, methods=['get'], url_path='directory')
+    def directory(self, request):
+        """
+        Ultra-fast lightweight workforce directory for selectors, rosters, and attendance registers.
+        Bypasses heavy relations (next_of_kin, documents, trainings, history_logs) for sub-200ms response time.
+        """
+        from erp_core.middleware import get_current_company
+        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        qs = Employee.objects.filter(is_deleted=False)
+        if company_id:
+            qs = qs.filter(company_id=company_id)
+        
+        status_param = request.query_params.get('status')
+        if status_param and str(status_param).upper() != 'ALL':
+            if str(status_param).upper() == 'ACTIVE':
+                qs = qs.filter(is_active=True)
+            elif str(status_param).upper() == 'INACTIVE':
+                qs = qs.filter(is_active=False)
+            else:
+                qs = qs.filter(employment_status=str(status_param).upper())
+        else:
+            qs = qs.filter(is_active=True)
+
+        raw_emps = list(qs.select_related('designation').values(
+            'id', 'first_name', 'last_name', 'employee_code', 'previous_employee_code',
+            'cnic_number', 'phone', 'designation_id', 'designation__name'
+        ).order_by('first_name', 'last_name')[:3000])
+
+        results = []
+        for emp in raw_emps:
+            disp_code = emp.get('previous_employee_code') or emp.get('employee_code') or ''
+            results.append({
+                'id': str(emp['id']),
+                'first_name': emp.get('first_name') or '',
+                'last_name': emp.get('last_name') or '',
+                'full_name': f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip(),
+                'employee_code': emp.get('employee_code') or '',
+                'previous_employee_code': emp.get('previous_employee_code') or '',
+                'display_code': disp_code,
+                'designation_id': str(emp['designation_id']) if emp.get('designation_id') else None,
+                'designation_name': emp.get('designation__name') or 'Security Guard',
+                'cnic_number': emp.get('cnic_number') or '',
+                'phone': emp.get('phone') or '',
+            })
+
+        return Response({'count': len(results), 'results': results})
+
     @action(detail=False, methods=['get'], url_path='cnic-alerts-summary')
     def cnic_alerts_summary(self, request):
         from datetime import date, timedelta
