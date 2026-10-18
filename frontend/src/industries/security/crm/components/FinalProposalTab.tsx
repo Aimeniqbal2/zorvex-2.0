@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import type { 
-    SecurityProposal, ProposalVersion, ProposalServiceLine, 
-    ContractEquipmentRequirement, ProposalAdditionalCharge, 
-    SecurityAssessment, ClientLocation, SecurityServiceType 
+import type {
+    SecurityProposal, ProposalVersion, ProposalServiceLine,
+    ContractEquipmentRequirement, ProposalAdditionalCharge,
+    SecurityAssessment, ClientLocation, SecurityServiceType
 } from '../api';
-import { 
+import {
     getProposalVersions, updateProposalVersion, importAssessmentRecommendations,
     createProposalServiceLine, updateProposalServiceLine,
     deleteProposalServiceLine, createContractEquipment, updateContractEquipment,
@@ -1121,7 +1121,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                         {/* Section: Profitability & Margins */}
                         <div className="fp-costing-section" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
                             <div className="fp-costing-sec-title">Bottom Line & Margins</div>
-                            
+
                             <div className="fp-costing-box-margin">
                                 <div>
                                     <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Gross Margin</div>
@@ -1226,10 +1226,10 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                             </div>
                         </div>
 
-                        {/* Discount & Tax controls in Summary */}
+                        {/* Discount controls in Summary */}
                         {!isFrozen && (
                             <div className="fp-summary-discount-box">
-                                <div className="fp-summary-discount-title">Discount & Taxes</div>
+                                <div className="fp-summary-discount-title">Commercial Discount</div>
                                 <div className="fp-discount-grid">
                                     <div className="fp-form-field">
                                         <label className="fp-field-label" style={{ fontSize: '10px' }}>Type</label>
@@ -1256,25 +1256,13 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         />
                                     </div>
                                 </div>
-                                <div className="fp-form-field">
-                                    <label className="fp-field-label" style={{ fontSize: '10px' }}>Tax Rate (%)</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="0.1"
-                                        value={termsState.tax_rate}
-                                        onChange={(e) => setTermsState({ ...termsState, tax_rate: e.target.value })}
-                                        className="fp-input"
-                                        style={{ padding: '6px 8px', fontSize: '12px', fontFamily: 'monospace' }}
-                                    />
-                                </div>
                             </div>
                         )}
 
                         {/* Totals Breakdown */}
                         <div className="fp-summary-totals-group">
                             <div className="fp-summary-line">
-                                <span>Gross Subtotal:</span>
+                                <span>Total Monthly Sale:</span>
                                 <span style={{ fontFamily: 'monospace', color: 'var(--color-text)' }}>
                                     PKR {Number(activeVersion?.subtotal || 0).toLocaleString()}
                                 </span>
@@ -1287,29 +1275,15 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     </span>
                                 </div>
                             )}
-                            <div className="fp-summary-line">
-                                <span>Taxable Amount:</span>
-                                <span style={{ fontFamily: 'monospace', color: 'var(--color-text)' }}>
-                                    PKR {Number(activeVersion?.taxable_amount || 0).toLocaleString()}
-                                </span>
-                            </div>
-                            {Number(activeVersion?.tax_amount || 0) > 0 && (
-                                <div className="fp-summary-line" style={{ color: '#f59e0b' }}>
-                                    <span>Sales Tax / GST ({activeVersion?.tax_rate}%):</span>
-                                    <span style={{ fontFamily: 'monospace' }}>
-                                        + PKR {Number(activeVersion?.tax_amount || 0).toLocaleString()}
-                                    </span>
-                                </div>
-                            )}
 
                             {/* Grand Total Highlight Box */}
                             <div className="fp-grand-total-box">
                                 <div>
-                                    <div className="fp-grand-total-label">Grand Total Offer</div>
-                                    <div className="fp-grand-total-sub">Incl. taxes & discounts</div>
+                                    <div className="fp-grand-total-label">Total Invoice Amount</div>
+                                    <div className="fp-grand-total-sub">Total commercial proposal offer</div>
                                 </div>
                                 <div className="fp-grand-total-amount">
-                                    PKR {Number(activeVersion?.grand_total || 0).toLocaleString()}
+                                    PKR {Number(activeVersion?.total_invoice_amount || 0).toLocaleString()}
                                 </div>
                             </div>
                         </div>

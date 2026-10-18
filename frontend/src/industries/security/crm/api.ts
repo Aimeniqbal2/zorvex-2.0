@@ -190,6 +190,8 @@ export interface SecurityProposal {
     contract_status?: string | null;
     valid_until: string | null;
     notes: string;
+    location?: string | null;
+    location_name?: string | null;
     locations_summary?: string;
     guard_headcount?: number;
     guard_breakdown?: string;

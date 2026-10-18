@@ -256,6 +256,7 @@ class ProposalSignedDocumentSerializer(serializers.ModelSerializer):
 
 class SecurityProposalSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='customer.name', read_only=True)
+    location_name = serializers.CharField(source='location.name', read_only=True)
     contract_code = serializers.CharField(source='contract.contract_code', read_only=True)
     contract_id = serializers.CharField(source='contract.id', read_only=True)
     contract_status = serializers.CharField(source='contract.status', read_only=True)
@@ -284,6 +285,8 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
         return obj.versions.order_by('-version_number').first()
 
     def get_locations_summary(self, obj):
+        if obj.location:
+            return obj.location.name
         ver = self._get_target_version(obj)
         if not ver:
             return ""
@@ -297,25 +300,23 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
         if not ver:
             return 0
         from django.db.models import Sum
-        return ver.service_lines.filter(
-            is_deleted=False
-        ).exclude(
-            location__is_deleted=True
-        ).exclude(
-            location__is_active=False
-        ).aggregate(total=Sum('quantity'))['total'] or 0
+        qs = ver.service_lines.filter(is_deleted=False)
+        if obj.location_id:
+            qs = qs.filter(location_id=obj.location_id)
+        else:
+            qs = qs.exclude(location__is_deleted=True).exclude(location__is_active=False)
+        return qs.aggregate(total=Sum('quantity'))['total'] or 0
 
     def get_guard_breakdown(self, obj):
         ver = self._get_target_version(obj)
         if not ver:
             return ""
-        lines = ver.service_lines.filter(
-            is_deleted=False
-        ).exclude(
-            location__is_deleted=True
-        ).exclude(
-            location__is_active=False
-        ).select_related('service_type').all()
+        qs = ver.service_lines.filter(is_deleted=False)
+        if obj.location_id:
+            qs = qs.filter(location_id=obj.location_id)
+        else:
+            qs = qs.exclude(location__is_deleted=True).exclude(location__is_active=False)
+        lines = qs.select_related('service_type').all()
         parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
         return ", ".join(parts)
 

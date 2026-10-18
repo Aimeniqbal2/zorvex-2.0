@@ -267,8 +267,19 @@ export const SecurityProposalDetail: React.FC<Props> = ({ proposalId, onBack }) 
                             </div>
                             <div className="sec-hero-subtitle">
                                 <span><i className='bx bx-building'></i> <strong>{proposal.customer_name || 'Client'}</strong></span>
-                                <span>•</span>
-                                <span><i className='bx bx-map-pin'></i> {locations.length} Site{locations.length !== 1 ? 's' : ''}</span>
+                                {proposal.location_name ? (
+                                    <>
+                                        <span>•</span>
+                                        <span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                                            <i className='bx bx-map-pin'></i> {proposal.location_name}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span>•</span>
+                                        <span><i className='bx bx-map-pin'></i> {locations.length} Site{locations.length !== 1 ? 's' : ''}</span>
+                                    </>
+                                )}
                                 {proposal.contract_code && (
                                     <>
                                         <span>•</span>

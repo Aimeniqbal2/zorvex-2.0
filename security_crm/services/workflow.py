@@ -823,15 +823,26 @@ class SecurityProposalWorkflowService:
         # 2. Find or create OperationalSites for each active ClientLocation
         operational_sites = []
         for loc in client_locations:
-            site, _ = OperationalSite.objects.get_or_create(
+            site = OperationalSite.objects.filter(
                 company=proposal.company,
                 crm_entity=proposal.customer,
                 name=loc.name,
-                defaults={
-                    'address': getattr(loc.crm_address, 'street_address', '') if loc.crm_address else (loc.notes or loc.name),
-                    'is_active': True
-                }
-            )
+                is_deleted=False
+            ).first()
+            if not site:
+                site = OperationalSite.objects.filter(
+                    company=proposal.company,
+                    crm_entity=proposal.customer,
+                    name=loc.name
+                ).first()
+            if not site:
+                site = OperationalSite.objects.create(
+                    company=proposal.company,
+                    crm_entity=proposal.customer,
+                    name=loc.name,
+                    address=getattr(loc.crm_address, 'street_address', '') if loc.crm_address else (loc.notes or loc.name),
+                    is_active=True
+                )
             if site.is_deleted:
                 site.is_deleted = False
                 site.save(update_fields=['is_deleted'])

@@ -1126,11 +1126,11 @@ class SecurityCRMTests(TestCase):
         # Taxable: 321,000 - 5,000 = 316,000
         self.assertEqual(version.taxable_amount, Decimal('316000.00'))
 
-        # Tax (10%): 31,600
-        self.assertEqual(version.tax_amount, Decimal('31600.00'))
+        # Tax amount is 0 as disconnected flat tax is purged; tax is handled by costing engine
+        self.assertEqual(version.tax_amount, Decimal('0.00'))
 
-        # Grand Total: 316,000 + 31,600 = 347,600
-        self.assertEqual(version.grand_total, Decimal('347600.00'))
+        # Grand Total equals taxable offer total (316,000)
+        self.assertEqual(version.grand_total, Decimal('316000.00'))
 
     def test_manual_tax_basis_and_ot_rate(self):
         """Test MANUAL tax basis overrides and ot_rate property on service lines."""

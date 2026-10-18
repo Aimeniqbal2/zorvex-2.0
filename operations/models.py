@@ -276,8 +276,8 @@ class SecurityPost(BaseModel):
                 raise ValidationError({'service_contract': 'The selected contract does not cover this site.'})
         if self.required_designation_id and str(self.required_designation.company_id) != str(self.company_id):
             raise ValidationError({'required_designation': 'Designation must belong to the same company.'})
-        if self.required_headcount < 1:
-            raise ValidationError({'required_headcount': 'Required headcount must be at least 1.'})
+        if self.required_headcount < 0:
+            raise ValidationError({'required_headcount': 'Required headcount cannot be negative.'})
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -487,8 +487,8 @@ class PostShiftRequirement(BaseModel):
             raise ValidationError({'post': 'Security Post must belong to the same company.'})
         if self.shift_id and str(self.shift.company_id) != str(self.company_id):
             raise ValidationError({'shift': 'Shift must belong to the same company.'})
-        if self.required_headcount < 1:
-            raise ValidationError({'required_headcount': 'Required headcount must be at least 1.'})
+        if self.required_headcount < 0:
+            raise ValidationError({'required_headcount': 'Required headcount cannot be negative.'})
 
     def save(self, *args, **kwargs):
         self.clean()

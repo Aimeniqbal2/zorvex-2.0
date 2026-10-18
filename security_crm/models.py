@@ -40,6 +40,7 @@ class SecurityProposal(BaseModel):
     Represents the commercial proposal associated with an existing universal CRM customer.
     """
     customer = models.ForeignKey('crm.CRMEntity', on_delete=models.CASCADE, related_name='security_proposals')
+    location = models.ForeignKey('ClientLocation', on_delete=models.SET_NULL, null=True, blank=True, related_name='security_proposals')
     proposal_number = models.CharField(max_length=100, db_index=True, blank=True)
     title = models.CharField(max_length=255)
     status = models.CharField(max_length=50, choices=SecurityProposalStatus.choices, default=SecurityProposalStatus.DRAFT)
@@ -89,6 +90,8 @@ class SecurityProposal(BaseModel):
         super().clean()
         if self.customer_id and str(self.customer.company_id) != str(self.company_id):
             raise ValidationError({'customer': 'Customer must belong to the same company.'})
+        if self.location_id and str(self.location.company_id) != str(self.company_id):
+            raise ValidationError({'location': 'Location must belong to the same company.'})
         
         # Prevent direct unsafe status mutation from API clients (rudimentary check here; service handles strict workflow)
         if self.pk:
@@ -420,14 +423,13 @@ class ProposalVersion(BaseModel):
 
     @property
     def tax_amount(self):
+        """Legacy flat tax property removed; tax is computed strictly via sales_tax_amount in costing engine."""
         from decimal import Decimal
-        if self.tax_rate:
-            return (self.taxable_amount * self.tax_rate) / Decimal('100.00')
         return Decimal('0.00')
 
     @property
     def grand_total(self):
-        return self.taxable_amount + self.tax_amount
+        return self.taxable_amount
 
     def clean(self):
         super().clean()

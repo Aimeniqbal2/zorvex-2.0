@@ -39,6 +39,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     // Overview Data
     const [serviceLines, setServiceLines] = useState<ProposalServiceLine[]>([]);
     const [activeVersion, setActiveVersion] = useState<ProposalVersion | null>(null);
+    const [allProposalVersions, setAllProposalVersions] = useState<ProposalVersion[]>([]);
 
     const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'locations' | 'requirements'>('overview');
     const [isLoading, setIsLoading] = useState(true);
@@ -90,30 +91,56 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
             setProposals(loadedProposals);
             setAddresses(loadedAddrs);
 
-            // Load active proposal version & service lines for overview dashboard
+            // Load active proposal versions & service lines across ALL client proposals for complete overview
             if (loadedProposals.length > 0) {
                 try {
-                    const primaryProp = loadedProposals.find(p => p.status === 'ACTIVE') || loadedProposals[0];
-                    const vers = await getProposalVersions(primaryProp.id);
-                    const versList = Array.isArray(vers) ? vers : ((vers as any)?.results || []);
-                    const actVer = versList.find((v: any) => v.status === 'APPROVED' || v.status === 'ACTIVE') || versList[0];
-                    
-                    if (actVer) {
-                        setActiveVersion(actVer);
-                        const linesRes = await getServiceLines(actVer.id);
-                        const lines = linesRes.results || (Array.isArray(linesRes) ? linesRes : []);
-                        setServiceLines(lines);
-                    } else {
-                        setActiveVersion(null);
-                        setServiceLines([]);
-                    }
+                    const proposalDetails = await Promise.all(
+                        loadedProposals.map(async (prop) => {
+                            try {
+                                const vers = await getProposalVersions(prop.id);
+                                const versList = Array.isArray(vers) ? vers : ((vers as any)?.results || []);
+                                const actVer = versList.find((v: any) => v.status === 'APPROVED' || v.status === 'ACTIVE') || versList[0];
+                                if (!actVer) return null;
+                                const linesRes = await getServiceLines(actVer.id);
+                                const lines = linesRes.results || (Array.isArray(linesRes) ? linesRes : []);
+                                return {
+                                    proposal: prop,
+                                    version: actVer,
+                                    serviceLines: lines.map((l: any) => ({
+                                        ...l,
+                                        proposalId: prop.id,
+                                        proposalLocationId: prop.location,
+                                        proposalLocationName: prop.location_name
+                                    }))
+                                };
+                            } catch (pErr) {
+                                console.error(`Error loading proposal ${prop.id} for overview:`, pErr);
+                                return null;
+                            }
+                        })
+                    );
+
+                    const validDetails = proposalDetails.filter(Boolean) as Array<{
+                        proposal: SecurityProposal;
+                        version: ProposalVersion;
+                        serviceLines: ProposalServiceLine[];
+                    }>;
+
+                    const allLines = validDetails.flatMap(d => d.serviceLines);
+                    const allVers = validDetails.map(d => d.version);
+
+                    setServiceLines(allLines);
+                    setAllProposalVersions(allVers);
+                    setActiveVersion(allVers[0] || null);
                 } catch (vErr) {
                     console.error("Error loading proposal details for overview:", vErr);
                     setActiveVersion(null);
+                    setAllProposalVersions([]);
                     setServiceLines([]);
                 }
             } else {
                 setActiveVersion(null);
+                setAllProposalVersions([]);
                 setServiceLines([]);
             }
         } catch (error) {
@@ -127,12 +154,19 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         loadData();
     }, [loadData]);
 
-    const handleCreateRequirement = async () => {
+    const handleCreateRequirement = async (locationId?: string) => {
         try {
-            const payload = {
+            let targetLoc = locations.find(l => l.id === locationId);
+            if (!targetLoc && locations.length > 0) {
+                targetLoc = locations.find(l => !proposals.some(p => p.location === l.id || p.location_name?.toLowerCase() === l.name.toLowerCase())) || locations[0];
+            }
+            const payload: any = {
                 customer: customerId,
-                title: `${customer?.name} - Final Requirements`,
+                title: targetLoc ? `${customer?.name} - ${targetLoc.name} Requirements` : `${customer?.name} - Final Requirements`,
             };
+            if (targetLoc) {
+                payload.location = targetLoc.id;
+            }
             const newProp = await createSecurityProposal(payload);
             useToastStore.getState().success('Requirement sheet created and linked to Operations');
             onOpenProposal(newProp.id);
@@ -278,7 +312,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     if (isLoading) return <div style={{ padding: '24px', color: 'var(--color-text-muted)' }}>Loading client details...</div>;
     if (!customer) return <div style={{ padding: '24px', color: 'var(--color-danger)' }}>Client not found</div>;
 
-    // Derived Financial & Force Metrics for Overview
+    // Derived Financial & Force Metrics for Overview (Aggregated Across ALL Active Locations & Proposals)
     const totalGuards = serviceLines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
     const totalMonthlySale = serviceLines.reduce((sum, line) => {
         const sale = Number(line.line_sale) || ((Number(line.quantity) || 0) * (Number(line.client_rate) || 0));
@@ -290,21 +324,25 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     }, 0);
     const grossMargin = totalMonthlySale - totalMonthlySalary;
 
-    const overheadExpense = activeVersion?.total_monthly_expense 
-        ? Number(activeVersion.total_monthly_expense) 
-        : (totalGuards * (Number(activeVersion?.overhead_per_guard) || 0));
-    const serviceCharges = activeVersion?.total_service_charges 
-        ? Number(activeVersion.total_service_charges) 
-        : (totalGuards * (Number(activeVersion?.service_charges_per_guard) || 0));
-    const salesTax = activeVersion?.sales_tax_amount ? Number(activeVersion.sales_tax_amount) : 0;
-    const withholdingTax = activeVersion?.withholding_tax_amount ? Number(activeVersion.withholding_tax_amount) : 0;
-    const sessi = activeVersion?.total_sessi ? Number(activeVersion.total_sessi) : 0;
-    const eobi = activeVersion?.total_eobi ? Number(activeVersion.total_eobi) : 0;
-    const invoiceTotal = activeVersion?.total_invoice_amount 
-        ? Number(activeVersion.total_invoice_amount) 
+    const overheadExpense = allProposalVersions.length > 0
+        ? allProposalVersions.reduce((sum, v) => sum + Number(v.total_monthly_expense || 0), 0)
+        : (totalGuards * (Number(activeVersion?.overhead_per_guard) || 6000));
+
+    const serviceCharges = allProposalVersions.length > 0
+        ? allProposalVersions.reduce((sum, v) => sum + Number(v.total_service_charges || 0), 0)
+        : (totalGuards * (Number(activeVersion?.service_charges_per_guard) || 3000));
+
+    const salesTax = allProposalVersions.reduce((sum, v) => sum + Number(v.sales_tax_amount || 0), 0);
+    const withholdingTax = allProposalVersions.reduce((sum, v) => sum + Number(v.withholding_tax_amount || 0), 0);
+    const sessi = allProposalVersions.reduce((sum, v) => sum + Number(v.total_sessi || 0), 0);
+    const eobi = allProposalVersions.reduce((sum, v) => sum + Number(v.total_eobi || 0), 0);
+
+    const invoiceTotal = allProposalVersions.length > 0
+        ? allProposalVersions.reduce((sum, v) => sum + Number(v.total_invoice_amount || (Number(v.total_monthly_sale || 0) + Number(v.sales_tax_amount || 0))), 0)
         : (totalMonthlySale + salesTax);
-    const netProfit = activeVersion?.net_profit_loss 
-        ? Number(activeVersion.net_profit_loss) 
+
+    const netProfit = allProposalVersions.length > 0
+        ? allProposalVersions.reduce((sum, v) => sum + Number(v.net_profit_loss || 0), 0)
         : (grossMargin - overheadExpense);
 
     // Primary Head Office Address
@@ -315,8 +353,15 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
 
     // Group service lines by location
     const locationLineGroups = locations.map(loc => {
+        const propForLoc = proposals.find(
+            p => String(p.location) === String(loc.id) || 
+                 (p.location_name && p.location_name.toLowerCase() === loc.name.toLowerCase())
+        );
         const linesForLoc = serviceLines.filter(
-            sl => String(sl.location) === String(loc.id) || String(sl.location_name).toLowerCase() === loc.name.toLowerCase()
+            sl => String(sl.location) === String(loc.id) || 
+                  String((sl as any).proposalLocationId) === String(loc.id) ||
+                  (sl.location_name && sl.location_name.toLowerCase() === loc.name.toLowerCase()) ||
+                  ((sl as any).proposalLocationName && (sl as any).proposalLocationName.toLowerCase() === loc.name.toLowerCase())
         );
         const locGuards = linesForLoc.reduce((acc, l) => acc + (Number(l.quantity) || 0), 0);
         const locSale = linesForLoc.reduce((acc, l) => acc + (Number(l.line_sale) || ((Number(l.quantity) || 0) * (Number(l.client_rate) || 0))), 0);
@@ -324,12 +369,24 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
 
         return {
             location: loc,
+            proposal: propForLoc,
             lines: linesForLoc,
             totalGuards: locGuards,
             totalSale: locSale,
             totalSalary: locSalary
         };
     });
+
+    const unassignedLines = serviceLines.filter(sl => {
+        return !locations.some(loc => 
+            String(sl.location) === String(loc.id) || 
+            String((sl as any).proposalLocationId) === String(loc.id) ||
+            (sl.location_name && sl.location_name.toLowerCase() === loc.name.toLowerCase()) ||
+            ((sl as any).proposalLocationName && (sl as any).proposalLocationName.toLowerCase() === loc.name.toLowerCase())
+        );
+    });
+    const unassignedGuards = unassignedLines.reduce((acc, l) => acc + (Number(l.quantity) || 0), 0);
+    const unassignedSale = unassignedLines.reduce((acc, l) => acc + (Number(l.line_sale) || ((Number(l.quantity) || 0) * (Number(l.client_rate) || 0))), 0);
 
     const locColumns: Column<ClientLocation>[] = [
         { 
@@ -431,27 +488,51 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         {
             key: 'actions',
             header: 'Actions',
-            render: (loc) => (
-                <div style={{ display: 'flex', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
-                    <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        title="Edit Location"
-                        onClick={() => handleOpenEditLocation(loc)}
-                    >
-                        <i className='bx bx-edit'></i> Edit
-                    </Button>
-                    <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        title="Delete Location"
-                        style={{ color: 'var(--color-danger, #ef4444)' }}
-                        onClick={() => handleDeleteLocation(loc.id, loc.name)}
-                    >
-                        <i className='bx bx-trash'></i>
-                    </Button>
-                </div>
-            )
+            render: (loc) => {
+                const locProp = proposals.find(p => p.location === loc.id || (p.location_name && p.location_name.toLowerCase() === loc.name.toLowerCase()));
+                return (
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                        {locProp ? (
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                title="Open Final Requirements for this location"
+                                style={{ color: 'var(--color-primary)', fontWeight: 600 }}
+                                onClick={() => onOpenProposal(locProp.id)}
+                            >
+                                <i className='bx bx-list-check' style={{ fontSize: '15px' }}></i> Requirements
+                            </Button>
+                        ) : (
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                title="Set Final Requirements for this location"
+                                style={{ color: '#10b981', fontWeight: 600 }}
+                                onClick={() => handleCreateRequirement(loc.id)}
+                            >
+                                <i className='bx bx-plus-circle' style={{ fontSize: '15px' }}></i> Add Req
+                            </Button>
+                        )}
+                        <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            title="Edit Location"
+                            onClick={() => handleOpenEditLocation(loc)}
+                        >
+                            <i className='bx bx-edit'></i> Edit
+                        </Button>
+                        <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            title="Delete Location"
+                            style={{ color: 'var(--color-danger, #ef4444)' }}
+                            onClick={() => handleDeleteLocation(loc.id, loc.name)}
+                        >
+                            <i className='bx bx-trash'></i>
+                        </Button>
+                    </div>
+                );
+            }
         }
     ];
 
@@ -465,7 +546,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
             key: 'title', 
             header: 'Requirement Scope', 
             render: (p) => {
-                const targetLoc = p.locations_summary || (locations.length > 0 ? locations.map(l => l.name).join(', ') : 'All Deployment Sites');
+                const targetLoc = p.location_name || p.locations_summary || (locations.length > 0 ? locations.map(l => l.name).join(', ') : 'All Deployment Sites');
                 const guardText = p.guard_breakdown || (p.guard_headcount ? `${p.guard_headcount} Guards Total` : (totalGuards ? `${totalGuards} Guards Total` : 'Deployment Requirements'));
                 const headcount = p.guard_headcount ?? (totalGuards || null);
 
@@ -474,6 +555,18 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <i className='bx bx-map-pin' style={{ color: 'var(--color-primary)', fontSize: '15px' }}></i>
                             <span>{targetLoc}</span>
+                            {p.location_name && (
+                                <span style={{
+                                    fontSize: '11px',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    background: 'rgba(var(--color-primary-rgb), 0.12)',
+                                    color: 'var(--color-primary)',
+                                    fontWeight: 600
+                                }}>
+                                    Dedicated Location
+                                </span>
+                            )}
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <i className='bx bx-shield-quarter' style={{ color: '#10b981' }}></i>
@@ -586,7 +679,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         </Button>
                         <Button 
                             variant="primary" 
-                            onClick={handleCreateRequirement}
+                            onClick={() => handleCreateRequirement()}
                         >
                             <i className='bx bx-clipboard'></i> Set Final Requirements
                         </Button>
@@ -925,19 +1018,42 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                                                             <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)' }}>{grp.location.address}</div>
                                                         )}
                                                     </div>
-                                                    <div style={{ textAlign: 'right' }}>
-                                                        <span style={{ 
-                                                            fontSize: '12px', 
-                                                            padding: '2px 8px', 
-                                                            borderRadius: '10px', 
-                                                            background: grp.totalGuards > 0 ? 'rgba(var(--color-primary-rgb), 0.12)' : 'rgba(0,0,0,0.05)', 
-                                                            color: grp.totalGuards > 0 ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                                                            fontWeight: 600 
-                                                        }}>
-                                                            {grp.totalGuards} Guards
-                                                        </span>
-                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-success)', marginTop: '2px' }}>
-                                                            {formatPKR(grp.totalSale)} / mo
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        {grp.proposal ? (
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="sm" 
+                                                                title="Open Final Requirements for this location"
+                                                                style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: '12px', padding: '3px 8px', background: 'rgba(var(--color-primary-rgb), 0.08)' }}
+                                                                onClick={() => onOpenProposal(grp.proposal!.id)}
+                                                            >
+                                                                <i className='bx bx-clipboard'></i> Requirements <i className='bx bx-right-arrow-alt'></i>
+                                                            </Button>
+                                                        ) : (
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="sm" 
+                                                                title="Create Final Requirements for this location"
+                                                                style={{ color: 'var(--color-primary)', fontSize: '12px', padding: '3px 8px' }}
+                                                                onClick={() => handleCreateRequirement(grp.location.id)}
+                                                            >
+                                                                <i className='bx bx-plus'></i> Set Req
+                                                            </Button>
+                                                        )}
+                                                        <div style={{ textAlign: 'right' }}>
+                                                            <span style={{ 
+                                                                fontSize: '12px', 
+                                                                padding: '2px 8px', 
+                                                                borderRadius: '10px', 
+                                                                background: grp.totalGuards > 0 ? 'rgba(var(--color-primary-rgb), 0.12)' : 'rgba(0,0,0,0.05)', 
+                                                                color: grp.totalGuards > 0 ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                                                                fontWeight: 600 
+                                                            }}>
+                                                                {grp.totalGuards} Guards
+                                                            </span>
+                                                            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-success)', marginTop: '2px' }}>
+                                                                {formatPKR(grp.totalSale)} / mo
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -979,6 +1095,74 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                                                 )}
                                             </div>
                                         ))}
+                                        {unassignedLines.length > 0 && (
+                                            <div 
+                                                style={{ 
+                                                    border: '1px solid var(--color-border)', 
+                                                    borderRadius: '8px', 
+                                                    overflow: 'hidden',
+                                                    background: 'var(--color-background)',
+                                                    marginTop: '10px'
+                                                }}
+                                            >
+                                                <div style={{ 
+                                                    padding: '10px 14px', 
+                                                    background: 'var(--color-surface)', 
+                                                    borderBottom: '1px solid var(--color-border)',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center'
+                                                }}>
+                                                    <div>
+                                                        <strong style={{ fontSize: '13.5px', color: 'var(--color-text)' }}>General / Unassigned Deployments</strong>
+                                                        <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)' }}>Staffing not linked to a registered location</div>
+                                                    </div>
+                                                    <div style={{ textAlign: 'right' }}>
+                                                        <span style={{ 
+                                                            fontSize: '12px', 
+                                                            padding: '2px 8px', 
+                                                            borderRadius: '10px', 
+                                                            background: 'rgba(var(--color-primary-rgb), 0.12)', 
+                                                            color: 'var(--color-primary)',
+                                                            fontWeight: 600 
+                                                        }}>
+                                                            {unassignedGuards} Guards
+                                                        </span>
+                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-success)', marginTop: '2px' }}>
+                                                            {formatPKR(unassignedSale)} / mo
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontSize: '11px', textAlign: 'left' }}>
+                                                            <th style={{ padding: '6px 14px', fontWeight: 600 }}>ROLE / DESIGNATION</th>
+                                                            <th style={{ padding: '6px 10px', fontWeight: 600, textAlign: 'center' }}>QTY</th>
+                                                            <th style={{ padding: '6px 10px', fontWeight: 600, textAlign: 'right' }}>RATE / HEAD</th>
+                                                            <th style={{ padding: '6px 14px', fontWeight: 600, textAlign: 'right' }}>LINE TOTAL</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {unassignedLines.map((l, lIdx) => {
+                                                            const lineSale = Number(l.line_sale) || ((Number(l.quantity) || 0) * (Number(l.client_rate) || 0));
+                                                            return (
+                                                                <tr key={l.id || lIdx} style={{ borderBottom: lIdx < unassignedLines.length - 1 ? '1px solid var(--color-border)' : 'none' }}>
+                                                                    <td style={{ padding: '8px 14px' }}>
+                                                                        <strong style={{ color: 'var(--color-text)' }}>{l.service_type_name || 'Security Personnel'}</strong>
+                                                                        {l.shift_hours && <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginLeft: '6px' }}>({l.shift_hours})</span>}
+                                                                    </td>
+                                                                    <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600 }}>{l.quantity}</td>
+                                                                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{formatPKR(l.client_rate)}</td>
+                                                                    <td style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text)', fontFamily: 'monospace' }}>
+                                                                        {formatPKR(lineSale)}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1118,7 +1302,15 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
 
                                     {/* Action to Final Requirements */}
                                     <div style={{ marginTop: '8px' }}>
-                                        {proposals.length > 0 ? (
+                                        {proposals.length > 1 ? (
+                                            <Button 
+                                                variant="primary" 
+                                                style={{ width: '100%' }}
+                                                onClick={() => setActiveTab('requirements')}
+                                            >
+                                                <i className='bx bx-list-check'></i> View All Final Requirements ({proposals.length} Sites)
+                                            </Button>
+                                        ) : proposals.length === 1 ? (
                                             <Button 
                                                 variant="primary" 
                                                 style={{ width: '100%' }}
@@ -1130,7 +1322,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                                             <Button 
                                                 variant="primary" 
                                                 style={{ width: '100%' }}
-                                                onClick={handleCreateRequirement}
+                                                onClick={() => handleCreateRequirement()}
                                             >
                                                 <i className='bx bx-plus'></i> Set Final Requirements
                                             </Button>
@@ -1190,7 +1382,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         <div style={{ color: 'var(--color-text-muted)', fontSize: '13.5px' }}>
                             Commercial service requirements and guard staffing for this client. Click any row to open requirements sheet.
                         </div>
-                        <Button variant="primary" onClick={handleCreateRequirement}>
+                        <Button variant="primary" onClick={() => handleCreateRequirement()}>
                             <i className='bx bx-plus'></i> Add Requirements
                         </Button>
                     </div>

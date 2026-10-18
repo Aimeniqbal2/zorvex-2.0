@@ -107,6 +107,39 @@ class ClientLocationViewSet(TenantModelViewSet):
         except Exception as e:
             logger.warning(f"Could not auto-create OperationalSite for location {loc.name}: {e}")
 
+        # Auto-create dedicated SecurityProposal (Final Requirements) for this location if none exists
+        try:
+            prop = SecurityProposal.objects.filter(
+                company=loc.company,
+                customer=loc.customer,
+                location=loc,
+                is_deleted=False
+            ).first()
+            if not prop:
+                prop = SecurityProposal.objects.create(
+                    company=loc.company,
+                    customer=loc.customer,
+                    location=loc,
+                    title=f"{loc.customer.name} - {loc.name} Requirements",
+                    status=SecurityProposalStatus.ACTIVE,
+                    is_handoff_ready=True
+                )
+                ProposalVersion.objects.create(
+                    company=loc.company,
+                    proposal=prop,
+                    version_number=1,
+                    version_type='Final Requirement',
+                    status='ACTIVE',
+                    overhead_per_guard=6000,
+                    service_charges_per_guard=3000,
+                    withholding_tax_rate=7,
+                    tax_rate=8,
+                    sales_tax_basis='TOTAL_SALE',
+                    withholding_tax_basis='INVOICE_AMOUNT'
+                )
+        except Exception as e:
+            logger.warning(f"Could not auto-create SecurityProposal for location {loc.name}: {e}")
+
     def perform_update(self, serializer):
         old_name = serializer.instance.name if serializer.instance else None
         loc = serializer.save()
@@ -151,6 +184,9 @@ class SecurityProposalViewSet(TenantModelViewSet):
         customer_id = self.request.query_params.get('customer') or self.request.query_params.get('customer_id')
         if customer_id:
             qs = qs.filter(customer_id=customer_id)
+        location_id = self.request.query_params.get('location') or self.request.query_params.get('location_id')
+        if location_id:
+            qs = qs.filter(location_id=location_id)
         status_filter = self.request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -1828,26 +1864,44 @@ class CostingGridBatchSyncView(APIView):
                             is_active=True
                         )
 
-                    proposal = getattr(SecurityProposal, 'all_objects', SecurityProposal.objects).filter(
+                    # Location-specific proposal matching: strictly find non-terminal active proposal for (customer, location)
+                    proposal = SecurityProposal.objects.filter(
                         company=company,
-                        customer=customer
-                    ).order_by('-created_at').first()
-                    if proposal and proposal.is_deleted:
-                        proposal.is_deleted = False
-                        proposal.save(update_fields=['is_deleted'])
+                        customer=customer,
+                        location=location,
+                        is_deleted=False
+                    ).exclude(status__in=[SecurityProposalStatus.CANCELLED, SecurityProposalStatus.REJECTED]).order_by('-created_at').first()
+
+                    # Fallback: check unassigned proposal for this customer without a location yet
+                    if not proposal:
+                        unassigned = SecurityProposal.objects.filter(
+                            company=company,
+                            customer=customer,
+                            location__isnull=True,
+                            is_deleted=False
+                        ).exclude(status__in=[SecurityProposalStatus.CANCELLED, SecurityProposalStatus.REJECTED]).order_by('-created_at').first()
+                        if unassigned:
+                            unassigned.location = location
+                            unassigned.title = f"{customer.name} - {location.name} Requirements"
+                            unassigned.save(update_fields=['location', 'title'])
+                            proposal = unassigned
+
+                    # Create fresh dedicated proposal if none exists for this location
                     if not proposal:
                         proposal = SecurityProposal.objects.create(
                             company=company,
                             customer=customer,
-                            title=f"{customer.name} - Final Requirements",
+                            location=location,
+                            title=f"{customer.name} - {location.name} Requirements",
                             status=SecurityProposalStatus.ACTIVE,
                             is_handoff_ready=True
                         )
                     else:
-                        if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:
-                            proposal.status = SecurityProposalStatus.ACTIVE
-                            proposal.is_handoff_ready = True
-                            proposal.save(update_fields=['status', 'is_handoff_ready'])
+                        if proposal.status not in [SecurityProposalStatus.CANCELLED, SecurityProposalStatus.REJECTED]:
+                            if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:
+                                proposal.status = SecurityProposalStatus.ACTIVE
+                                proposal.is_handoff_ready = True
+                                proposal.save(update_fields=['status', 'is_handoff_ready'])
 
                     def _parse_dec(v, default):
                         if v is None or str(v).strip() == '':

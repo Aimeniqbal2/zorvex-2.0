@@ -119,6 +119,7 @@ const ROLE_COLUMNS: RoleColDef[] = [
 
 export const FastCostingGridTab: React.FC = () => {
     const [rows, setRows] = useState<CostingGridRow[]>([]);
+    const [dirtyRowKeys, setDirtyRowKeys] = useState<Set<string>>(new Set());
     const [existingCustomers, setExistingCustomers] = useState<CRMEntity[]>([]);
     const [existingLocations, setExistingLocations] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -130,6 +131,13 @@ export const FastCostingGridTab: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
 
+    const getRowKey = (r: CostingGridRow, fallbackIdx?: number) => {
+        if (r.id) return String(r.id);
+        if (r.proposal_version_id) return `ver-${r.proposal_version_id}`;
+        if (r.location_id) return `loc-${r.location_id}`;
+        return `row-${(r.client_name || '').toLowerCase().trim()}-${(r.location_name || '').toLowerCase().trim()}${fallbackIdx !== undefined ? `-${fallbackIdx}` : ''}`;
+    };
+
     const loadGrid = async () => {
         setIsLoading(true);
         try {
@@ -138,7 +146,12 @@ export const FastCostingGridTab: React.FC = () => {
                 getEntities({ entity_type: 'CUSTOMER' }).catch(() => ({ results: [] })),
                 getClientLocations().catch(() => ({ results: [] }))
             ]);
-            setRows(gridData);
+            const prepared = (gridData || []).map((r: any, idx: number) => ({
+                ...r,
+                id: r.id || (r.proposal_version_id ? `ver-${r.proposal_version_id}` : `loc-${r.location_id || idx}`)
+            }));
+            setRows(prepared);
+            setDirtyRowKeys(new Set());
             setExistingCustomers(customersRes.results || []);
             setExistingLocations((locationsRes as any)?.results || locationsRes || []);
         } catch (err: any) {
@@ -301,8 +314,9 @@ export const FastCostingGridTab: React.FC = () => {
     }, [existingLocations]);
 
     const handleAddBlankRow = () => {
+        const newId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
         const newRow: CostingGridRow = {
-            id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            id: newId,
             client_id: null,
             client_name: '',
             location_name: '',
@@ -329,10 +343,21 @@ export const FastCostingGridTab: React.FC = () => {
             deo_qty: 0, deo_rate: 0, deo_sal: 0,
             lady_cctv_qty: 0, lady_cctv_rate: 0, lady_cctv_sal: 0,
         };
+        setDirtyRowKeys(prev => {
+            const next = new Set(prev);
+            next.add(newId);
+            return next;
+        });
         setRows([newRow, ...rows]);
     };
 
     const handleUpdateRow = (targetRow: CostingGridRow, field: keyof CostingGridRow, value: any) => {
+        const rowKey = getRowKey(targetRow);
+        setDirtyRowKeys(prev => {
+            const next = new Set(prev);
+            next.add(rowKey);
+            return next;
+        });
         setRows(prevRows => prevRows.map(r => {
             if (r === targetRow || (r.id && r.id === targetRow.id)) {
                 const updated = { ...r };
@@ -352,6 +377,13 @@ export const FastCostingGridTab: React.FC = () => {
         if (!window.confirm(`Are you sure you want to delete "${locName}" and remove all its requirements from CRM and Operations?`)) {
             return;
         }
+
+        const rowKey = getRowKey(targetRow);
+        setDirtyRowKeys(prev => {
+            const next = new Set(prev);
+            next.delete(rowKey);
+            return next;
+        });
 
         // If it's an unsaved row without backend references
         if (!targetRow.location_id && !targetRow.proposal_version_id && !targetRow.client_id) {
@@ -381,15 +413,27 @@ export const FastCostingGridTab: React.FC = () => {
             return;
         }
 
-        const invalidRows = rows.filter(r => !r.client_name?.trim());
+        // Performance check: Only sync if changes were actually made
+        if (dirtyRowKeys.size === 0) {
+            useToastStore.getState().info('No changes detected. Costing sheets are already in sync.');
+            return;
+        }
+
+        const dirtyRows = rows.filter(r => dirtyRowKeys.has(getRowKey(r)));
+        if (dirtyRows.length === 0) {
+            useToastStore.getState().info('No changes detected. Costing sheets are already in sync.');
+            return;
+        }
+
+        const invalidRows = dirtyRows.filter(r => !r.client_name?.trim());
         if (invalidRows.length > 0) {
-            useToastStore.getState().error('Please ensure all rows have a Client Name.');
+            useToastStore.getState().error('Please ensure all modified rows have a Client Name.');
             return;
         }
 
         setIsSaving(true);
         try {
-            const preparedRows = rows.map(r => ({
+            const preparedRows = dirtyRows.map(r => ({
                 ...r,
                 overhead_per_guard: (r.overhead_per_guard !== '' && r.overhead_per_guard !== null && r.overhead_per_guard !== undefined) ? Number(r.overhead_per_guard) : 6000,
                 service_charges_per_guard: (r.service_charges_per_guard !== '' && r.service_charges_per_guard !== null && r.service_charges_per_guard !== undefined) ? Number(r.service_charges_per_guard) : 3000,
@@ -404,7 +448,8 @@ export const FastCostingGridTab: React.FC = () => {
                         : Math.round(Number(r.guard_civ_sal || 35000) / 30)),
             }));
             const res = await syncCostingGrid(preparedRows as any);
-            useToastStore.getState().success(res.message || 'Costing grid synced to CRM successfully!');
+            useToastStore.getState().success(res.message || `Successfully synced ${dirtyRows.length} changed location(s)!`);
+            setDirtyRowKeys(new Set());
             await loadGrid();
         } catch (err: any) {
             useToastStore.getState().error(err?.response?.data?.error || err?.message || 'Failed to sync costing grid.');
@@ -750,13 +795,19 @@ export const FastCostingGridTab: React.FC = () => {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '8px',
-                            background: '#10b981',
-                            borderColor: '#10b981',
-                            fontWeight: 700
+                            background: dirtyRowKeys.size > 0 ? '#10b981' : 'var(--color-surface-secondary)',
+                            borderColor: dirtyRowKeys.size > 0 ? '#10b981' : 'var(--color-border)',
+                            color: dirtyRowKeys.size > 0 ? '#ffffff' : 'var(--color-text-muted)',
+                            opacity: isSaving ? 0.7 : 1,
+                            cursor: isSaving ? 'not-allowed' : (dirtyRowKeys.size > 0 ? 'pointer' : 'default'),
+                            fontWeight: 700,
+                            transition: 'all 0.2s ease',
+                            boxShadow: dirtyRowKeys.size > 0 ? '0 2px 8px rgba(16, 185, 129, 0.3)' : 'none'
                         }}
+                        title={dirtyRowKeys.size > 0 ? `${dirtyRowKeys.size} unsaved location change(s)` : 'All costing sheets in sync'}
                     >
-                        <i className='bx bx-cloud-upload' style={{ fontSize: '20px' }}></i>
-                        {isSaving ? 'Syncing to CRM...' : 'Save & Sync to CRM'}
+                        <i className={`bx bx-cloud-upload ${dirtyRowKeys.size > 0 ? 'bx-tada' : ''}`} style={{ fontSize: '20px' }}></i>
+                        {isSaving ? 'Syncing to CRM...' : (dirtyRowKeys.size > 0 ? `Save & Sync to CRM (${dirtyRowKeys.size} changed)` : 'Save & Sync to CRM (In Sync)')}
                     </Button>
                 </div>
             </div>
@@ -906,7 +957,9 @@ export const FastCostingGridTab: React.FC = () => {
                         ) : (
                             filteredRows.map((row, idx) => {
                                 const calc = computeRowTotals(row);
-                                const rowBg = idx % 2 === 0 ? 'var(--color-surface)' : 'var(--color-surface-secondary)';
+                                const isDirty = dirtyRowKeys.has(getRowKey(row));
+                                const baseBg = idx % 2 === 0 ? 'var(--color-surface)' : 'var(--color-surface-secondary)';
+                                const rowBg = isDirty ? 'rgba(245, 158, 11, 0.08)' : baseBg;
 
                                 return (
                                     <tr 
@@ -919,16 +972,19 @@ export const FastCostingGridTab: React.FC = () => {
                                         {/* Row # Sticky */}
                                         <td style={{ 
                                             padding: '8px 8px', 
-                                            color: 'var(--color-text-muted)', 
-                                            fontWeight: 600, 
+                                            color: isDirty ? '#d97706' : 'var(--color-text-muted)', 
+                                            fontWeight: isDirty ? 700 : 600, 
                                             textAlign: 'center',
                                             position: 'sticky',
                                             left: 0,
                                             zIndex: 20,
                                             background: rowBg,
-                                            boxSizing: 'border-box'
-                                        }}>
-                                            {idx + 1}
+                                            boxSizing: 'border-box',
+                                            borderLeft: isDirty ? '3px solid #f59e0b' : '3px solid transparent'
+                                        }}
+                                        title={isDirty ? 'Unsaved changes on this location row' : undefined}
+                                        >
+                                            {isDirty ? '● ' : ''}{idx + 1}
                                         </td>
 
                                         {/* Client Name Sticky */}
