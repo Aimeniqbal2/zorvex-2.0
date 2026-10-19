@@ -625,7 +625,7 @@ export const CrossModuleHandoffTab: React.FC<Props> = ({ proposal, onRefresh }) 
                                     <th style={{ padding: '10px' }}>Site</th>
                                     <th style={{ padding: '10px' }}>Qty</th>
                                     <th style={{ padding: '10px' }}>Client Rate</th>
-                                    <th style={{ padding: '10px' }}>Single OT Rate</th>
+                                    <th style={{ padding: '10px' }}>OD Rate (Dozing)</th>
                                     <th style={{ padding: '10px' }}>Double OT Rate</th>
                                     <th style={{ padding: '10px' }}>Line Total</th>
                                 </tr>

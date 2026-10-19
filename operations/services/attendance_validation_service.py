@@ -21,7 +21,7 @@ from hrm.models import Employee, AttendanceStatus, WorkforceAttendance
 from operations.models import DailyDutyPay, DutyType, OperationalSite
 
 
-CANONICAL_CODES = {'P', 'O', 'PO', 'WP', 'W', 'A', 'L', ''}
+CANONICAL_CODES = {'P', 'O', 'OD', 'PO', 'POD', 'WP', 'W', 'A', 'L', ''}
 
 
 def normalize_attendance_code(raw_val: str) -> str:
@@ -30,7 +30,9 @@ def normalize_attendance_code(raw_val: str) -> str:
     Accepted aliases:
       'P', '1' -> 'P'
       'O', 'OT' -> 'O'
+      'OD', 'DOZ', 'DOZING' -> 'OD'
       'PO', 'P+O', 'P+OT', 'POT' -> 'PO'
+      'POD', 'P+OD', 'P+DOZ', 'PD' -> 'POD'
       'WP', 'WO+P', 'W+P', 'D', 'DS', 'WO+OT', '2' -> 'WP'
       'W', 'WO', 'OFF' -> 'W'
       'A', '0' -> 'A'
@@ -43,12 +45,16 @@ def normalize_attendance_code(raw_val: str) -> str:
     if not c:
         return ''
 
+    if c in ('POD', 'P+OD', 'P+DOZ', 'PD'):
+        return 'POD'
+    if c in ('OD', 'DOZ', 'DOZING'):
+        return 'OD'
+    if c in ('PO', 'P+O', 'P+OT', 'POT'):
+        return 'PO'
     if c in ('P', '1'):
         return 'P'
     if c in ('O', 'OT'):
         return 'O'
-    if c in ('PO', 'P+O', 'P+OT', 'POT'):
-        return 'PO'
     if c in ('WP', 'WO+P', 'W+P', 'D', 'DS', 'WO+OT', '2'):
         return 'WP'
     if c in ('W', 'WO', 'OFF'):
@@ -58,7 +64,9 @@ def normalize_attendance_code(raw_val: str) -> str:
     if c in ('L', 'PL', 'SL'):
         return 'L'
 
-    # Fallback to last character if multiple typed
+    # Fallback checks
+    if c.endswith('OD') or c == 'OD':
+        return 'OD'
     last_char = c[-1]
     if last_char in ('P', '1'):
         return 'P'
@@ -154,12 +162,16 @@ class AttendanceValidationService:
             # Note: PO is stored as two DDP rows (PRIMARY and OVERTIME) at the same site.
             prev_entry = existing_db_duties[(e_id, d_day)].get(s_id)
             if prev_entry:
-                if (prev_entry['code'] == 'P' and dp.duty_type == DutyType.OVERTIME) or (prev_entry['code'] == 'O' and dp.duty_type == DutyType.PRIMARY):
+                if (prev_entry['code'] == 'P' and dp.attendance_status == AttendanceStatus.OVERTIME_DOZING) or (prev_entry['code'] == 'OD' and dp.duty_type == DutyType.PRIMARY):
+                    code = 'POD'
+                elif (prev_entry['code'] == 'P' and dp.duty_type == DutyType.OVERTIME) or (prev_entry['code'] == 'O' and dp.duty_type == DutyType.PRIMARY):
                     code = 'PO'
                 else:
                     code = prev_entry['code']
             else:
-                if dp.duty_type == DutyType.OVERTIME:
+                if dp.attendance_status == AttendanceStatus.OVERTIME_DOZING:
+                    code = 'OD'
+                elif dp.duty_type == DutyType.OVERTIME:
                     code = 'O'
                 elif dp.attendance_status == AttendanceStatus.WORKED_WEEKLY_OFF:
                     code = 'WP'
@@ -220,22 +232,23 @@ class AttendanceValidationService:
                 site_names = [get_site_display(s) for s in p_sites]
                 raise ValidationError(
                     f"Guard {emp_name} cannot be marked Present (P) at multiple locations on Day {day} ({', '.join(site_names)}). "
-                    f"Only 1 primary shift is permitted per day. Mark Overtime (O) for additional locations."
+                    f"Only 1 primary shift is permitted per day. Mark Overtime (O/OD) for additional locations."
                 )
 
             # -------------------------------------------------------------
-            # RULE 2: Present + Overtime (PO) exclusivity
+            # RULE 2: Present + Overtime (PO/POD) exclusivity
             # -------------------------------------------------------------
-            po_sites = [s for s, c in active_duties.items() if c == 'PO']
-            if len(po_sites) > 1:
+            combo_sites = [s for s, c in active_duties.items() if c in ('PO', 'POD')]
+            if len(combo_sites) > 1:
                 raise ValidationError(
-                    f"Guard {emp_name} cannot be marked Present + Overtime (PO) at multiple locations on Day {day}."
+                    f"Guard {emp_name} cannot be marked Present + Overtime (PO/POD) at multiple locations on Day {day}."
                 )
-            if len(po_sites) == 1 and len(active_duties) > 1:
-                po_site_name = get_site_display(po_sites[0])
-                other_sites = [get_site_display(s) for s in active_duties.keys() if s != po_sites[0]]
+            if len(combo_sites) == 1 and len(active_duties) > 1:
+                combo_site_name = get_site_display(combo_sites[0])
+                combo_code = active_duties[combo_sites[0]]
+                other_sites = [get_site_display(s) for s in active_duties.keys() if s != combo_sites[0]]
                 raise ValidationError(
-                    f"Guard {emp_name} is marked Present + Overtime (PO) at '{po_site_name}' on Day {day}, which consumes their full 2-shift daily capacity. "
+                    f"Guard {emp_name} is marked {combo_code} at '{combo_site_name}' on Day {day}, which consumes their full 2-shift daily capacity. "
                     f"No conflicting duties can be marked at {', '.join(other_sites)}."
                 )
 
@@ -256,25 +269,26 @@ class AttendanceValidationService:
                 )
 
             # -------------------------------------------------------------
-            # RULE 4: Overtime (O) requires a valid P at a DIFFERENT location
+            # RULE 4: Overtime (O or OD) requires a valid P at a DIFFERENT location
             # -------------------------------------------------------------
-            o_sites = [s for s, c in active_duties.items() if c == 'O']
-            if len(o_sites) > 1:
+            ot_sites = [s for s, c in active_duties.items() if c in ('O', 'OD')]
+            if len(ot_sites) > 1:
                 raise ValidationError(
-                    f"Guard {emp_name} cannot have multiple Overtime (O) shifts on Day {day}. Maximum 1 overtime shift allowed per day."
+                    f"Guard {emp_name} cannot have multiple Overtime (O/OD) shifts on Day {day}. Maximum 1 overtime shift allowed per day."
                 )
-            if len(o_sites) == 1:
-                o_site_id = o_sites[0]
-                o_site_name = get_site_display(o_site_id)
+            if len(ot_sites) == 1:
+                ot_site_id = ot_sites[0]
+                ot_site_name = get_site_display(ot_site_id)
+                ot_code = active_duties[ot_site_id]
 
                 if len(p_sites) == 0:
                     raise ValidationError(
-                        f"Guard {emp_name} cannot be marked Overtime (O) at '{o_site_name}' on Day {day} without a valid primary Present (P) shift at another location."
+                        f"Guard {emp_name} cannot be marked Overtime ({ot_code}) at '{ot_site_name}' on Day {day} without a valid primary Present (P) shift at another location."
                     )
-                if o_site_id in p_sites:
+                if ot_site_id in p_sites:
                     raise ValidationError(
-                        f"Guard {emp_name} cannot be marked both Present (P) and Overtime (O) separately at the same location ('{o_site_name}') on Day {day}. "
-                        f"Use 'PO' (Present + Overtime) instead."
+                        f"Guard {emp_name} cannot be marked both Present (P) and Overtime ({ot_code}) separately at the same location ('{ot_site_name}') on Day {day}. "
+                        f"Use '{'POD' if ot_code == 'OD' else 'PO'}' instead."
                     )
 
             # -------------------------------------------------------------
@@ -311,9 +325,9 @@ class AttendanceValidationService:
             # RULE 7: Leave (L) exclusivity
             # -------------------------------------------------------------
             l_sites = [s for s, c in active_duties.items() if c == 'L']
-            if len(l_sites) >= 1 and any(c in ('P', 'O', 'PO', 'WP') for c in active_codes):
+            if len(l_sites) >= 1 and any(c in ('P', 'O', 'OD', 'PO', 'POD', 'WP') for c in active_codes):
                 raise ValidationError(
-                    f"Guard {emp_name} is on Leave (L) on Day {day}. Cannot assign active duty (P/O/PO/WP) while on leave."
+                    f"Guard {emp_name} is on Leave (L) on Day {day}. Cannot assign active duty (P/O/OD/PO/POD/WP) while on leave."
                 )
 
         return {'normalized_updates': normalized_updates}

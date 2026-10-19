@@ -95,10 +95,15 @@ class AttendanceSystemValidationAndPersistenceTests(TestCase):
         """Tests that normalize_attendance_code maps keyboard aliases to canonical codes."""
         self.assertEqual(normalize_attendance_code('1'), 'P')
         self.assertEqual(normalize_attendance_code('P'), 'P')
-        self.assertEqual(normalize_attendance_code('p'), 'P')
         self.assertEqual(normalize_attendance_code('O'), 'O')
         self.assertEqual(normalize_attendance_code('ot'), 'O')
+        self.assertEqual(normalize_attendance_code('OD'), 'OD')
+        self.assertEqual(normalize_attendance_code('od'), 'OD')
+        self.assertEqual(normalize_attendance_code('doz'), 'OD')
         self.assertEqual(normalize_attendance_code('PO'), 'PO')
+        self.assertEqual(normalize_attendance_code('POD'), 'POD')
+        self.assertEqual(normalize_attendance_code('pod'), 'POD')
+        self.assertEqual(normalize_attendance_code('P+OD'), 'POD')
         self.assertEqual(normalize_attendance_code('P+O'), 'PO')
         self.assertEqual(normalize_attendance_code('POT'), 'PO')
         self.assertEqual(normalize_attendance_code('WP'), 'WP')
@@ -466,5 +471,54 @@ class AttendanceSystemValidationAndPersistenceTests(TestCase):
         guard_b_row = next(r for r in site_b_block['guards'] if r['employee_id'] == str(self.guard.id))
         self.assertEqual(guard_b_row['days'].get('5'), 'O')
         self.assertEqual(guard_b_row['total_ot'], 1)
+
+    def test_pod_creates_dual_workforce_attendance_records(self):
+        """
+        Tests that marking 'POD' at Site A creates two WorkforceAttendance records:
+        One PRESENT and one OVERTIME_DOZING, both linked to Site A.
+        """
+        updates = [
+            {'site_id': str(self.site_a.id), 'employee_id': str(self.guard.id), 'day': 7, 'code': 'POD'}
+        ]
+        res = MonthlyMusterService.save_monthly_muster_updates(
+            company=self.company, user=self.user, year=2026, month=10, updates=updates
+        )
+        self.assertEqual(res['status'], 'success')
+
+        att_records = WorkforceAttendance.objects.filter(
+            company=self.company, employee=self.guard, date=datetime.date(2026, 10, 7)
+        )
+        self.assertEqual(att_records.count(), 2)
+
+        present_att = att_records.filter(status=AttendanceStatus.PRESENT).first()
+        self.assertIsNotNone(present_att)
+        self.assertEqual(present_att.site_id, self.site_a.id)
+
+        od_att = att_records.filter(status=AttendanceStatus.OVERTIME_DOZING).first()
+        self.assertIsNotNone(od_att)
+        self.assertEqual(od_att.site_id, self.site_a.id)
+
+    def test_standalone_overtime_dozing_displays_in_muster_grid(self):
+        """
+        Tests that when a guard has P at Site A and OD at Site B on day 8:
+        get_monthly_muster_grid returns 'OD' for the cell at Site B and increments total_od.
+        """
+        updates = [
+            {'site_id': str(self.site_a.id), 'employee_id': str(self.guard.id), 'day': 8, 'code': 'P'},
+            {'site_id': str(self.site_b.id), 'employee_id': str(self.guard.id), 'day': 8, 'code': 'OD'}
+        ]
+        res = MonthlyMusterService.save_monthly_muster_updates(
+            company=self.company, user=self.user, year=2026, month=10, updates=updates
+        )
+        self.assertEqual(res['status'], 'success')
+
+        grid_data = MonthlyMusterService.get_monthly_muster_grid(
+            company=self.company, year=2026, month=10, site_id=self.site_b.id
+        )
+        site_b_block = next(s for s in grid_data['sites'] if s['site_id'] == str(self.site_b.id))
+        guard_b_row = next(r for r in site_b_block['guards'] if r['employee_id'] == str(self.guard.id))
+        self.assertEqual(guard_b_row['days'].get('8'), 'OD')
+        self.assertEqual(guard_b_row['total_od'], 1)
+
 
 

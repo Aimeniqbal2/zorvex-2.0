@@ -642,6 +642,7 @@ class AttendanceStatus(models.TextChoices):
     WEEKLY_OFF = 'WEEKLY_OFF', 'Weekly Off'
     HALF_DAY = 'HALF_DAY', 'Half Day'
     OVERTIME = 'OVERTIME', 'Overtime'
+    OVERTIME_DOZING = 'OVERTIME_DOZING', 'Overtime Dozing'
     WORKED_WEEKLY_OFF = 'WORKED_WEEKLY_OFF', 'Worked Weekly Off'
     DOUBLE_SHIFT = 'DOUBLE_SHIFT', 'Double Shift'
     # Backward compatibility choices

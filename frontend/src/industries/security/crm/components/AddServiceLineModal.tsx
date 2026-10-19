@@ -49,9 +49,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
             setWeaponType(editingLine.weapon_type || 'UNARMED');
             setShiftHours(editingLine.shift_hours || '12_HOURS');
             const rawOt = editingLine.single_ot_rate ?? editingLine.double_ot_rate ?? (editingLine as any).ot_rate ?? 0;
-            const sal = Number(editingLine.guard_salary) || 0;
-            const initialOt = Number(rawOt) > 0 ? rawOt : (sal > 0 ? Math.round(sal / 30) : 0);
-            setOtRate(initialOt);
+            setOtRate(Number(rawOt) || 0);
             setNotes(editingLine.notes || '');
         } else {
             setLocation(locations[0]?.id || '');
@@ -518,16 +516,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                                             min="0"
                                             step="any"
                                             value={guardSalary}
-                                            onChange={(e) => {
-                                                const newVal = e.target.value;
-                                                setGuardSalary(newVal);
-                                                const num = Number(newVal) || 0;
-                                                const currentOt = Number(otRate) || 0;
-                                                const oldDefault = Math.round(Number(guardSalary) / 30);
-                                                if (num > 0 && (currentOt === 0 || currentOt === oldDefault)) {
-                                                    setOtRate(Math.round(num / 30));
-                                                }
-                                            }}
+                                            onChange={(e) => setGuardSalary(e.target.value)}
                                             placeholder="e.g. 39000"
                                             required
                                             style={{
@@ -547,7 +536,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                                     </div>
                                 </div>
 
-                                {/* Overtime Rate */}
+                                {/* Overtime Dozing (OD) Rate */}
                                 <div style={{
                                     padding: '12px 14px',
                                     borderRadius: '10px',
@@ -556,32 +545,18 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                                 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                         <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                            Overtime Rate (OT per Shift/Day)
+                                            Overtime Dozing (OD Rate / Shift)
                                         </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const sal = Number(guardSalary) || 0;
-                                                const def = sal > 0 ? Math.round(sal / 30) : 0;
-                                                setOtRate(def);
-                                            }}
-                                            title="Reset to 1 Day Salary (Salary ÷ 30)"
-                                            style={{
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: '4px',
-                                                padding: '3px 8px',
-                                                fontSize: '11px',
-                                                fontWeight: 600,
-                                                color: '#2563eb',
-                                                background: 'rgba(37, 99, 235, 0.08)',
-                                                border: '1px solid rgba(37, 99, 235, 0.25)',
-                                                borderRadius: '5px',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            ⚡ Default (1 Day Salary)
-                                        </button>
+                                        <span style={{
+                                            padding: '2px 8px',
+                                            borderRadius: '4px',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            background: '#ede9fe',
+                                            color: '#6d28d9'
+                                        }}>
+                                            Muster Code: OD
+                                        </span>
                                     </div>
                                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                         <input
@@ -590,7 +565,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                                             step="any"
                                             value={otRate}
                                             onChange={(e) => setOtRate(e.target.value)}
-                                            placeholder="0.00"
+                                            placeholder="e.g. 600"
                                             style={{
                                                 flex: 1,
                                                 height: '38px',
@@ -608,7 +583,7 @@ export const AddServiceLineModal: React.FC<AddServiceLineModalProps> = ({
                                         <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 600 }}>PKR</span>
                                     </div>
                                     <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                                        Default: 1 full day salary (Salary ÷ 30). Fully editable for custom client agreements. Click ⚡ to recalculate.
+                                        Manual fixed rate applied when marked <strong>Overtime Dozing (OD)</strong>. Active Overtime (O) automatically earns 1 full day base salary.
                                     </div>
                                 </div>
 

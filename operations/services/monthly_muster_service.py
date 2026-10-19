@@ -66,21 +66,25 @@ class MonthlyMusterService:
     @staticmethod
     def get_site_overtime_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None, fallback_monthly_salary=None):
         """
-        Resolves the overtime rate for this site and requirement.
-        If an explicit overtime rate is configured in CRM (single_ot_rate or double_ot_rate), uses that.
-        Otherwise, by default it equals 1 full day's salary (monthly_pay_rate / days_in_month)
-        so that an overtime shift pays the exact daily rate of that requirement.
-        Supports prefetched_lines and prefetched_posts to eliminate N+1 queries.
+        Active Overtime (O) rate.
+        Strictly equals 1 full day's base salary for this requirement/deployment (monthly_pay_rate / days_in_month),
+        identical to Present (P).
         """
+        div = Decimal(str(days_in_month if days_in_month else 30))
+
+        if isinstance(desig, (Decimal, int, float)) and not fallback_monthly_salary:
+            fallback_monthly_salary = Decimal(str(desig))
+            desig = None
+
         if not site:
+            if fallback_monthly_salary:
+                return (fallback_monthly_salary / div).quantize(Decimal('0.01'))
             return Decimal('0.00')
         company = site.company
         from security_crm.models import ProposalServiceLine
         from operations.models import SecurityPost
 
-        div = Decimal(str(days_in_month if days_in_month else 30))
-
-        # 1. Match lines by location name
+        # 1. Match lines by location to get guard_salary
         if prefetched_lines is not None:
             lines = prefetched_lines
         else:
@@ -96,29 +100,20 @@ class MonthlyMusterService:
                     is_deleted=False
                 ).select_related('service_type'))
 
-        # If designation is provided, try to find a matching line first
         if desig and lines:
             desig_name = (desig.name if hasattr(desig, 'name') else str(desig)).lower()
             for l in lines:
                 st_name = (l.service_type.name if l.service_type else '').lower()
                 if (desig_name in st_name or st_name in desig_name):
-                    ot = l.single_ot_rate or l.double_ot_rate
-                    if ot and ot > Decimal('0.00'):
-                        return ot
-                    elif l.guard_salary and l.guard_salary > Decimal('0.00'):
+                    if l.guard_salary and l.guard_salary > Decimal('0.00'):
                         return (l.guard_salary / div).quantize(Decimal('0.01'))
 
-        # Check if any line has an explicit OT rate
-        best_ot = Decimal('0.00')
+        # Check any line's guard_salary
         for l in lines:
-            ot = l.single_ot_rate or l.double_ot_rate or Decimal('0.00')
-            if ot and ot > best_ot:
-                best_ot = ot
+            if l.guard_salary and l.guard_salary > Decimal('0.00'):
+                return (l.guard_salary / div).quantize(Decimal('0.01'))
 
-        if best_ot > Decimal('0.00'):
-            return best_ot
-
-        # 3. Default to matching SecurityPost rate / days_in_month
+        # 2. Match SecurityPost rate / days_in_month
         if prefetched_posts is not None:
             posts = prefetched_posts
         else:
@@ -133,9 +128,52 @@ class MonthlyMusterService:
         if p_first and p_first.monthly_pay_rate and p_first.monthly_pay_rate > Decimal('0.00'):
             return (p_first.monthly_pay_rate / div).quantize(Decimal('0.01'))
 
-        # 4. Fallback baseline: fallback_monthly_salary or 35,000 / days_in_month
+        # 3. Fallback baseline: fallback_monthly_salary or 35,000 / days_in_month
         fallback_sal = fallback_monthly_salary or Decimal('35000.00')
         return (fallback_sal / div).quantize(Decimal('0.01'))
+
+    @staticmethod
+    def get_site_dozing_overtime_rate(site, desig=None, prefetched_lines=None, prefetched_posts=None):
+        """
+        Overtime Dozing (OD) rate.
+        Pulls the manual overtime rate configured for this site and requirement in CRM ProposalServiceLine (single_ot_rate or double_ot_rate).
+        Kept strictly manual as dozing shifts have customized rates.
+        """
+        if not site:
+            return Decimal('0.00')
+        company = site.company
+        from security_crm.models import ProposalServiceLine
+
+        if prefetched_lines is not None:
+            lines = prefetched_lines
+        else:
+            lines = list(ProposalServiceLine.objects.filter(
+                company=company,
+                location__name__iexact=site.name,
+                is_deleted=False
+            ).select_related('service_type'))
+            if not lines and site.crm_entity:
+                lines = list(ProposalServiceLine.objects.filter(
+                    company=company,
+                    location__customer=site.crm_entity,
+                    is_deleted=False
+                ).select_related('service_type'))
+
+        if desig and lines:
+            desig_name = (desig.name if hasattr(desig, 'name') else str(desig)).lower()
+            for l in lines:
+                st_name = (l.service_type.name if l.service_type else '').lower()
+                if (desig_name in st_name or st_name in desig_name):
+                    ot = l.single_ot_rate or l.double_ot_rate
+                    if ot and ot > Decimal('0.00'):
+                        return ot
+
+        for l in lines:
+            ot = l.single_ot_rate or l.double_ot_rate
+            if ot and ot > Decimal('0.00'):
+                return ot
+
+        return Decimal('0.00')
 
     @staticmethod
     def get_monthly_muster_grid(company, year: int, month: int, site_id=None):
@@ -243,9 +281,9 @@ class MonthlyMusterService:
         ).select_related('employee', 'site')
 
         # Map: (employee_id, date) -> list of duties across all sites
-        # Map: (employee_id, site_id, date) -> dict with 'primary' and 'overtime'
+        # Map: (employee_id, site_id, date) -> dict with 'primary', 'overtime', and 'overtime_dozing'
         global_duty_by_emp_date = defaultdict(list)
-        duty_by_emp_site_date = defaultdict(lambda: {'primary': None, 'overtime': None, 'notes': ''})
+        duty_by_emp_site_date = defaultdict(lambda: {'primary': None, 'overtime': None, 'overtime_dozing': None, 'notes': ''})
 
         for att in attendances:
             key_global = (str(att.employee_id), att.date.day)
@@ -259,7 +297,9 @@ class MonthlyMusterService:
             if att.site_id:
                 key_site = (str(att.employee_id), str(att.site_id), att.date.day)
                 entry = duty_by_emp_site_date[key_site]
-                if att.status == AttendanceStatus.OVERTIME:
+                if att.status == AttendanceStatus.OVERTIME_DOZING:
+                    entry['overtime_dozing'] = att
+                elif att.status == AttendanceStatus.OVERTIME:
                     entry['overtime'] = att
                 else:
                     if not entry['primary']:
@@ -269,7 +309,8 @@ class MonthlyMusterService:
 
         for dp in duty_pays:
             key_global = (str(dp.employee_id), dp.duty_date.day)
-            is_ot = (dp.duty_type == DutyType.OVERTIME or dp.attendance_status == 'OVERTIME' or dp.rate_source == 'OVERTIME' or 'overtime' in (dp.notes or '').lower())
+            is_dozing = (dp.attendance_status == AttendanceStatus.OVERTIME_DOZING or 'dozing' in (dp.notes or '').lower())
+            is_ot = (dp.duty_type == DutyType.OVERTIME or dp.attendance_status == AttendanceStatus.OVERTIME or dp.rate_source == 'OVERTIME' or 'overtime' in (dp.notes or '').lower())
             is_wp = (dp.attendance_status == AttendanceStatus.WORKED_WEEKLY_OFF or 'worked on week off' in (dp.notes or '').lower() or 'double shift' in (dp.notes or '').lower() or 'wo+ot' in (dp.notes or '').lower())
 
             global_duty_by_emp_date[key_global].append({
@@ -277,6 +318,7 @@ class MonthlyMusterService:
                 'duty_type': dp.duty_type,
                 'status': dp.attendance_status,
                 'is_ot': is_ot,
+                'is_dozing': is_dozing,
                 'is_wp': is_wp,
                 'site_id': str(dp.site_id) if dp.site_id else None,
                 'site_name': dp.site.name if dp.site else 'Unlinked',
@@ -286,7 +328,9 @@ class MonthlyMusterService:
             if dp.site_id:
                 key_site = (str(dp.employee_id), str(dp.site_id), dp.duty_date.day)
                 entry = duty_by_emp_site_date[key_site]
-                if is_ot:
+                if is_dozing:
+                    entry['overtime_dozing'] = dp
+                elif is_ot:
                     entry['overtime'] = dp
                 else:
                     entry['primary'] = dp.attendance_status
@@ -321,6 +365,9 @@ class MonthlyMusterService:
             guards_sal = Decimal('0.00')
             overtime_rate = MonthlyMusterService.get_site_overtime_rate(
                 site, days_in_month=days_in_month, prefetched_lines=site_lines, prefetched_posts=posts
+            )
+            dozing_overtime_rate = MonthlyMusterService.get_site_dozing_overtime_rate(
+                site, prefetched_lines=site_lines, prefetched_posts=posts
             )
 
             # Deduplicate posts by required_designation_id / normalized title to prevent duplicate rows
@@ -362,6 +409,9 @@ class MonthlyMusterService:
                 p_ot = MonthlyMusterService.get_site_overtime_rate(
                     site, desig=desig_obj, days_in_month=days_in_month, prefetched_lines=site_lines, prefetched_posts=posts
                 )
+                p_dozing_ot = MonthlyMusterService.get_site_dozing_overtime_rate(
+                    site, desig=desig_obj, prefetched_lines=site_lines, prefetched_posts=posts
+                )
                 site_requirements.append({
                     'post_id': str(p.id),
                     'post_name': p.post_name,
@@ -370,7 +420,8 @@ class MonthlyMusterService:
                     'designation_name': desig_title,
                     'required_headcount': p.required_headcount,
                     'monthly_pay_rate': float(p.monthly_pay_rate or Decimal('35000.00')),
-                    'overtime_rate': float(p_ot if p_ot > Decimal('0.00') else overtime_rate)
+                    'overtime_rate': float(p_ot if p_ot > Decimal('0.00') else overtime_rate),
+                    'dozing_overtime_rate': float(p_dozing_ot if p_dozing_ot > Decimal('0.00') else dozing_overtime_rate)
                 })
 
             # If no posts are defined yet for this site, provide default selectable requirements:
@@ -384,7 +435,8 @@ class MonthlyMusterService:
                         'designation_name': gd_desig_default.name if gd_desig_default else 'Security Guard',
                         'required_headcount': guards_req or 0,
                         'monthly_pay_rate': float(guards_sal or Decimal('35000.00')),
-                        'overtime_rate': float(overtime_rate)
+                        'overtime_rate': float(overtime_rate),
+                        'dozing_overtime_rate': float(dozing_overtime_rate)
                     },
                     {
                         'post_id': None,
@@ -394,7 +446,8 @@ class MonthlyMusterService:
                         'designation_name': sup_desig_default.name if sup_desig_default else 'Security Supervisor',
                         'required_headcount': supervisors_req or 0,
                         'monthly_pay_rate': float(supervisors_sal or Decimal('45000.00')),
-                        'overtime_rate': float(overtime_rate)
+                        'overtime_rate': float(overtime_rate),
+                        'dozing_overtime_rate': float(dozing_overtime_rate)
                     }
                 ]
 
@@ -469,7 +522,9 @@ class MonthlyMusterService:
                 days_map = {}
                 count_p = 0
                 count_ot = 0
+                count_od = 0
                 count_po = 0
+                count_pod = 0
                 count_wo = 0
                 count_wp = 0
                 count_a = 0
@@ -482,18 +537,31 @@ class MonthlyMusterService:
                     if site_duty:
                         has_prim = site_duty.get('primary') is not None
                         has_ot = site_duty.get('overtime') is not None
+                        has_od = site_duty.get('overtime_dozing') is not None
                         prim_st = site_duty.get('primary')
 
-                        if has_prim and has_ot and prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                        if has_prim and has_od and prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                            code = 'POD'
+                            count_pod += 1
+                            daily_totals[d] += 2
+                        elif has_prim and has_ot and prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
                             code = 'PO'
                             count_po += 1
+                            daily_totals[d] += 2
+                        elif has_od and (not has_prim or prim_st in [AttendanceStatus.OVERTIME_DOZING, 'OVERTIME_DOZING', 'OD']):
+                            code = 'OD'
+                            count_od += 1
                             daily_totals[d] += 1
                         elif has_ot and (not has_prim or prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']):
                             code = 'O'
                             count_ot += 1
                             daily_totals[d] += 1
                         elif has_prim:
-                            if prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']:
+                            if prim_st in [AttendanceStatus.OVERTIME_DOZING, 'OVERTIME_DOZING', 'OD']:
+                                code = 'OD'
+                                count_od += 1
+                                daily_totals[d] += 1
+                            elif prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']:
                                 code = 'O'
                                 count_ot += 1
                                 daily_totals[d] += 1
@@ -532,15 +600,17 @@ class MonthlyMusterService:
                     'designation_id': str(dep.designation_id) if dep and dep.designation_id else None,
                     'is_primary': item['is_primary'],
                     'days': days_map,
-                    'total_present': count_p + count_po,
+                    'total_present': count_p + count_po + count_pod,
                     'total_ot': count_ot + count_po,
+                    'total_od': count_od + count_pod,
                     'total_wo': count_wo,
                     'total_wp': count_wp,
                     'total_ds': count_wp,
                     'total_po': count_po,
+                    'total_pod': count_pod,
                     'total_absent': count_a,
                     'total_leave': count_l,
-                    'payable_days': count_p + count_po + count_wo + (count_wp * 2),
+                    'payable_days': count_p + count_po + count_pod + count_wo + (count_wp * 2),
                 })
 
             site_blocks.append({
@@ -552,6 +622,7 @@ class MonthlyMusterService:
                 'guards_req': guards_req,
                 'guards_sal': float(guards_sal),
                 'overtime_rate': float(overtime_rate),
+                'dozing_overtime_rate': float(dozing_overtime_rate),
                 'requirements': site_requirements,
                 'guards': guards_data,
                 'daily_totals': {str(k): v for k, v in daily_totals.items()},
@@ -726,12 +797,10 @@ class MonthlyMusterService:
                     site_monthly_sal = Decimal('35000.00')
 
                 daily_rate = (site_monthly_sal / Decimal(str(days_in_month))).quantize(Decimal('0.01'))
-                ot_rate = MonthlyMusterService.get_site_overtime_rate(
-                    site, desig=effective_desig, days_in_month=days_in_month,
-                    fallback_monthly_salary=site_monthly_sal
-                )
-                if ot_rate <= Decimal('0.00'):
-                    ot_rate = daily_rate
+                # Active Overtime (O) rate strictly equals 1 full day base salary, identical to Present (P)
+                ot_rate = daily_rate
+                # Overtime Dozing (OD) rate strictly reads manual amount from CRM ProposalServiceLine
+                dozing_ot_rate = MonthlyMusterService.get_site_dozing_overtime_rate(site, desig=effective_desig)
 
                 if code == 'P':
                     # 1. Primary WorkforceAttendance
@@ -770,12 +839,11 @@ class MonthlyMusterService:
                         company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
                     ).delete()
                     WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                        company=company, employee=emp, date=target_date, site=site, status__in=[AttendanceStatus.OVERTIME, AttendanceStatus.OVERTIME_DOZING]
                     ).delete()
 
                 elif code == 'O':
-                    # Standalone Overtime duty at this site (primary shift is at another location)
-                    # 1. Overtime WorkforceAttendance
+                    # Standalone Active Overtime duty at this site (primary shift is at another location)
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
@@ -785,10 +853,9 @@ class MonthlyMusterService:
                             'site': site,
                             'is_finalized': True,
                             'recorded_by': user if (user and user.is_authenticated) else None,
-                            'notes': f'Muster: Overtime Shift at {site.name}'
+                            'notes': f'Muster: Active Overtime Shift at {site.name}'
                         }
                     )
-                    # 2. Overtime DailyDutyPay
                     DailyDutyPay.objects.update_or_create(
                         company=company,
                         employee=emp,
@@ -800,25 +867,65 @@ class MonthlyMusterService:
                             'attendance_status': AttendanceStatus.OVERTIME,
                             'rate_source': DailyPayRateSource.POST_RATE,
                             'client': site.crm_entity,
-                            'daily_payable_rate': ot_rate,
+                            'daily_payable_rate': daily_rate,
                             'payable_percentage': Decimal('100.00'),
-                            'payable_amount': ot_rate,
+                            'payable_amount': daily_rate,
                             'calculation_status': DailyPayCalculationStatus.CALCULATED,
-                            'notes': f'Muster: Overtime Shift at {site.name}'
+                            'notes': f'Muster: Active Overtime Shift at {site.name}'
                         }
                     )
                     # Delete any primary duty pay at THIS site
                     DailyDutyPay.objects.filter(
                         company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.PRIMARY
                     ).delete()
-                    # Delete any primary attendance at THIS site
+                    # Delete any primary attendance or other OT attendance at THIS site
                     WorkforceAttendance.objects.filter(
                         company=company, employee=emp, date=target_date, site=site
                     ).exclude(status=AttendanceStatus.OVERTIME).delete()
 
+                elif code == 'OD':
+                    # Standalone Overtime Dozing duty at this site
+                    WorkforceAttendance.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        date=target_date,
+                        status=AttendanceStatus.OVERTIME_DOZING,
+                        defaults={
+                            'site': site,
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Overtime Dozing Shift at {site.name}'
+                        }
+                    )
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.OVERTIME,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.OVERTIME_DOZING,
+                            'rate_source': DailyPayRateSource.POST_RATE,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': dozing_ot_rate,
+                            'payable_percentage': Decimal('100.00'),
+                            'payable_amount': dozing_ot_rate,
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Overtime Dozing Shift at {site.name}'
+                        }
+                    )
+                    # Delete any primary duty pay at THIS site
+                    DailyDutyPay.objects.filter(
+                        company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.PRIMARY
+                    ).delete()
+                    # Delete any primary attendance or other OT attendance at THIS site
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site
+                    ).exclude(status=AttendanceStatus.OVERTIME_DOZING).delete()
+
                 elif code == 'PO':
-                    # Present + Overtime at the SAME site
-                    # 1. Primary WorkforceAttendance
+                    # Present + Active Overtime at the SAME site
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
@@ -831,7 +938,6 @@ class MonthlyMusterService:
                             'notes': f'Muster: Present Shift at {site.name}'
                         }
                     )
-                    # 2. Overtime WorkforceAttendance
                     WorkforceAttendance.objects.update_or_create(
                         company=company,
                         employee=emp,
@@ -841,9 +947,13 @@ class MonthlyMusterService:
                             'site': site,
                             'is_finalized': True,
                             'recorded_by': user if (user and user.is_authenticated) else None,
-                            'notes': f'Muster: Overtime Shift at {site.name}'
+                            'notes': f'Muster: Active Overtime Shift at {site.name}'
                         }
                     )
+                    # Delete any leftover OVERTIME_DOZING attendance at this site
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME_DOZING
+                    ).delete()
                     # 3. Primary DailyDutyPay
                     DailyDutyPay.objects.update_or_create(
                         company=company,
@@ -862,7 +972,7 @@ class MonthlyMusterService:
                             'notes': f'Muster: Primary Shift at {site.name}'
                         }
                     )
-                    # 4. Overtime DailyDutyPay
+                    # 4. Overtime DailyDutyPay (Active OT = daily_rate)
                     DailyDutyPay.objects.update_or_create(
                         company=company,
                         employee=emp,
@@ -874,11 +984,79 @@ class MonthlyMusterService:
                             'attendance_status': AttendanceStatus.OVERTIME,
                             'rate_source': DailyPayRateSource.POST_RATE,
                             'client': site.crm_entity,
-                            'daily_payable_rate': ot_rate,
+                            'daily_payable_rate': daily_rate,
                             'payable_percentage': Decimal('100.00'),
-                            'payable_amount': ot_rate,
+                            'payable_amount': daily_rate,
                             'calculation_status': DailyPayCalculationStatus.CALCULATED,
-                            'notes': f'Muster: Overtime Shift at {site.name}'
+                            'notes': f'Muster: Active Overtime Shift at {site.name}'
+                        }
+                    )
+
+                elif code == 'POD':
+                    # Present + Overtime Dozing at the SAME site
+                    WorkforceAttendance.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        date=target_date,
+                        status=AttendanceStatus.PRESENT,
+                        defaults={
+                            'site': site,
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Present Shift at {site.name}'
+                        }
+                    )
+                    WorkforceAttendance.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        date=target_date,
+                        status=AttendanceStatus.OVERTIME_DOZING,
+                        defaults={
+                            'site': site,
+                            'is_finalized': True,
+                            'recorded_by': user if (user and user.is_authenticated) else None,
+                            'notes': f'Muster: Overtime Dozing Shift at {site.name}'
+                        }
+                    )
+                    # Delete any leftover active OVERTIME attendance at this site
+                    WorkforceAttendance.objects.filter(
+                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                    ).delete()
+                    # 3. Primary DailyDutyPay
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.PRIMARY,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.PRESENT,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': daily_rate,
+                            'payable_percentage': Decimal('100.00'),
+                            'payable_amount': daily_rate,
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Primary Shift at {site.name}'
+                        }
+                    )
+                    # 4. Overtime DailyDutyPay (Dozing OT = dozing_ot_rate)
+                    DailyDutyPay.objects.update_or_create(
+                        company=company,
+                        employee=emp,
+                        duty_date=target_date,
+                        duty_type=DutyType.OVERTIME,
+                        roster=None,
+                        defaults={
+                            'site': site,
+                            'attendance_status': AttendanceStatus.OVERTIME_DOZING,
+                            'rate_source': DailyPayRateSource.POST_RATE,
+                            'client': site.crm_entity,
+                            'daily_payable_rate': dozing_ot_rate,
+                            'payable_percentage': Decimal('100.00'),
+                            'payable_amount': dozing_ot_rate,
+                            'calculation_status': DailyPayCalculationStatus.CALCULATED,
+                            'notes': f'Muster: Overtime Dozing Shift at {site.name}'
                         }
                     )
 
@@ -919,7 +1097,7 @@ class MonthlyMusterService:
                         company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
                     ).delete()
                     WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                        company=company, employee=emp, date=target_date, site=site, status__in=[AttendanceStatus.OVERTIME, AttendanceStatus.OVERTIME_DOZING]
                     ).delete()
 
                 elif code == 'W':
@@ -957,7 +1135,7 @@ class MonthlyMusterService:
                         company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
                     ).delete()
                     WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                        company=company, employee=emp, date=target_date, site=site, status__in=[AttendanceStatus.OVERTIME, AttendanceStatus.OVERTIME_DOZING]
                     ).delete()
 
                 elif code == 'A':
@@ -995,7 +1173,7 @@ class MonthlyMusterService:
                         company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
                     ).delete()
                     WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                        company=company, employee=emp, date=target_date, site=site, status__in=[AttendanceStatus.OVERTIME, AttendanceStatus.OVERTIME_DOZING]
                     ).delete()
 
                 elif code == 'L':
@@ -1033,7 +1211,7 @@ class MonthlyMusterService:
                         company=company, employee=emp, duty_date=target_date, site=site, duty_type=DutyType.OVERTIME
                     ).delete()
                     WorkforceAttendance.objects.filter(
-                        company=company, employee=emp, date=target_date, site=site, status=AttendanceStatus.OVERTIME
+                        company=company, employee=emp, date=target_date, site=site, status__in=[AttendanceStatus.OVERTIME, AttendanceStatus.OVERTIME_DOZING]
                     ).delete()
 
                 elif code == '':
@@ -1225,6 +1403,7 @@ class MonthlyMusterService:
         ledger_records = []
         total_days_worked = 0
         total_ot_shifts = 0
+        total_ot_dozing_shifts = 0
         total_double_shifts = 0
         total_earned = Decimal('0.00')
 
@@ -1235,13 +1414,17 @@ class MonthlyMusterService:
             if d_str not in date_records:
                 date_records[d_str] = []
             
+            is_ot_dozing = (dp.attendance_status == AttendanceStatus.OVERTIME_DOZING)
             is_ot = (dp.attendance_status == AttendanceStatus.OVERTIME or dp.rate_source == 'OVERTIME' or dp.duty_type == DutyType.OVERTIME)
             is_ds = (dp.attendance_status in [AttendanceStatus.DOUBLE_SHIFT, AttendanceStatus.WORKED_WEEKLY_OFF, 'DOUBLE_SHIFT', 'WORKED_WEEKLY_OFF'])
             is_leave = (dp.attendance_status in [AttendanceStatus.UNPAID_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.ON_LEAVE, 'UNPAID_LEAVE', 'PAID_LEAVE', 'LEAVE'])
             is_absent = (dp.attendance_status in [AttendanceStatus.ABSENT, 'ABSENT'])
             is_wo = (dp.attendance_status in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF'])
             
-            if is_ot:
+            if is_ot_dozing:
+                total_ot_dozing_shifts += 1
+                record_duty_type = 'OVERTIME_DOZING'
+            elif is_ot:
                 total_ot_shifts += 1
                 record_duty_type = 'OVERTIME'
             elif is_ds:
@@ -1300,6 +1483,7 @@ class MonthlyMusterService:
             'period_end': str(end_date),
             'total_days_worked': total_days_worked,
             'total_ot_shifts': total_ot_shifts,
+            'total_ot_dozing_shifts': total_ot_dozing_shifts,
             'total_double_shifts': total_double_shifts,
             'total_earned_pkr': float(total_earned),
             'records': ledger_records

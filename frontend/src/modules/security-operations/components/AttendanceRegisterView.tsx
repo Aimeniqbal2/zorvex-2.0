@@ -498,6 +498,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                             >
                                 <option value="">All Statuses</option>
                                 <option value="PRESENT">Present</option>
+                                <option value="OVERTIME">Active Overtime (O)</option>
+                                <option value="OVERTIME_DOZING">Overtime Dozing (OD)</option>
                                 <option value="WEEKLY_OFF">Weekly Off</option>
                                 <option value="ABSENT">Absent</option>
                                 <option value="LEAVE">Leave</option>
@@ -665,6 +667,10 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                             badgeBg = '#dbeafe';
                                             badgeColor = '#1d4ed8';
                                             badgeBorder = '#bfdbfe';
+                                        } else if (st === 'OVERTIME_DOZING') {
+                                            badgeBg = '#ede9fe';
+                                            badgeColor = '#6d28d9';
+                                            badgeBorder = '#ddd6fe';
                                         } else if (st === 'LEAVE' || st === 'PAID_LEAVE') {
                                             badgeBg = '#f3e8ff';
                                             badgeColor = '#7e22ce';
@@ -858,8 +864,13 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                             </div>
 
                             <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-                                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Overtime Shifts (OT)</div>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Active OT Shifts (O)</div>
                                 <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#1d4ed8' }}>{guardLedger.total_ot_shifts || 0} Shifts</div>
+                            </div>
+
+                            <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 700, marginBottom: '4px' }}>Overtime Dozing (OD)</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#6d28d9' }}>{guardLedger.total_ot_dozing_shifts || 0} Shifts</div>
                             </div>
 
                             <div style={{ background: 'var(--color-surface, #ffffff)', padding: '18px 20px', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
@@ -908,6 +919,10 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({ 
                                             badgeBg = '#dbeafe';
                                             badgeColor = '#1d4ed8';
                                             badgeBorder = '#bfdbfe';
+                                        } else if (r.duty_type === 'OVERTIME_DOZING') {
+                                            badgeBg = '#ede9fe';
+                                            badgeColor = '#6d28d9';
+                                            badgeBorder = '#ddd6fe';
                                         } else if (r.duty_type === 'DOUBLE_SHIFT' || r.duty_type === 'WORKED_WEEKLY_OFF') {
                                             badgeBg = '#ccfbf1';
                                             badgeColor = '#0f766e';

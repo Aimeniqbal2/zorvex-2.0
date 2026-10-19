@@ -12,6 +12,7 @@ interface GuardRow {
     days: Record<string, string>;
     total_present: number;
     total_ot: number;
+    total_od?: number;
     total_wo: number;
     total_ds: number;
     total_absent: number;
@@ -28,6 +29,7 @@ interface SiteRequirement {
     required_headcount: number;
     monthly_pay_rate: number;
     overtime_rate: number;
+    dozing_overtime_rate?: number;
 }
 
 interface SiteBlock {
@@ -39,6 +41,7 @@ interface SiteBlock {
     guards_req: number;
     guards_sal: number;
     overtime_rate: number;
+    dozing_overtime_rate?: number;
     requirements?: SiteRequirement[];
     guards: GuardRow[];
     daily_totals: Record<string, number>;
@@ -192,28 +195,34 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         // Single letter mapping and aliases
         if (['P', '1'].includes(raw)) val = 'P';
         else if (['O', 'OT'].includes(raw)) val = 'O';
+        else if (['OD', 'DOZ', 'DOZING', 'O-D', 'O/D'].includes(raw)) val = 'OD';
         else if (['PO', 'P+O', 'P+OT', 'POT'].includes(raw)) val = 'PO';
+        else if (['POD', 'P+OD', 'PD', 'P+DOZ'].includes(raw)) val = 'POD';
         else if (['WP', 'WO+P', 'W+P', 'D', 'DS', 'WO+OT', '2'].includes(raw)) val = 'WP';
         else if (['W', 'WO', 'OFF'].includes(raw)) val = 'W';
         else if (['A', '0'].includes(raw)) val = 'A';
         else if (['L', 'PL', 'SL'].includes(raw)) val = 'L';
         else if (raw === '') val = '';
         else {
-            // Check last typed character as fallback
-            const lastChar = raw.charAt(raw.length - 1);
-            if (['P', '1'].includes(lastChar)) val = 'P';
-            else if (lastChar === 'O') val = 'O';
-            else if (lastChar === 'W') val = 'W';
-            else if (lastChar === 'A') val = 'A';
-            else if (lastChar === 'L') val = 'L';
+            // Check fallback for quick suffix typing
+            if (raw.endsWith('OD')) val = 'OD';
+            else if (raw.endsWith('POD')) val = 'POD';
             else {
-                addToast('warning', `Allowed codes: P (Present), O (Overtime), PO (Present+OT), WP (Worked Week Off), W (Weekly Off), A (Absent), L (Leave).`);
-                return;
+                const lastChar = raw.charAt(raw.length - 1);
+                if (['P', '1'].includes(lastChar)) val = 'P';
+                else if (lastChar === 'O') val = 'O';
+                else if (lastChar === 'W') val = 'W';
+                else if (lastChar === 'A') val = 'A';
+                else if (lastChar === 'L') val = 'L';
+                else {
+                    addToast('warning', `Allowed codes: P (Present), O (Active OT), OD (OT Dozing), PO (Present+OT), POD (Present+OT Dozing), WP (Worked Week Off), W (Weekly Off), A (Absent), L (Leave).`);
+                    return;
+                }
             }
         }
 
         // Anti-Cheating Cross-Location & Shift Capacity Validation:
-        if (['P', 'O', 'PO', 'WP', 'W', 'L', 'A'].includes(val)) {
+        if (['P', 'O', 'OD', 'PO', 'POD', 'WP', 'W', 'L', 'A'].includes(val)) {
             for (const otherSite of sitesData) {
                 if (otherSite.site_id === siteId) continue;
                 const otherGuard = otherSite.guards.find(g => g.employee_id === employeeId);
@@ -223,17 +232,17 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                 // Rule 1: A guard cannot be marked Present (P) at two different locations on the same day
                 if (val === 'P' && (otherCode === 'P' || otherCode === '1')) {
-                    addToast('error', `⚠️ Duplicate Prevented: Guard ${otherGuard.name} (${otherGuard.employee_code}) is already marked Present (P) at "${otherSite.site_name}" on Day ${day}. Only "O" (Overtime) can be marked here!`);
+                    addToast('error', `⚠️ Duplicate Prevented: Guard ${otherGuard.name} (${otherGuard.employee_code}) is already marked Present (P) at "${otherSite.site_name}" on Day ${day}. Only Overtime ("O" or "OD") can be marked here!`);
                     return;
                 }
 
-                // Rule 2: PO consumes full capacity (2 shifts / 24 hours) at this location
-                if (val === 'PO') {
-                    addToast('error', `⚠️ Capacity Conflict: Guard ${otherGuard.name} is already assigned at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Present + Overtime (PO) consumes their full 2-shift capacity!`);
+                // Rule 2: PO / POD consumes full capacity (2 shifts / 24 hours) at this location
+                if (val === 'PO' || val === 'POD') {
+                    addToast('error', `⚠️ Capacity Conflict: Guard ${otherGuard.name} is already assigned at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Full 2-shift capacity consumed!`);
                     return;
                 }
-                if (otherCode === 'PO') {
-                    addToast('error', `⚠️ Capacity Reached: Guard ${otherGuard.name} is already marked Present + Overtime (PO) at "${otherSite.site_name}" on Day ${day}. No additional duty allowed!`);
+                if (['PO', 'POD'].includes(otherCode)) {
+                    addToast('error', `⚠️ Capacity Reached: Guard ${otherGuard.name} is already marked ${otherCode} at "${otherSite.site_name}" on Day ${day}. No additional duty allowed!`);
                     return;
                 }
 
@@ -247,24 +256,24 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     return;
                 }
 
-                // Rule 4: Maximum 1 Overtime shift (O) per day across all sites
-                if (val === 'O' && (otherCode === 'O' || otherCode === 'OT')) {
-                    addToast('error', `⚠️ Overtime Limit: Guard ${otherGuard.name} is already marked Overtime (O) at "${otherSite.site_name}" on Day ${day}. Maximum 1 overtime shift allowed per day!`);
+                // Rule 4: Maximum 1 Overtime shift (O or OD) per day across all sites
+                if (['O', 'OD'].includes(val) && ['O', 'OD', 'OT'].includes(otherCode)) {
+                    addToast('error', `⚠️ Overtime Limit: Guard ${otherGuard.name} is already marked Overtime (${otherCode}) at "${otherSite.site_name}" on Day ${day}. Maximum 1 overtime shift allowed per day!`);
                     return;
                 }
 
                 // Rule 5: Absence (A) or Weekly Off (W) cannot co-exist with active duty at another site
-                if ((val === 'A' || val === 'W') && ['P', 'O', 'PO', 'WP'].includes(otherCode)) {
+                if ((val === 'A' || val === 'W') && ['P', 'O', 'OD', 'PO', 'POD', 'WP'].includes(otherCode)) {
                     addToast('error', `⚠️ Invariant Conflict: Guard ${otherGuard.name} has active duty at "${otherSite.site_name}" (${otherCode}) on Day ${day}. Cannot mark ${val === 'A' ? 'Absent (A)' : 'Weekly Off (W)'} on another site!`);
                     return;
                 }
-                if (['A', 'W'].includes(otherCode) && ['P', 'O', 'PO', 'WP'].includes(val)) {
+                if (['A', 'W'].includes(otherCode) && ['P', 'O', 'OD', 'PO', 'POD', 'WP'].includes(val)) {
                     addToast('error', `⚠️ Invariant Conflict: Guard ${otherGuard.name} is marked ${otherCode === 'A' ? 'Absent (A)' : 'Weekly Off (W)'} at "${otherSite.site_name}" on Day ${day}. Cannot mark active duty on another site!`);
                     return;
                 }
 
-                // Rule 6: If on Leave (L), cannot perform active duty (P, O, PO, WP)
-                if (['P', 'O', 'PO', 'WP'].includes(val) && ['L', 'PL', 'SL'].includes(otherCode)) {
+                // Rule 6: If on Leave (L), cannot perform active duty (P, O, OD, PO, POD, WP)
+                if (['P', 'O', 'OD', 'PO', 'POD', 'WP'].includes(val) && ['L', 'PL', 'SL'].includes(otherCode)) {
                     addToast('error', `⚠️ Conflict: Guard ${otherGuard.name} is on Leave (L) at "${otherSite.site_name}" on Day ${day}. Cannot mark active duty while on leave.`);
                     return;
                 }
@@ -279,11 +288,13 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 const updatedDays = { ...guard.days, [String(day)]: val };
 
                 // Recompute counts for this guard
-                let p = 0, ot = 0, po = 0, wo = 0, wp = 0, a = 0, l = 0;
+                let p = 0, ot = 0, od = 0, po = 0, pod = 0, wo = 0, wp = 0, a = 0, l = 0;
                 Object.values(updatedDays).forEach(c => {
                     if (c === 'P' || c === '1') p++;
                     else if (c === 'O' || c === 'OT') ot++;
+                    else if (c === 'OD') od++;
                     else if (c === 'PO') po++;
+                    else if (c === 'POD') pod++;
                     else if (c === 'WP' || c === 'D' || c === 'WO+OT' || c === 'DS') wp++;
                     else if (c === 'W' || c === 'WO') wo++;
                     else if (c === 'A') a++;
@@ -293,13 +304,14 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 return {
                     ...guard,
                     days: updatedDays,
-                    total_present: p + po,
+                    total_present: p + po + pod,
                     total_ot: ot + po,
+                    total_od: od + pod,
                     total_wo: wo,
                     total_ds: wp,
                     total_absent: a,
                     total_leave: l,
-                    payable_days: p + po + wo + (wp * 2) + l
+                    payable_days: p + po + pod + wo + (wp * 2) + l
                 };
             });
 
@@ -310,8 +322,12 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 let dTot = 0;
                 let dVac = 0;
                 updatedGuards.forEach(g => {
-                    const c = g.days[String(d)];
-                    if (['P', '1', 'O', 'OT', 'PO', 'WP', 'D', 'WO+OT', 'DS'].includes(c)) dTot++;
+                    const c = (g.days[String(d)] || '').trim().toUpperCase();
+                    if (c === 'PO' || c === 'POD') {
+                        dTot += 2;
+                    } else if (['P', '1', 'O', 'OT', 'OD', 'WP', 'D', 'WO+OT', 'DS'].includes(c)) {
+                        dTot += 1;
+                    }
                     if (['W', 'WO', 'L', 'PL', 'SL'].includes(c)) dVac++;
                 });
                 newDailyTotals[String(d)] = dTot;
@@ -754,7 +770,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         📅 {daysInMonth} Days in Month
                     </span>
                     <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
-                        <strong>Keystroke Shortcuts:</strong> Type <code>P</code> (Present), <code>O</code> (Overtime), <code>PO</code> (Present + OT), <code>WP</code> (Worked Week Off), <code>W</code> (Weekly Off), <code>A</code> (Absent), <code>L</code> (Leave).
+                        <strong>Keystroke Shortcuts:</strong> Type <code>P</code> (Present), <code>O</code> (Active OT), <code>OD</code> (OT Dozing), <code>PO</code> (Present + Active OT), <code>POD</code> (Present + OT Dozing), <code>WP</code> (Worked Week Off), <code>W</code> (Weekly Off), <code>A</code> (Absent), <code>L</code> (Leave).
                     </span>
                 </div>
 
@@ -763,10 +779,16 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dcfce7', border: '1px solid #16a34a' }}></span> <strong>P</strong> Present
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dbeafe', border: '1px solid #2563eb' }}></span> <strong>O</strong> Overtime
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#dbeafe', border: '1px solid #2563eb' }}></span> <strong>O</strong> Active OT
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f3e8ff', border: '1px solid #7e22ce' }}></span> <strong>PO</strong> Present + OT
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#ede9fe', border: '1px solid #6d28d9' }}></span> <strong>OD</strong> OT Dozing
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#f3e8ff', border: '1px solid #7e22ce' }}></span> <strong>PO</strong> Present + Active OT
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#fae8ff', border: '1px solid #a21caf' }}></span> <strong>POD</strong> Present + OT Dozing
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <span style={{ width: 12, height: 12, borderRadius: '3px', background: '#ccfbf1', border: '1px solid #0f766e' }}></span> <strong>WP</strong> Worked on Week Off
@@ -964,7 +986,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                     })}
 
                                     <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '2px solid #cbd5e1', background: '#f8fafc', color: '#059669', fontWeight: 800 }} title="Total Present shifts">P</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }} title="Total Overtime shifts">O</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }} title="Total Active Overtime shifts">O</th>
+                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#6d28d9', fontWeight: 800 }} title="Total Overtime Dozing shifts">OD</th>
                                     <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#0f766e', fontWeight: 800 }} title="Worked on Weekly Off">WP</th>
                                     <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 800 }} title="Weekly Off / Leave">W/L</th>
                                     <th style={{ padding: '8px 8px', minWidth: '55px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#059669', fontWeight: 800 }} title="Total Payable Days">Pay Days</th>
@@ -974,7 +997,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                             <tbody>
                                 {site.guards.length === 0 ? (
                                     <tr>
-                                        <td colSpan={daysInMonth + 10} style={{ padding: '24px', color: '#94a3b8', textAlign: 'center', background: '#ffffff' }}>
+                                        <td colSpan={daysInMonth + 11} style={{ padding: '24px', color: '#94a3b8', textAlign: 'center', background: '#ffffff' }}>
                                             No guards currently deployed at this site for {month}/{year}. Click <strong>[ + Add Guard ]</strong> above to assign personnel.
                                         </td>
                                     </tr>
@@ -993,7 +1016,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                     const style = getDesigBadgeStyle(dCode);
                                                     return (
                                                         <span style={{ 
-                                                            padding: '2px 7px', 
+                                                             padding: '2px 7px', 
                                                             borderRadius: '4px', 
                                                             fontSize: '0.72rem', 
                                                             fontWeight: 800,
@@ -1024,9 +1047,15 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                 } else if (cellVal === 'O' || cellVal === 'OT') {
                                                     cellBg = '#dbeafe';
                                                     cellColor = '#1d4ed8';
+                                                } else if (cellVal === 'OD') {
+                                                    cellBg = '#ede9fe';
+                                                    cellColor = '#6d28d9';
                                                 } else if (cellVal === 'PO') {
                                                     cellBg = '#f3e8ff';
                                                     cellColor = '#7e22ce';
+                                                } else if (cellVal === 'POD') {
+                                                    cellBg = '#fae8ff';
+                                                    cellColor = '#a21caf';
                                                 } else if (cellVal === 'WP' || cellVal === 'D' || cellVal === 'WO+OT' || cellVal === 'DS') {
                                                     cellBg = '#ccfbf1';
                                                     cellColor = '#0f766e';
@@ -1074,6 +1103,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                                             <td style={{ padding: '6px 4px', borderLeft: '2px solid #cbd5e1', fontWeight: 800, color: '#15803d', background: '#f0fdf4' }}>{guard.total_present}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#2563eb', background: '#eff6ff' }}>{guard.total_ot}</td>
+                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#6d28d9', background: '#f5f3ff' }}>{guard.total_od || 0}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#0f766e', background: '#f0fdfa' }}>{guard.total_ds}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 700, color: '#64748b' }}>{guard.total_wo + guard.total_leave}</td>
                                             <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#059669', background: '#ecfdf5' }}>{guard.payable_days}</td>
@@ -1100,20 +1130,25 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             {site.daily_vacations[String(d)] || 0}
                                         </td>
                                     ))}
-                                    <td colSpan={6} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
+                                    <td colSpan={7} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
                                 </tr>
 
-                                {/* Daily Deployed Total Row (Matching Screenshot) */}
+                                {/* Daily Shifts Fulfilled Row (Matches Client Site Requirements) */}
                                 <tr style={{ background: '#ecfdf5', borderTop: '2px solid #6ee7b7', color: '#047857', fontWeight: 900 }}>
                                     <td colSpan={4} style={{ padding: '8px 14px', textAlign: 'left', position: 'sticky', left: 0, background: '#ecfdf5', zIndex: 2 }}>
-                                        Total Deployed On Site
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                            <span>Total Shifts Fulfilled</span>
+                                            <span style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.85, background: 'rgba(5, 150, 105, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                                P=1 | PO=2 | POD=2
+                                            </span>
+                                        </div>
                                     </td>
                                     {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
                                         <td key={d} style={{ padding: '4px', borderLeft: '1px solid #a7f3d0' }}>
                                             {site.daily_totals[String(d)] || 0}
                                         </td>
                                     ))}
-                                    <td colSpan={6} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
+                                    <td colSpan={7} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
                                 </tr>
                             </tbody>
                         </table>
