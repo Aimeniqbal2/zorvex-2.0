@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getMonthlyMusterGrid, saveMonthlyMusterUpdates, importMonthlyMusterExcel, apiClient } from '../api';
+import { getMonthlyMusterGrid, saveMonthlyMusterUpdates, importMonthlyMusterExcel, cleanupOrphanedAttendance, apiClient } from '../api';
 import { useToastStore } from '../../../stores/toastStore';
 
 interface GuardRow {
@@ -128,6 +128,9 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
     const [showImportModal, setShowImportModal] = useState<boolean>(false);
     const [importFile, setImportFile] = useState<File | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Clean Orphaned Attendance state
+    const [cleaning, setCleaning] = useState<boolean>(false);
 
     const loadMusterData = async () => {
         try {
@@ -381,6 +384,24 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             addToast('error', err.response?.data?.detail || 'Failed to save muster updates.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    // Clean Orphaned Records from Deleted/Inactive Sites
+    const handleCleanupOrphanedAttendance = async () => {
+        if (!window.confirm(`Clean Orphaned Records?\n\nThis will scan and safely remove any obsolete attendance records linked to deleted or inactive locations for ${year}-${String(month).padStart(2, '0')}.\n\nDo you want to proceed?`)) {
+            return;
+        }
+        try {
+            setCleaning(true);
+            const res = await cleanupOrphanedAttendance(year, month);
+            addToast('success', res.message || 'Successfully cleaned up orphaned records from deleted sites.');
+            await loadMusterData();
+        } catch (err: any) {
+            console.error('Failed to clean orphaned records:', err);
+            addToast('error', err.response?.data?.detail || 'Failed to clean orphaned records.');
+        } finally {
+            setCleaning(false);
         }
     };
 
@@ -724,6 +745,30 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         }}
                     >
                         <i className='bx bx-export'></i> Export
+                    </button>
+
+                    {/* Clean Orphaned Records Button */}
+                    <button
+                        onClick={handleCleanupOrphanedAttendance}
+                        disabled={cleaning}
+                        title="Purge obsolete attendance records linked to deleted or inactive locations"
+                        style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '6px', 
+                            padding: '8px 14px', 
+                            borderRadius: '8px', 
+                            background: '#fff1f2', 
+                            color: '#e11d48', 
+                            border: '1px solid #fecdd3', 
+                            fontWeight: 700, 
+                            fontSize: '0.88rem',
+                            cursor: cleaning ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.15s ease'
+                        }}
+                    >
+                        <i className={`bx ${cleaning ? 'bx-loader-alt bx-spin' : 'bx-trash-alt'}`}></i>
+                        {cleaning ? 'Cleaning...' : 'Clean Deleted Sites'}
                     </button>
 
                     {/* Save Changes Button */}

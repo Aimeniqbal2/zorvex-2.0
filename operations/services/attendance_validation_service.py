@@ -148,15 +148,21 @@ class AttendanceValidationService:
             employee_id__in=emp_ids_touched,
             duty_date__in=dates_to_check,
             is_deleted=False
-        ).select_related('site', 'employee')
+        ).select_related('site', 'site__crm_entity', 'employee')
 
         # Map existing DB duties by (emp_id_str, day) -> list of { site_id, code, site_name, duty_type }
         existing_db_duties = defaultdict(dict)
         for dp in existing_duties_qs:
+            # Skip duties from deleted, inactive, or orphaned sites (they must never block active sites)
+            if not dp.site or dp.site.is_deleted or not dp.site.is_active:
+                continue
+            if getattr(dp.site, 'crm_entity', None) and (dp.site.crm_entity.is_deleted or not dp.site.crm_entity.active):
+                continue
+
             e_id = str(dp.employee_id)
             d_day = dp.duty_date.day
-            s_id = str(dp.site_id) if dp.site_id else 'CENTRAL'
-            s_name = dp.site.name if dp.site else 'Other Location'
+            s_id = str(dp.site_id)
+            s_name = dp.site.name
 
             # Determine existing canonical code
             # Note: PO is stored as two DDP rows (PRIMARY and OVERTIME) at the same site.

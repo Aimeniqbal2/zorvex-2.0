@@ -170,6 +170,8 @@ class OperationalSiteViewSet(BaseSecurityOpsViewSet):
         DutyRoster.objects.filter(site=instance).update(is_deleted=True)
         DutyAssignment.objects.filter(site=instance).update(is_deleted=True)
         DailyDutyPay.objects.filter(site=instance).update(is_deleted=True)
+        from hrm.models import WorkforceAttendance
+        WorkforceAttendance.objects.filter(site=instance).update(is_deleted=True)
 
         # 3. Unlink from any active service contracts
         for contract in instance.service_contracts.all():
@@ -4337,6 +4339,42 @@ class MonthlyMusterGuardLedgerView(APIView):
             return Response(data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MonthlyMusterCleanupOrphanedAttendanceView(APIView):
+    """
+    POST /api/operations/monthly-muster/cleanup-orphaned/
+    Purges historical attendance & duty pay records from deleted, inactive, or unlinked sites.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        company = _resolve_company_for_api_view(request)
+        year = request.data.get('year')
+        month = request.data.get('month')
+        if year:
+            try:
+                year = int(year)
+            except (ValueError, TypeError):
+                year = None
+        if month:
+            try:
+                month = int(month)
+            except (ValueError, TypeError):
+                month = None
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            result = MonthlyMusterService.cleanup_orphaned_attendance(
+                company=company,
+                year=year,
+                month=month
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception("Error cleaning up orphaned attendance: %s", e)
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 

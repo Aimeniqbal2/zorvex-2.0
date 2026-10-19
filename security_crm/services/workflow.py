@@ -1127,6 +1127,8 @@ class SecurityProposalWorkflowService:
                 DutyRoster.objects.filter(site=s).update(is_deleted=True)
                 DutyAssignment.objects.filter(site=s).update(is_deleted=True)
                 DailyDutyPay.objects.filter(site=s).update(is_deleted=True)
+                from hrm.models import WorkforceAttendance
+                WorkforceAttendance.objects.filter(site=s).update(is_deleted=True)
 
                 for contract in s.service_contracts.all():
                     contract.sites.remove(s)

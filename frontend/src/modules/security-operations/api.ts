@@ -1327,7 +1327,13 @@ export const getGuardAttendanceLedger = async (params: { employee: string; year?
     return response.data;
 };
 
+export const cleanupOrphanedAttendance = async (year?: number, month?: number): Promise<any> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/cleanup-orphaned/', { year, month });
+    return response.data;
+};
+
 // Re-export apiClient for modal components
 export { apiClient } from '../../api/client';
+
 
 

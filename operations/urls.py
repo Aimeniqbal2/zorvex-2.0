@@ -21,7 +21,8 @@ from .views import (
     AdvancedOperationsViewSet, InspectionPolicyViewSet, CrossModuleIntegrationViewSet,
     SecurityReportsViewSet,
     MonthlyMusterGridView, MonthlyMusterSaveView,
-    MonthlyMusterExcelImportView, MonthlyMusterGuardLedgerView
+    MonthlyMusterExcelImportView, MonthlyMusterGuardLedgerView,
+    MonthlyMusterCleanupOrphanedAttendanceView
 )
 
 router = DefaultRouter()
@@ -79,6 +80,7 @@ urlpatterns = [
     path('staffing-coverage/', StaffingCoverageView.as_view(), name='staffing-coverage'),
     path('monthly-muster/', MonthlyMusterGridView.as_view(), name='monthly-muster-grid'),
     path('monthly-muster/save/', MonthlyMusterSaveView.as_view(), name='monthly-muster-save'),
+    path('monthly-muster/cleanup-orphaned/', MonthlyMusterCleanupOrphanedAttendanceView.as_view(), name='monthly-muster-cleanup-orphaned'),
     path('monthly-muster/import-excel/', MonthlyMusterExcelImportView.as_view(), name='monthly-muster-import-excel'),
     path('monthly-muster/guard-ledger/', MonthlyMusterGuardLedgerView.as_view(), name='monthly-muster-guard-ledger'),
     path('', include(router.urls)),

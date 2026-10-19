@@ -802,6 +802,31 @@ class MonthlyMusterService:
                 # Overtime Dozing (OD) rate strictly reads manual amount from CRM ProposalServiceLine
                 dozing_ot_rate = MonthlyMusterService.get_site_dozing_overtime_rate(site, desig=effective_desig)
 
+                # Auto-purge any dangling attendance from deleted / inactive / orphaned sites on this target_date
+                DailyDutyPay.objects.filter(
+                    company=company,
+                    employee=emp,
+                    duty_date=target_date
+                ).filter(
+                    Q(site__isnull=True) |
+                    Q(site__is_deleted=True) |
+                    Q(site__is_active=False) |
+                    Q(site__crm_entity__is_deleted=True) |
+                    Q(site__crm_entity__active=False)
+                ).delete()
+
+                WorkforceAttendance.objects.filter(
+                    company=company,
+                    employee=emp,
+                    date=target_date
+                ).filter(
+                    Q(site__isnull=True) |
+                    Q(site__is_deleted=True) |
+                    Q(site__is_active=False) |
+                    Q(site__crm_entity__is_deleted=True) |
+                    Q(site__crm_entity__active=False)
+                ).delete()
+
                 if code == 'P':
                     # 1. Primary WorkforceAttendance
                     WorkforceAttendance.objects.update_or_create(
@@ -1488,3 +1513,43 @@ class MonthlyMusterService:
             'total_earned_pkr': float(total_earned),
             'records': ledger_records
         }
+
+    @staticmethod
+    def cleanup_orphaned_attendance(company, year: int = None, month: int = None):
+        """
+        Scans and cleans up all orphaned / dangling DailyDutyPay and WorkforceAttendance records
+        associated with deleted, inactive, or unlinked OperationalSites.
+        Returns a dict with statistics on purged records.
+        """
+        invalid_site_filter = (
+            Q(site__isnull=True) |
+            Q(site__is_deleted=True) |
+            Q(site__is_active=False) |
+            Q(site__crm_entity__is_deleted=True) |
+            Q(site__crm_entity__active=False)
+        )
+
+        ddp_qs = DailyDutyPay.objects.filter(company=company).filter(invalid_site_filter)
+        att_qs = WorkforceAttendance.objects.filter(company=company).filter(invalid_site_filter)
+
+        if year and month:
+            days_in_month = calendar.monthrange(year, month)[1]
+            start_date = date(year, month, 1)
+            end_date = date(year, month, days_in_month)
+            ddp_qs = ddp_qs.filter(duty_date__gte=start_date, duty_date__lte=end_date)
+            att_qs = att_qs.filter(date__gte=start_date, date__lte=end_date)
+
+        ddp_count = ddp_qs.count()
+        att_count = att_qs.count()
+
+        with transaction.atomic():
+            ddp_qs.delete()
+            att_qs.delete()
+
+        return {
+            'status': 'success',
+            'cleaned_duty_pays': ddp_count,
+            'cleaned_attendances': att_count,
+            'message': f"Cleaned up {ddp_count} duty records and {att_count} attendance records from deleted/inactive sites."
+        }
+
