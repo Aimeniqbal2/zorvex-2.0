@@ -504,14 +504,28 @@ class MonthlyMusterService:
                 
                 # PREFER DEPLOYMENT DESIGNATION/ROLE AT THIS SPECIFIC SITE
                 desig_code_explicit = ''
-                if dep and dep.designation:
-                    desig_title = dep.designation.name
+                post_title = ''
+                if dep and dep.post:
+                    post_title = (dep.post.required_designation.name if dep.post.required_designation else '') or dep.post.post_name or ''
+
+                dep_desig_title = dep.designation.name if (dep and dep.designation) else ''
+
+                p_low = post_title.lower()
+                d_low = dep_desig_title.lower()
+                has_specific_p = any(k in p_low for k in ['civil', 'ex-army', 'ex army', 'ssg'])
+                has_specific_d = any(k in d_low for k in ['civil', 'ex-army', 'ex army', 'ssg'])
+
+                if has_specific_p and not has_specific_d:
+                    desig_title = post_title
+                    if dep and dep.post and dep.post.required_designation:
+                        desig_code_explicit = getattr(dep.post.required_designation, 'code', '') or ''
+                elif dep_desig_title:
+                    desig_title = dep_desig_title
                     desig_code_explicit = getattr(dep.designation, 'code', '') or ''
-                elif dep and dep.post and dep.post.required_designation:
-                    desig_title = dep.post.required_designation.name
-                    desig_code_explicit = getattr(dep.post.required_designation, 'code', '') or ''
-                elif dep and dep.post and dep.post.post_name:
-                    desig_title = dep.post.post_name
+                elif post_title:
+                    desig_title = post_title
+                    if dep and dep.post and dep.post.required_designation:
+                        desig_code_explicit = getattr(dep.post.required_designation, 'code', '') or ''
                 else:
                     desig_title = emp.designation.name if emp.designation else 'Guard'
                     desig_code_explicit = getattr(emp.designation, 'code', '') or ''
@@ -598,6 +612,7 @@ class MonthlyMusterService:
                     'designation_full': desig_title,
                     'post_id': str(dep.post_id) if dep and dep.post_id else None,
                     'designation_id': str(dep.designation_id) if dep and dep.designation_id else None,
+                    'background_type': getattr(emp, 'background_type', 'CIVILIAN'),
                     'is_primary': item['is_primary'],
                     'days': days_map,
                     'total_present': count_p + count_po + count_pod,

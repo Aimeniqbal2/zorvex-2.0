@@ -8,6 +8,9 @@ interface GuardRow {
     name: string;
     designation: string;
     designation_full: string;
+    post_id?: string | null;
+    designation_id?: string | null;
+    background_type?: string | null;
     is_primary: boolean;
     days: Record<string, string>;
     total_present: number;
@@ -88,6 +91,114 @@ export const getDesigBadgeStyle = (code: string) => {
         case 'GD':
         default:
             return { bg: '#f0f9ff', color: '#0369a1', border: '#bae6fd' };
+    }
+};
+
+export type GuardSubBadge = 'C' | 'EX' | 'SSG' | null;
+
+export const getGuardSubBadge = (
+    guard: GuardRow,
+    siteRequirements?: SiteRequirement[]
+): GuardSubBadge => {
+    const dCode = normalizeDesigCode(guard.designation_full, guard.designation);
+
+    // DEO has no civil/ex distinction per industry domain rules
+    if (dCode === 'DEO') return null;
+
+    // 1. Direct check on designation_full (e.g. 'Security Guard Civil', 'Supervisor Ex-Army', 'Close Protection Officer Ex-SSG Commando')
+    const full = (guard.designation_full || '').toLowerCase();
+    if (full.includes('ssg')) return 'SSG';
+    if (full.includes('ex-army') || full.includes('ex army') || full.includes('ex_army') || full.includes('ex-military') || full.endsWith('_ex') || full.includes(' ex')) {
+        return 'EX';
+    }
+    if (full.includes('civil') || full.includes('civilian') || full.endsWith('_civ') || full.includes(' civ')) {
+        return 'C';
+    }
+
+    // 2. Check matched requirement by post_id
+    if (siteRequirements && siteRequirements.length > 0) {
+        if (guard.post_id) {
+            const req = siteRequirements.find(r => r.post_id === guard.post_id);
+            if (req) {
+                const rTitle = (req.designation_name || req.post_name || '').toLowerCase();
+                if (rTitle.includes('ssg')) return 'SSG';
+                if (rTitle.includes('ex-army') || rTitle.includes('ex army') || rTitle.includes('ex_army')) return 'EX';
+                if (rTitle.includes('civil') || rTitle.includes('civilian')) return 'C';
+            }
+        }
+
+        // 3. Check matched requirement by designation_id
+        if (guard.designation_id) {
+            const req = siteRequirements.find(r => r.designation_id === guard.designation_id);
+            if (req) {
+                const rTitle = (req.designation_name || req.post_name || '').toLowerCase();
+                if (rTitle.includes('ssg')) return 'SSG';
+                if (rTitle.includes('ex-army') || rTitle.includes('ex army') || rTitle.includes('ex_army')) return 'EX';
+                if (rTitle.includes('civil') || rTitle.includes('civilian')) return 'C';
+            }
+        }
+
+        // 4. Requirement deduction:
+        // Filter site requirements that belong to this designation code (e.g. all SUP, all GD, or all CPO)
+        const matchingReqs = siteRequirements.filter(r => normalizeDesigCode(r.designation_name, r.designation_code) === dCode);
+        if (matchingReqs.length > 0) {
+            const hasSSG = matchingReqs.some(r => (r.designation_name || r.post_name || '').toLowerCase().includes('ssg'));
+            const hasEx = matchingReqs.some(r => {
+                const t = (r.designation_name || r.post_name || '').toLowerCase();
+                return t.includes('ex-army') || t.includes('ex army') || t.includes('ex_army');
+            });
+            const hasCiv = matchingReqs.some(r => {
+                const t = (r.designation_name || r.post_name || '').toLowerCase();
+                return t.includes('civil') || t.includes('civilian');
+            });
+
+            // If the site exclusively requires one background type for this role, assign it!
+            if (hasSSG && !hasEx && !hasCiv) return 'SSG';
+            if (hasEx && !hasSSG && !hasCiv) return 'EX';
+            if (hasCiv && !hasSSG && !hasEx) return 'C';
+
+            // If both Civil and Ex-Army are required at this site:
+            if (guard.background_type === 'EX_ARMY') return 'EX';
+            if (guard.background_type === 'CIVILIAN') return 'C';
+        }
+    }
+
+    // 5. Fallback to employee background_type
+    if (guard.background_type === 'EX_ARMY') return 'EX';
+    if (guard.background_type === 'CIVILIAN') return 'C';
+
+    // 6. Common default for security roles (GD, SUP, CPO, CCTV)
+    if (['GD', 'SUP', 'CPO', 'CCTV'].includes(dCode)) {
+        return 'C';
+    }
+
+    return null;
+};
+
+export const getSubBadgeStyle = (sub: GuardSubBadge) => {
+    switch (sub) {
+        case 'EX':
+            return {
+                bg: '#fef3c7',
+                color: '#92400e',
+                border: '#fde68a',
+                label: 'Ex-Army'
+            };
+        case 'SSG':
+            return {
+                bg: '#fee2e2',
+                color: '#991b1b',
+                border: '#fca5a5',
+                label: 'Ex-SSG Commando'
+            };
+        case 'C':
+        default:
+            return {
+                bg: '#f1f5f9',
+                color: '#475569',
+                border: '#cbd5e1',
+                label: 'Civilian'
+            };
     }
 };
 
@@ -430,6 +541,9 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             name: `${emp.first_name} ${emp.last_name || ''}`.trim(),
             designation: desigCode,
             designation_full: desigTitle,
+            post_id: req.post_id || null,
+            designation_id: req.designation_id || null,
+            background_type: emp.background_type || (desigTitle.toLowerCase().includes('ex-army') ? 'EX_ARMY' : 'CIVILIAN'),
             is_primary: false,
             days: initialDays,
             total_present: 0,
@@ -1055,22 +1169,54 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             <td style={{ padding: '6px 8px', position: 'sticky', left: '32px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, fontWeight: 800, color: '#0284c7', textAlign: 'left' }}>
                                                 {guard.employee_code}
                                             </td>
-                                            <td style={{ padding: '6px 4px', position: 'sticky', left: '97px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2 }}>
+                                            <td style={{ padding: '4px 2px', position: 'sticky', left: '97px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, textAlign: 'center', verticalAlign: 'middle' }}>
                                                 {(() => {
                                                     const dCode = normalizeDesigCode(guard.designation_full, guard.designation);
                                                     const style = getDesigBadgeStyle(dCode);
+                                                    const sub = getGuardSubBadge(guard, site.requirements);
+                                                    const subStyle = sub ? getSubBadgeStyle(sub) : null;
                                                     return (
-                                                        <span style={{ 
-                                                             padding: '2px 7px', 
-                                                            borderRadius: '4px', 
-                                                            fontSize: '0.72rem', 
-                                                            fontWeight: 800,
-                                                            background: style.bg,
-                                                            color: style.color,
-                                                            border: `1px solid ${style.border}`
+                                                        <div style={{
+                                                            display: 'inline-flex',
+                                                            flexDirection: 'column',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '2px',
+                                                            lineHeight: 1
                                                         }}>
-                                                            {dCode}
-                                                        </span>
+                                                            <span style={{ 
+                                                                padding: '2px 7px', 
+                                                                borderRadius: '4px', 
+                                                                fontSize: '0.72rem', 
+                                                                fontWeight: 800,
+                                                                background: style.bg,
+                                                                color: style.color,
+                                                                border: `1px solid ${style.border}`,
+                                                                letterSpacing: '0.3px',
+                                                                lineHeight: 1.1
+                                                            }}>
+                                                                {dCode}
+                                                            </span>
+                                                            {sub && subStyle && (
+                                                                <span 
+                                                                    title={`${dCode} (${subStyle.label})`}
+                                                                    style={{
+                                                                        padding: '1px 5px',
+                                                                        borderRadius: '3px',
+                                                                        fontSize: '0.58rem',
+                                                                        fontWeight: 800,
+                                                                        letterSpacing: '0.4px',
+                                                                        lineHeight: 1,
+                                                                        background: subStyle.bg,
+                                                                        color: subStyle.color,
+                                                                        border: `1px solid ${subStyle.border}`,
+                                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                                                                    }}
+                                                                >
+                                                                    {sub}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     );
                                                 })()}
                                             </td>
@@ -1295,19 +1441,54 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                             {activeReq && (() => {
                                 const activeCode = normalizeDesigCode(activeReq.designation_name, activeReq.designation_code);
                                 const pillStyle = getDesigBadgeStyle(activeCode);
+                                const mockGuard: GuardRow = {
+                                    employee_id: '',
+                                    employee_code: '',
+                                    name: '',
+                                    designation: activeCode,
+                                    designation_full: activeReq.designation_name,
+                                    post_id: activeReq.post_id,
+                                    designation_id: activeReq.designation_id,
+                                    is_primary: false,
+                                    days: {},
+                                    total_present: 0,
+                                    total_ot: 0,
+                                    total_wo: 0,
+                                    total_ds: 0,
+                                    total_absent: 0,
+                                    total_leave: 0,
+                                    payable_days: 0
+                                };
+                                const sub = getGuardSubBadge(mockGuard, [activeReq]);
+                                const subStyle = sub ? getSubBadgeStyle(sub) : null;
                                 return (
                                 <div style={{ background: pillStyle.bg, border: `1px solid ${pillStyle.border}`, borderRadius: '10px', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <span style={{
-                                            padding: '4px 10px',
-                                            borderRadius: '6px',
-                                            fontWeight: 800,
-                                            fontSize: '0.82rem',
-                                            background: pillStyle.color,
-                                            color: '#ffffff'
-                                        }}>
-                                            {activeCode}
-                                        </span>
+                                        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                            <span style={{
+                                                padding: '4px 10px',
+                                                borderRadius: '6px',
+                                                fontWeight: 800,
+                                                fontSize: '0.82rem',
+                                                background: pillStyle.color,
+                                                color: '#ffffff'
+                                            }}>
+                                                {activeCode}
+                                            </span>
+                                            {sub && subStyle && (
+                                                <span style={{
+                                                    padding: '1px 5px',
+                                                    borderRadius: '3px',
+                                                    fontWeight: 800,
+                                                    fontSize: '0.62rem',
+                                                    background: subStyle.bg,
+                                                    color: subStyle.color,
+                                                    border: `1px solid ${subStyle.border}`
+                                                }}>
+                                                    {sub}
+                                                </span>
+                                            )}
+                                        </div>
                                         <div>
                                             <strong style={{ fontSize: '0.9rem', color: 'var(--color-text, #0f172a)' }}>{activeReq.designation_name}</strong>
                                             <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)' }}>
