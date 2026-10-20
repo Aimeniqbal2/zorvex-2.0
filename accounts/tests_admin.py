@@ -157,3 +157,59 @@ class DjangoAdminUserAccessTests(TestCase):
         
         access = UserModuleAccess.objects.filter(user=self.existing_user, enabled=True)
         self.assertEqual(access.count(), 0) # No modules despite being cashier
+
+
+class DjangoAdminSuperadminCrossCompanyTests(TestCase):
+    """
+    Verifies that superusers in Django admin can view, edit, and manage
+    CompanySubscription and User records across any tenant company without
+    hitting 'Does not exist. Perhaps it was deleted?' errors.
+    """
+    def setUp(self):
+        self.superadmin = User.objects.create_superuser(
+            username='zorvex_admin', email='zorvex@admin.com', password='password123'
+        )
+        self.company_a = Company.objects.create(name='Company Alpha', domain='alpha')
+        self.company_b = Company.objects.create(name='Company Beta', domain='beta')
+
+        from subscriptions.models import SubscriptionPlan, CompanySubscription
+        self.plan = SubscriptionPlan.objects.create(name='Enterprise', price=500, max_users=50)
+
+        # Create subscription and user under Company Beta (not the first company)
+        self.sub_b = CompanySubscription.all_objects.create(
+            company=self.company_b, plan=self.plan, start_date='2026-01-01', end_date='2027-01-01', is_active=True
+        )
+        self.user_b = User.objects.create_user(
+            username='beta_admin', email='beta@admin.com', password='pass', company=self.company_b, role='admin'
+        )
+
+    def test_superadmin_can_view_cross_company_user_in_admin(self):
+        self.client.login(username='zorvex_admin', password='password123')
+        # View change list
+        url_list = reverse('admin:accounts_user_changelist')
+        resp = self.client.get(url_list)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'beta_admin')
+
+        # View change form (object detail)
+        url_change = reverse('admin:accounts_user_change', args=[self.user_b.id])
+        resp_change = self.client.get(url_change)
+        self.assertEqual(resp_change.status_code, 200)
+        self.assertNotContains(resp_change, "doesn't exist. Perhaps it was deleted?")
+        self.assertContains(resp_change, 'beta_admin')
+
+    def test_superadmin_can_view_cross_company_subscription_in_admin(self):
+        self.client.login(username='zorvex_admin', password='password123')
+        # View change list
+        url_list = reverse('admin:subscriptions_companysubscription_changelist')
+        resp = self.client.get(url_list)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Company Beta')
+
+        # View change form (object detail)
+        url_change = reverse('admin:subscriptions_companysubscription_change', args=[self.sub_b.id])
+        resp_change = self.client.get(url_change)
+        self.assertEqual(resp_change.status_code, 200)
+        self.assertNotContains(resp_change, "doesn't exist. Perhaps it was deleted?")
+        self.assertContains(resp_change, 'Company Beta')
+

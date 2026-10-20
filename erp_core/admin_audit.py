@@ -603,6 +603,23 @@ def enhance_all_registered_admins():
 
             admin_cls.delete_queryset = make_delete_queryset(orig_delete_queryset)
 
+        # 4. Universal Admin QuerySet:
+        # Ensures superusers can view and edit records across all companies and soft-deleted records
+        # in changeform and changelist without being blocked by TenantManager.
+        orig_get_queryset = admin_cls.get_queryset
+
+        def make_get_queryset(orig_func):
+            def custom_get_queryset(self, request):
+                if request.user.is_superuser:
+                    if hasattr(self.model, 'all_objects'):
+                        return self.model.all_objects.all()
+                    elif hasattr(self.model, '_base_manager'):
+                        return self.model._base_manager.all()
+                return orig_func(self, request)
+            return custom_get_queryset
+
+        admin_cls.get_queryset = make_get_queryset(orig_get_queryset)
+
 
 def safe_cascade_soft_delete(obj, user=None):
     """

@@ -83,9 +83,13 @@ class CustomUserAdmin(UserAdmin):
                 cap = next((c for c in security_pkg.capabilities if c.engine == mod.code), None)
                 if cap:
                     label = cap.label
-                    
             modules_data.append({'code': mod.code, 'name': label})
             
         return JsonResponse({'modules': modules_data})
+
+    def get_queryset(self, request):
+        if request.user.is_superuser:
+            return self.model._base_manager.all()
+        return super().get_queryset(request)
 
 admin.site.register(User, CustomUserAdmin)

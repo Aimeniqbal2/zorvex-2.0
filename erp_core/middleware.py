@@ -57,7 +57,7 @@ class TenantMiddleware:
                 if x_company_id:
                     company_id = x_company_id
                     _thread_locals.company = company_id
-                else:
+                elif not path.startswith('/admin/'):
                     from platform_core.views import _get_company_for_user
                     comp, _ = _get_company_for_user(request)
                     if comp:
