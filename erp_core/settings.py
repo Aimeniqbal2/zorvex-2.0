@@ -58,21 +58,25 @@ else:
         "http://softech.ltd",
         "https://softech.ltd",
         "https://www.softech.ltd",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://192.168.18.163:5173",
-        "http://192.168.18.163:8000",
     ]
+    # Dynamically trust all common local development port ranges across localhost, 127.0.0.1, and local IP
+    for _port in list(range(5170, 5186)) + list(range(3000, 3011)) + list(range(8000, 8011)):
+        CSRF_TRUSTED_ORIGINS.extend([
+            f"http://localhost:{_port}",
+            f"http://127.0.0.1:{_port}",
+            f"https://localhost:{_port}",
+            f"https://127.0.0.1:{_port}",
+            f"http://192.168.18.163:{_port}",
+        ])
 
 # Reverse Proxy & SSL Configuration (Nginx terminates SSL in production)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
-# Secure Cookies (Enabled in production when DEBUG=False; preserved HTTP for local dev)
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+# Secure Cookies: default to False on local HTTP development so Chrome/browsers do not drop cookies.
+# Set SESSION_COOKIE_SECURE=True and CSRF_COOKIE_SECURE=True in production .env with HTTPS.
+SESSION_COOKIE_SECURE = env.bool('SESSION_COOKIE_SECURE', default=False)
+CSRF_COOKIE_SECURE = env.bool('CSRF_COOKIE_SECURE', default=False)
 
 # Application definition
 
@@ -233,6 +237,11 @@ REST_FRAMEWORK = {
 
 # CORS Configuration
 CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    r"^https?://([a-zA-Z0-9-]+\.)*softech\.ltd(:\d+)?$",
+]
 _cors_allowed = env.list('CORS_ALLOWED_ORIGINS', default=[])
 if _cors_allowed:
     CORS_ALLOWED_ORIGINS = _cors_allowed

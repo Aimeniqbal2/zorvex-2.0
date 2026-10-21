@@ -81,6 +81,13 @@ apiClient.interceptors.response.use(
     async (error: AxiosError) => {
         const originalRequest = error.config as any;
         
+        const isLoginEndpoint = originalRequest?.url && originalRequest.url.includes('/api/auth/login');
+        
+        // If error is 401 on login endpoint, let the caller handle the error directly without refresh or redirect
+        if (isLoginEndpoint) {
+            return Promise.reject(error);
+        }
+
         // If error is 401 and we haven't already retried this request
         if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
             const refreshToken = TokenManager.getRefreshToken();

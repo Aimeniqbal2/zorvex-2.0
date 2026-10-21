@@ -41,6 +41,8 @@ class CustomUserChangeForm(UserChangeForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
+        if user.role in ('admin', 'super_admin'):
+            user.is_staff = True
         
         def save_custom_modules():
             custom_modules = self.cleaned_data.get('custom_modules', [])
@@ -103,8 +105,19 @@ class CustomUserCreationForm(UserCreationForm):
         else:
             self.fields['custom_modules'].choices = []
 
+    def clean(self):
+        cleaned_data = super().clean()
+        role = cleaned_data.get('role', 'staff')
+        company = cleaned_data.get('company')
+        if role != 'super_admin' and not company:
+            self.add_error('company', "Company is required for client users. Only SuperAdmin users can exist without an assigned company.")
+        return cleaned_data
+
     def save(self, commit=True):
         user = super().save(commit=False)
+        user.is_active = True
+        if user.role in ('admin', 'super_admin'):
+            user.is_staff = True
         
         def save_custom_modules():
             custom_modules = self.cleaned_data.get('custom_modules', [])

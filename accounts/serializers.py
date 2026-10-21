@@ -24,9 +24,30 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
+        from rest_framework.exceptions import AuthenticationFailed
         # Must pop explicitly before DRF simplejwt's parent super().validate() complains about extra unexpected fields
         remember_me = attrs.pop('remember_me', False)
-        
+
+        raw_username = attrs.get(self.username_field, '')
+        raw_password = attrs.get('password', '')
+        clean_identifier = str(raw_username).strip()
+        attrs[self.username_field] = clean_identifier
+
+        # Clear diagnostics so users understand why authentication failed instead of a cryptic generic error
+        try:
+            target_user = User.objects.get_by_natural_key(clean_identifier)
+        except User.DoesNotExist:
+            raise AuthenticationFailed("No user account was found with this username or email.")
+
+        if not target_user.is_active:
+            raise AuthenticationFailed("This account has been deactivated. Please contact your company administrator.")
+
+        if target_user.company and not target_user.company.is_active:
+            raise AuthenticationFailed("Your company account is currently deactivated. Please contact Zorvex support.")
+
+        if not target_user.check_password(raw_password):
+            raise AuthenticationFailed("Invalid password. Please check your credentials and try again.")
+
         data = super().validate(attrs)
         
         if remember_me:

@@ -16,9 +16,33 @@ class TenantUserManager(UserManager):
     def get_by_natural_key(self, username):
         """
         Authentication must NEVER be restricted by a tenant or cross-company context.
-        Usernames are globally unique across the system in AbstractUser.
+        Seamlessly authenticates users via:
+        1. Exact username match
+        2. Case-insensitive username match (e.g. Abcd, Abc_admin, ABCD)
+        3. Email address match (case-insensitive, e.g. client@company.com)
+        4. Stripped leading/trailing whitespace
         """
-        return self.model._base_manager.get(**{self.model.USERNAME_FIELD: username})
+        if not username:
+            raise self.model.DoesNotExist("Username or email was not provided.")
+
+        clean_user = str(username).strip()
+
+        # 1. Exact username match
+        user = self.model._base_manager.filter(**{self.model.USERNAME_FIELD: clean_user}).first()
+        if user:
+            return user
+
+        # 2. Case-insensitive username match
+        user = self.model._base_manager.filter(**{f"{self.model.USERNAME_FIELD}__iexact": clean_user}).first()
+        if user:
+            return user
+
+        # 3. Case-insensitive email match
+        user = self.model._base_manager.filter(email__iexact=clean_user).first()
+        if user:
+            return user
+
+        raise self.model.DoesNotExist(f"User with identifier '{clean_user}' does not exist.")
 
 
 class User(AbstractUser):
