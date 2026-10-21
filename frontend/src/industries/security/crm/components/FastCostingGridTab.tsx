@@ -6,6 +6,8 @@ import { fetchCostingGrid, syncCostingGrid, deleteCostingGridRow, importCostingE
 import type { CostingGridRow } from '../api';
 import { getEntities } from '../../../../modules/crm/api';
 import type { CRMEntity } from '../../../../modules/crm/types';
+import { useAuthStore } from '../../../../auth/authStore';
+import { FastCostingPrintModal } from './FastCostingPrintModal';
 
 interface RoleColDef {
     key: string;
@@ -118,6 +120,8 @@ const ROLE_COLUMNS: RoleColDef[] = [
 ];
 
 export const FastCostingGridTab: React.FC = () => {
+    const { user } = useAuthStore();
+    const companyName = user?.company_name || 'ZORVEX SECURITY SERVICES';
     const [rows, setRows] = useState<CostingGridRow[]>([]);
     const [dirtyRowKeys, setDirtyRowKeys] = useState<Set<string>>(new Set());
     const [existingCustomers, setExistingCustomers] = useState<CRMEntity[]>([]);
@@ -125,6 +129,7 @@ export const FastCostingGridTab: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
+    const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
     const [search, setSearch] = useState('');
     const [selectedClientFilter, setSelectedClientFilter] = useState<string>('ALL');
     const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('ALL');
@@ -237,60 +242,6 @@ export const FastCostingGridTab: React.FC = () => {
         };
     };
 
-    // Aggregate summary across all rows
-    const summary = useMemo(() => {
-        let totalGuards = 0;
-        let totalSale = 0;
-        let totalSalary = 0;
-        let totalExpense = 0;
-        let totalServiceCharges = 0;
-        let totalSalesTax = 0;
-        let totalInvoiceAmount = 0;
-        let totalWht = 0;
-        let totalSessi = 0;
-        let totalEobi = 0;
-        let totalDifference = 0;
-        let totalProfit = 0;
-        const clientsSet = new Set<string>();
-
-        rows.forEach(r => {
-            const calc = computeRowTotals(r);
-            totalGuards += calc.totalStrength;
-            totalSale += calc.monthlySale;
-            totalSalary += calc.monthlySalary;
-            totalExpense += calc.expense;
-            totalServiceCharges += calc.serviceCharges;
-            totalSalesTax += calc.salesTax;
-            totalInvoiceAmount += calc.invoiceAmount;
-            totalWht += calc.wht;
-            totalSessi += calc.sessi;
-            totalEobi += calc.eobi;
-            totalDifference += calc.difference;
-            totalProfit += calc.profitLoss;
-
-            const name = r.client_name?.trim();
-            if (name) {
-                clientsSet.add(name.toLowerCase());
-            }
-        });
-
-        return {
-            totalLocations: rows.length,
-            totalClients: clientsSet.size,
-            totalGuards,
-            totalSale,
-            totalSalary,
-            totalExpense,
-            totalServiceCharges,
-            totalSalesTax,
-            totalInvoice: totalInvoiceAmount,
-            totalWht,
-            totalSessi,
-            totalEobi,
-            totalDifference,
-            totalProfit
-        };
-    }, [rows]);
 
     const clientLocationsMap = useMemo(() => {
         const map: Record<string, string[]> = {};
@@ -526,6 +477,221 @@ export const FastCostingGridTab: React.FC = () => {
         return result;
     }, [rows, selectedClientFilter, selectedLocationFilter, search]);
 
+    // Aggregate summary across filtered rows (reflecting active company/search selection)
+    const summary = useMemo(() => {
+        let totalGuards = 0;
+        let totalSale = 0;
+        let totalSalary = 0;
+        let totalExpense = 0;
+        let totalServiceCharges = 0;
+        let totalSalesTax = 0;
+        let totalInvoiceAmount = 0;
+        let totalWht = 0;
+        let totalSessi = 0;
+        let totalEobi = 0;
+        let totalDifference = 0;
+        let totalProfit = 0;
+        const clientsSet = new Set<string>();
+
+        filteredRows.forEach(r => {
+            const calc = computeRowTotals(r);
+            totalGuards += calc.totalStrength;
+            totalSale += calc.monthlySale;
+            totalSalary += calc.monthlySalary;
+            totalExpense += calc.expense;
+            totalServiceCharges += calc.serviceCharges;
+            totalSalesTax += calc.salesTax;
+            totalInvoiceAmount += calc.invoiceAmount;
+            totalWht += calc.wht;
+            totalSessi += calc.sessi;
+            totalEobi += calc.eobi;
+            totalDifference += calc.difference;
+            totalProfit += calc.profitLoss;
+
+            const name = r.client_name?.trim();
+            if (name) {
+                clientsSet.add(name.toLowerCase());
+            }
+        });
+
+        return {
+            totalLocations: filteredRows.length,
+            totalClients: clientsSet.size,
+            totalGuards,
+            totalSale,
+            totalSalary,
+            totalExpense,
+            totalServiceCharges,
+            totalSalesTax,
+            totalInvoice: totalInvoiceAmount,
+            totalWht,
+            totalSessi,
+            totalEobi,
+            totalDifference,
+            totalProfit
+        };
+    }, [filteredRows]);
+
+    const handleExportCSV = (customRows?: CostingGridRow[], customClientName?: string) => {
+        const rowsToExport = customRows || filteredRows;
+        if (rowsToExport.length === 0) {
+            useToastStore.getState().error('No costing data available to export.');
+            return;
+        }
+
+        const effectiveClient = customClientName || selectedClientFilter;
+
+        const headers = [
+            '#',
+            'Client / Company Name',
+            'Location / Site',
+            ...ROLE_COLUMNS.flatMap(r => [
+                `${r.label} Rate (PKR)`,
+                `${r.label} Salary (PKR)`,
+                `${r.label} Qty`
+            ]),
+            'Monthly Sale (PKR)',
+            'Direct Salary (PKR)',
+            'Total Strength (Guards)',
+            'Overhead Exp (PKR)',
+            'OT Rate / Hr (PKR)',
+            'Service Charges (PKR)',
+            'SESSI (PKR)',
+            'EOBI (PKR)',
+            'WHT Formula',
+            'WHT Rate (%)',
+            'WHT Amount (PKR)',
+            'Sales Tax Formula',
+            'Sales Tax Rate (%)',
+            'Sales Tax Amount (PKR)',
+            'Total Invoice Amount (PKR)',
+            'Gross Margin (PKR)',
+            'Net Profit (PKR)'
+        ];
+
+        const escapeCsv = (val: any) => {
+            if (val === null || val === undefined) return '""';
+            const str = String(val);
+            return `"${str.replace(/"/g, '""')}"`;
+        };
+
+        const csvLines: string[] = [];
+        csvLines.push(headers.map(escapeCsv).join(','));
+
+        let expTotalGuards = 0;
+        let expTotalSale = 0;
+        let expTotalSalary = 0;
+        let expTotalExpense = 0;
+        let expTotalServiceCharges = 0;
+        let expTotalSalesTax = 0;
+        let expTotalInvoiceAmount = 0;
+        let expTotalWht = 0;
+        let expTotalSessi = 0;
+        let expTotalEobi = 0;
+        let expTotalDifference = 0;
+        let expTotalProfit = 0;
+
+        rowsToExport.forEach((row, idx) => {
+            const calc = computeRowTotals(row);
+            expTotalGuards += calc.totalStrength;
+            expTotalSale += calc.monthlySale;
+            expTotalSalary += calc.monthlySalary;
+            expTotalExpense += calc.expense;
+            expTotalServiceCharges += (calc.totalStrength * calc.serviceCharges);
+            expTotalSalesTax += calc.salesTax;
+            expTotalInvoiceAmount += calc.invoiceAmount;
+            expTotalWht += calc.wht;
+            expTotalSessi += calc.sessi;
+            expTotalEobi += calc.eobi;
+            expTotalDifference += calc.difference;
+            expTotalProfit += calc.profitLoss;
+
+            const whtBasis = row.withholding_tax_basis || (row.withholding_tax_override !== undefined && row.withholding_tax_override !== null && row.withholding_tax_override !== '' ? 'MANUAL' : 'INVOICE_AMOUNT');
+            const rawStBasis = row.sales_tax_basis || (row.sales_tax_override !== undefined && row.sales_tax_override !== null && row.sales_tax_override !== '' ? 'MANUAL' : 'TOTAL_SALE');
+            const stBasis = rawStBasis === 'INVOICE_AMOUNT' ? 'TOTAL_SALE' : rawStBasis;
+
+            const rowData: any[] = [
+                idx + 1,
+                row.client_name || '',
+                row.location_name || '',
+                ...ROLE_COLUMNS.flatMap(r => [
+                    Number(row[r.rateKey]) || 0,
+                    Number(row[r.salKey]) || 0,
+                    Number(row[r.qtyKey]) || 0
+                ]),
+                Math.round(calc.monthlySale),
+                Math.round(calc.monthlySalary),
+                calc.totalStrength,
+                Math.round(calc.expense),
+                row.ot_rate ? Number(row.ot_rate) : (calc.totalStrength > 0 ? Math.round((calc.monthlySalary / calc.totalStrength) / 30) : 0),
+                Math.round(calc.totalStrength * calc.serviceCharges),
+                Math.round(calc.sessi),
+                Math.round(calc.eobi),
+                whtBasis,
+                row.tax_wht_rate !== undefined && row.tax_wht_rate !== null && row.tax_wht_rate !== '' ? Number(row.tax_wht_rate) : 7,
+                Math.round(calc.wht),
+                stBasis,
+                row.sales_tax_rate !== undefined && row.sales_tax_rate !== null && row.sales_tax_rate !== '' ? Number(row.sales_tax_rate) : 8,
+                Math.round(calc.salesTax),
+                Math.round(calc.invoiceAmount),
+                Math.round(calc.difference),
+                Math.round(calc.profitLoss)
+            ];
+            csvLines.push(rowData.map(escapeCsv).join(','));
+        });
+
+        // Summary row for CSV
+        const roleTotals: any[] = [];
+        ROLE_COLUMNS.forEach(r => {
+            let totalQty = 0;
+            rowsToExport.forEach(row => {
+                totalQty += Number(row[r.qtyKey]) || 0;
+            });
+            roleTotals.push('', '', totalQty);
+        });
+
+        const summaryRow: any[] = [
+            'TOTALS',
+            `${effectiveClient !== 'ALL' ? effectiveClient : 'All Clients'}`,
+            `${rowsToExport.length} Location(s)`,
+            ...roleTotals,
+            Math.round(expTotalSale),
+            Math.round(expTotalSalary),
+            expTotalGuards,
+            Math.round(expTotalExpense),
+            '',
+            Math.round(expTotalServiceCharges),
+            Math.round(expTotalSessi),
+            Math.round(expTotalEobi),
+            '',
+            '',
+            Math.round(expTotalWht),
+            '',
+            '',
+            Math.round(expTotalSalesTax),
+            Math.round(expTotalInvoiceAmount),
+            Math.round(expTotalDifference),
+            Math.round(expTotalProfit)
+        ];
+        csvLines.push(summaryRow.map(escapeCsv).join(','));
+
+        const csvContent = '\uFEFF' + csvLines.join('\r\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        const clientSlug = effectiveClient && effectiveClient !== 'ALL'
+            ? effectiveClient.replace(/[^a-zA-Z0-9_-]/g, '_')
+            : 'All_Clients';
+        const dateStr = new Date().toISOString().split('T')[0];
+        link.setAttribute('download', `Fast_Costing_Grid_${clientSlug}_${dateStr}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        useToastStore.getState().success(`Exported ${rowsToExport.length} costing location(s) to CSV!`);
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', flex: 1, minHeight: 0 }}>
             {/* Costing Summary KPI Cards Bar */}
@@ -688,6 +854,26 @@ export const FastCostingGridTab: React.FC = () => {
                     >
                         <i className='bx bx-upload' style={{ fontSize: '18px' }}></i> 
                         {isImporting ? 'Importing Excel...' : 'Import Excel Sheet (.xlsx)'}
+                    </Button>
+
+                    <Button 
+                        variant="secondary" 
+                        disabled={filteredRows.length === 0}
+                        onClick={() => handleExportCSV()}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        title="Export current costing grid with all roles and financial totals to CSV / Excel"
+                    >
+                        <i className='bx bx-download' style={{ fontSize: '18px' }}></i> Export CSV
+                    </Button>
+
+                    <Button 
+                        variant="secondary" 
+                        disabled={filteredRows.length === 0}
+                        onClick={() => setIsPrintModalOpen(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        title="Print or Save PDF of the full costing grid for this company or all clients"
+                    >
+                        <i className='bx bx-printer' style={{ fontSize: '18px' }}></i> Print / PDF
                     </Button>
 
                     <Button 
@@ -1563,7 +1749,9 @@ export const FastCostingGridTab: React.FC = () => {
                                         boxShadow: '4px 0 10px rgba(0,0,0,0.18)'
                                     }}
                                 >
-                                    PORTFOLIO TOTALS ({filteredRows.length} Locations)
+                                    {selectedClientFilter !== 'ALL' 
+                                        ? `${selectedClientFilter.toUpperCase()} TOTALS (${filteredRows.length} Locations)` 
+                                        : `PORTFOLIO TOTALS (${filteredRows.length} Locations)`}
                                 </td>
                                 {ROLE_COLUMNS.map(role => {
                                     let roleTotalQty = 0;
@@ -1641,6 +1829,19 @@ export const FastCostingGridTab: React.FC = () => {
                     )}
                 </table>
             </div>
+
+            {/* Dedicated Landscape Print / PDF Modal */}
+            <FastCostingPrintModal
+                isOpen={isPrintModalOpen}
+                onClose={() => setIsPrintModalOpen(false)}
+                allRows={rows}
+                initialClientFilter={selectedClientFilter}
+                uniqueClients={uniqueClients}
+                companyName={companyName}
+                roleColumns={ROLE_COLUMNS}
+                computeRowTotals={computeRowTotals}
+                onExportCSV={(rowsToExport, clientName) => handleExportCSV(rowsToExport, clientName)}
+            />
         </div>
     );
 };
