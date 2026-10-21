@@ -6,21 +6,32 @@ import { isModuleAuthorized } from '../../auth/moduleAuth';
 import { AppIcon } from './AppIcon';
 
 import { SECURITY_NAVIGATION } from '../../industries/security/navigation';
+import { MOBILE_NAVIGATION } from '../../industries/mobile/navigation';
 
 export const AppLauncher: React.FC = () => {
-    const { enabledModules, fetchModuleState, loadingModules, industry } = useAppStore();
+    const { enabledModules, fetchModuleState, loadingModules, industry, company } = useAppStore();
     const { user } = useAuthStore();
 
     useEffect(() => {
         fetchModuleState();
     }, [fetchModuleState]);
 
-    const isSecurityIndustry = industry?.code === 'security' || user?.business_type === 'security';
+    const isSecurityIndustry = company?.business_type 
+        ? company.business_type.toLowerCase() === 'security'
+        : (industry?.code === 'security' || user?.business_type === 'security');
+
+    const isMobileIndustry = company?.business_type 
+        ? company.business_type.toLowerCase() === 'mobile'
+        : (industry?.code === 'mobile' || user?.business_type === 'mobile');
 
     const visibleModules = useMemo(() => {
-        const registryToUse = isSecurityIndustry ? SECURITY_NAVIGATION : MODULE_REGISTRY;
+        const registryToUse = isSecurityIndustry 
+            ? SECURITY_NAVIGATION 
+            : isMobileIndustry 
+            ? MOBILE_NAVIGATION 
+            : MODULE_REGISTRY;
         return registryToUse.filter(mod => isModuleAuthorized(mod, user, enabledModules));
-    }, [user, enabledModules, isSecurityIndustry]);
+    }, [user, enabledModules, isSecurityIndustry, isMobileIndustry]);
 
     if (loadingModules) {
         return (

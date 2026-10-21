@@ -41,6 +41,7 @@ urlpatterns = [
     path('api/communications/', include('communications.urls')),
     path('api/platform/', include('platform_core.urls', namespace='platform_core')),
     path('api/security/crm/', include('security_crm.urls', namespace='security_crm')),
+    path('api/industries/mobile/hrm/', include('industries.mobile.hrm.urls')),
 
     # Global cross-module search
     path('api/search/', GlobalSearchView.as_view(), name='global_search'),

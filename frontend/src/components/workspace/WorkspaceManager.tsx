@@ -18,6 +18,8 @@ import { useAuthStore } from '../../auth/authStore';
 import { useAppStore } from '../../stores/appStore';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { SECURITY_NAVIGATION } from '../../industries/security/navigation';
+import { MOBILE_NAVIGATION } from '../../industries/mobile/navigation';
+import { MobileHRModule } from '../../industries/mobile/hrm/MobileHRModule';
 import { SecurityCRMModule } from '../../industries/security/crm/SecurityCRMModule';
 import { SecurityPurchasingModule } from '../../industries/security/purchasing/SecurityPurchasingModule';
 import { SecurityFinanceModule } from '../../industries/security/finance/SecurityFinanceModule';
@@ -41,6 +43,10 @@ export const WorkspaceManager: React.FC = () => {
         ? company.business_type.toLowerCase() === 'security'
         : (industry?.code === 'security' || user?.business_type === 'security');
 
+    const isMobileIndustry = company?.business_type 
+        ? company.business_type.toLowerCase() === 'mobile'
+        : (industry?.code === 'mobile' || user?.business_type === 'mobile');
+
     useEffect(() => {
         fetchModuleState();
     }, [fetchModuleState]);
@@ -62,11 +68,16 @@ export const WorkspaceManager: React.FC = () => {
             return;
         }
 
-        // Try to find module for this route — check BOTH registries so security routes work
-        // regardless of whether industry loaded before or after navigation
+        // Try to find module for this route — check industry-specific registries
         const securityModule = SECURITY_NAVIGATION.find(m => m.route === location.pathname);
+        const mobileModule = MOBILE_NAVIGATION.find(m => m.route === location.pathname);
         const universalModule = MODULE_REGISTRY.find(m => m.route === location.pathname);
-        const module = isSecurityIndustry ? (securityModule ?? universalModule) : universalModule;
+        const module = isSecurityIndustry 
+            ? (securityModule ?? universalModule) 
+            : isMobileIndustry 
+            ? (mobileModule ?? universalModule) 
+            : universalModule;
+
         if (module) {
             if (isModuleAuthorized(module, user, enabledModules)) {
                 openTab(module);
@@ -78,7 +89,7 @@ export const WorkspaceManager: React.FC = () => {
             // Fallback to desktop if route unknown
             navigate('/');
         }
-    }, [location.pathname, openTab, activateTab, navigate, user, enabledModules, industry, isSecurityIndustry]);
+    }, [location.pathname, openTab, activateTab, navigate, user, enabledModules, industry, isSecurityIndustry, isMobileIndustry]);
 
     // Render logic
     const isDesktop = location.pathname === '/' || !activeTabId;
@@ -126,8 +137,8 @@ export const WorkspaceManager: React.FC = () => {
                             }} />
                         ) : tab.moduleCode === 'platform' ? (
                             <PlatformModule />
-                        ) : tab.moduleCode === 'hr' || tab.moduleCode === 'guards_staff' ? (
-                            <HRModule isSecurity={isSecurityIndustry} />
+                        ) : tab.moduleCode === 'hr' || tab.moduleCode === 'guards_staff' || tab.moduleCode === 'technicians_staff' ? (
+                            isMobileIndustry ? <MobileHRModule /> : <HRModule isSecurity={isSecurityIndustry} />
                         ) : tab.moduleCode === 'finance' || tab.moduleCode === 'security_finance' ? (
                             isSecurityIndustry ? <SecurityFinanceModule /> : <FinanceModule />
                         ) : tab.moduleCode === 'purchasing' || tab.moduleCode === 'vendors_purchasing' ? (

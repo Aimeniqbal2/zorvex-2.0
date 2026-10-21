@@ -79,6 +79,9 @@ def provision_company(
             if business_type == 'security':
                 from industries.security.installer import install_security_package
                 install_security_package(company)
+            elif business_type == 'mobile':
+                from industries.mobile.installer import install_mobile_package
+                install_mobile_package(company)
     except ImportError:
         pass
 

@@ -106,6 +106,7 @@ INSTALLED_APPS = [
     'operations',
     'billing',
     'communications',
+    'industries.mobile.hrm',
 ]
 
 MIDDLEWARE = [

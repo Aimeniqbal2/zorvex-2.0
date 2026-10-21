@@ -4,6 +4,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useAppStore } from '../../stores/appStore';
 import { MODULE_REGISTRY } from '../../config/modules';
 import { SECURITY_NAVIGATION } from '../../industries/security/navigation';
+import { MOBILE_NAVIGATION } from '../../industries/mobile/navigation';
 import { AppLauncher } from './AppLauncher';
 import { apiClient, API_HOST_URL } from '../../api/client';
 
@@ -112,7 +113,13 @@ export const DesktopDashboard: React.FC = () => {
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
 
-    const isSecurityIndustry = industry?.code === 'security' || user?.business_type === 'security' || company?.business_type === 'security';
+    const isSecurityIndustry = company?.business_type 
+        ? company.business_type.toLowerCase() === 'security'
+        : (industry?.code === 'security' || user?.business_type === 'security');
+
+    const isMobileIndustry = company?.business_type 
+        ? company.business_type.toLowerCase() === 'mobile'
+        : (industry?.code === 'mobile' || user?.business_type === 'mobile');
 
     useEffect(() => {
         let isMounted = true;
@@ -137,10 +144,15 @@ export const DesktopDashboard: React.FC = () => {
     }, []);
 
     const openModule = (code: string) => {
-        const registryToUse = isSecurityIndustry ? SECURITY_NAVIGATION : MODULE_REGISTRY;
+        const registryToUse = isSecurityIndustry 
+            ? SECURITY_NAVIGATION 
+            : isMobileIndustry 
+            ? MOBILE_NAVIGATION 
+            : MODULE_REGISTRY;
         const codeMap: Record<string, string> = {
-            'hr': isSecurityIndustry ? 'guards_staff' : 'hr',
+            'hr': isSecurityIndustry ? 'guards_staff' : isMobileIndustry ? 'technicians_staff' : 'hr',
             'guards_staff': 'guards_staff',
+            'technicians_staff': 'technicians_staff',
             'purchasing': isSecurityIndustry ? 'vendors_purchasing' : 'purchasing',
             'vendors_purchasing': 'vendors_purchasing',
             'security_ops': isSecurityIndustry ? 'operations' : 'security_ops',
