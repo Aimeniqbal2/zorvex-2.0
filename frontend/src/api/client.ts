@@ -29,11 +29,16 @@ apiClient.interceptors.request.use((config) => {
         delete config.headers['Content-Type'];
     }
 
+    const isAuthEndpoint = config.url && (
+        config.url.includes('/api/auth/login') ||
+        config.url.includes('/api/auth/refresh')
+    );
+
     const token = TokenManager.getAccessToken();
-    if (token && config.headers) {
+    if (token && config.headers && !isAuthEndpoint) {
         config.headers.Authorization = `Bearer ${token}`;
     }
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !isAuthEndpoint) {
         const companyId = localStorage.getItem('current_company_id');
         if (companyId && config.headers && !config.headers['X-Company-ID']) {
             config.headers['X-Company-ID'] = companyId;

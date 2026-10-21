@@ -34,6 +34,19 @@ class TenantMiddleware:
         _thread_locals.request = request
         company_id = None
         
+        # Authentication endpoints (/api/auth/*) must remain completely tenant-neutral.
+        # Never bind previous JWT claims, admin sessions, or cross-tenant context during login/refresh.
+        if path.startswith('/api/auth/'):
+            try:
+                return self.get_response(request)
+            finally:
+                if hasattr(_thread_locals, 'company'):
+                    del _thread_locals.company
+                if hasattr(_thread_locals, 'user'):
+                    del _thread_locals.user
+                if hasattr(_thread_locals, 'request'):
+                    del _thread_locals.request
+
         # Authenticate JWT for API requests so middleware can see request.user
         if not request.user.is_authenticated and 'HTTP_AUTHORIZATION' in request.META:
             from rest_framework_simplejwt.authentication import JWTAuthentication

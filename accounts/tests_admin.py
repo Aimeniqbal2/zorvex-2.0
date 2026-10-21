@@ -213,3 +213,38 @@ class DjangoAdminSuperadminCrossCompanyTests(TestCase):
         self.assertNotContains(resp_change, "doesn't exist. Perhaps it was deleted?")
         self.assertContains(resp_change, 'Company Beta')
 
+    def test_cross_company_user_can_login_when_admin_session_is_present(self):
+        """
+        When superadmin is logged into Django Admin in the browser session,
+        a user from any other company must still be able to authenticate cleanly
+        without being blocked by cross-company tenant scoping or 'no active account' error.
+        """
+        # Admin is logged in
+        self.client.login(username='zorvex_admin', password='password123')
+        # User from Company Beta attempts to log in via JWT
+        resp = self.client.post(
+            reverse('token_obtain_pair'),
+            {'username': 'beta_admin', 'password': 'pass'},
+            content_type='application/json'
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('access', resp.json())
+        from rest_framework_simplejwt.tokens import AccessToken
+        token = AccessToken(resp.json()['access'])
+        self.assertEqual(token['business_type'], 'other')
+
+    def test_cross_company_user_can_login_when_stale_company_header_is_present(self):
+        """
+        If the frontend sends a stale X-Company-ID header from a previously viewed company,
+        the login endpoint must remain neutral and authenticate the user correctly.
+        """
+        resp = self.client.post(
+            reverse('token_obtain_pair'),
+            {'username': 'beta_admin', 'password': 'pass'},
+            content_type='application/json',
+            HTTP_X_COMPANY_ID=str(self.company_a.id)
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('access', resp.json())
+
+

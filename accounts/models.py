@@ -13,6 +13,14 @@ class TenantUserManager(UserManager):
             return queryset.filter(Q(company_id=company_id) | Q(is_superuser=True))
         return queryset
 
+    def get_by_natural_key(self, username):
+        """
+        Authentication must NEVER be restricted by a tenant or cross-company context.
+        Usernames are globally unique across the system in AbstractUser.
+        """
+        return self.model._base_manager.get(**{self.model.USERNAME_FIELD: username})
+
+
 class User(AbstractUser):
     objects = TenantUserManager()
     """
