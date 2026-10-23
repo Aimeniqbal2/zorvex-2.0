@@ -364,19 +364,15 @@ export const FastCostingGridTab: React.FC = () => {
             return;
         }
 
-        // Performance check: Only sync if changes were actually made
-        if (dirtyRowKeys.size === 0) {
-            useToastStore.getState().info('No changes detected. Costing sheets are already in sync.');
-            return;
+        let targetRows = rows.filter(r => dirtyRowKeys.has(getRowKey(r)));
+        if (targetRows.length === 0) {
+            if (!window.confirm('All costing rows are currently in sync. Do you want to re-sync all locations into Operations & CRM now?')) {
+                return;
+            }
+            targetRows = rows.filter(r => r.client_name?.trim());
         }
 
-        const dirtyRows = rows.filter(r => dirtyRowKeys.has(getRowKey(r)));
-        if (dirtyRows.length === 0) {
-            useToastStore.getState().info('No changes detected. Costing sheets are already in sync.');
-            return;
-        }
-
-        const invalidRows = dirtyRows.filter(r => !r.client_name?.trim());
+        const invalidRows = targetRows.filter(r => !r.client_name?.trim());
         if (invalidRows.length > 0) {
             useToastStore.getState().error('Please ensure all modified rows have a Client Name.');
             return;
@@ -384,7 +380,7 @@ export const FastCostingGridTab: React.FC = () => {
 
         setIsSaving(true);
         try {
-            const preparedRows = dirtyRows.map(r => ({
+            const preparedRows = targetRows.map(r => ({
                 ...r,
                 overhead_per_guard: (r.overhead_per_guard !== '' && r.overhead_per_guard !== null && r.overhead_per_guard !== undefined) ? Number(r.overhead_per_guard) : 6000,
                 service_charges_per_guard: (r.service_charges_per_guard !== '' && r.service_charges_per_guard !== null && r.service_charges_per_guard !== undefined) ? Number(r.service_charges_per_guard) : 3000,
@@ -399,7 +395,7 @@ export const FastCostingGridTab: React.FC = () => {
                         : Math.round(Number(r.guard_civ_sal || 35000) / 30)),
             }));
             const res = await syncCostingGrid(preparedRows as any);
-            useToastStore.getState().success(res.message || `Successfully synced ${dirtyRows.length} changed location(s)!`);
+            useToastStore.getState().success(res.message || `Successfully synced ${targetRows.length} location(s) into Operations & CRM!`);
             setDirtyRowKeys(new Set());
             await loadGrid();
         } catch (err: any) {
@@ -983,17 +979,17 @@ export const FastCostingGridTab: React.FC = () => {
                             gap: '8px',
                             background: dirtyRowKeys.size > 0 ? '#10b981' : 'var(--color-surface-secondary)',
                             borderColor: dirtyRowKeys.size > 0 ? '#10b981' : 'var(--color-border)',
-                            color: dirtyRowKeys.size > 0 ? '#ffffff' : 'var(--color-text-muted)',
+                            color: dirtyRowKeys.size > 0 ? '#ffffff' : 'var(--color-text)',
                             opacity: isSaving ? 0.7 : 1,
-                            cursor: isSaving ? 'not-allowed' : (dirtyRowKeys.size > 0 ? 'pointer' : 'default'),
+                            cursor: isSaving ? 'not-allowed' : 'pointer',
                             fontWeight: 700,
                             transition: 'all 0.2s ease',
                             boxShadow: dirtyRowKeys.size > 0 ? '0 2px 8px rgba(16, 185, 129, 0.3)' : 'none'
                         }}
-                        title={dirtyRowKeys.size > 0 ? `${dirtyRowKeys.size} unsaved location change(s)` : 'All costing sheets in sync'}
+                        title={dirtyRowKeys.size > 0 ? `${dirtyRowKeys.size} unsaved location change(s) - click to save and sync to Operations & CRM` : 'All costing sheets in sync. Click to re-sync all to Operations & CRM.'}
                     >
                         <i className={`bx bx-cloud-upload ${dirtyRowKeys.size > 0 ? 'bx-tada' : ''}`} style={{ fontSize: '20px' }}></i>
-                        {isSaving ? 'Syncing to CRM...' : (dirtyRowKeys.size > 0 ? `Save & Sync to CRM (${dirtyRowKeys.size} changed)` : 'Save & Sync to CRM (In Sync)')}
+                        {isSaving ? 'Syncing to Operations & CRM...' : (dirtyRowKeys.size > 0 ? `Save & Sync to Operations & CRM (${dirtyRowKeys.size} changed)` : 'Save & Sync to Operations & CRM (In Sync)')}
                     </Button>
                 </div>
             </div>
@@ -1599,7 +1595,7 @@ export const FastCostingGridTab: React.FC = () => {
                                                         }}
                                                     >
                                                         <option value="TOTAL_SALE">Total Sale × %</option>
-                                                        <option value="SERVICE_CHARGES">On Service Charges × %</option>
+                                                        <option value="SERVICE_CHARGES">Total Count × Service Charges × %</option>
                                                         <option value="MANUAL">Manual</option>
                                                     </select>
                                                 );

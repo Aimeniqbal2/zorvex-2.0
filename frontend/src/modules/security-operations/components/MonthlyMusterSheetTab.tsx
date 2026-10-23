@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getMonthlyMusterGrid, saveMonthlyMusterUpdates, importMonthlyMusterExcel, cleanupOrphanedAttendance, apiClient } from '../api';
+import { getMonthlyMusterGrid, saveMonthlyMusterUpdates, importMonthlyMusterExcel, cleanupOrphanedAttendance, freezeMonthlyMuster, apiClient } from '../api';
 import { useToastStore } from '../../../stores/toastStore';
 
 interface GuardRow {
@@ -243,6 +243,82 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
     // Clean Orphaned Attendance state
     const [cleaning, setCleaning] = useState<boolean>(false);
 
+    // Frozen Month State
+    const [isFrozen, setIsFrozen] = useState<boolean>(false);
+    const [freezing, setFreezing] = useState<boolean>(false);
+    const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+
+    // Can freeze if not already frozen and month is ended (past month or at month-end day)
+    const canFreeze = useMemo(() => {
+        if (isFrozen) return false;
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        const currentDay = now.getDate();
+        const isPastMonth = (currentYear > year) || (currentYear === year && currentMonth > month);
+        const isCurrentMonthEnd = (currentYear === year && currentMonth === month && currentDay >= (daysInMonth - 1));
+        return isPastMonth || isCurrentMonthEnd;
+    }, [isFrozen, year, month, daysInMonth]);
+
+    // Scroll synchronization refs between sticky header and table body
+    const headerRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const bodyRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const isSyncingRef = useRef<Record<string, boolean>>({});
+
+    const syncBodyScroll = (siteId: string, scrollLeft: number) => {
+        if (isSyncingRef.current[siteId]) return;
+        const bdy = bodyRefs.current[siteId];
+        if (bdy && Math.abs(bdy.scrollLeft - scrollLeft) > 0.5) {
+            isSyncingRef.current[siteId] = true;
+            bdy.scrollLeft = scrollLeft;
+            requestAnimationFrame(() => {
+                isSyncingRef.current[siteId] = false;
+            });
+        }
+    };
+
+    const syncHeaderScroll = (siteId: string, scrollLeft: number) => {
+        if (isSyncingRef.current[siteId]) return;
+        const hdr = headerRefs.current[siteId];
+        if (hdr && Math.abs(hdr.scrollLeft - scrollLeft) > 0.5) {
+            isSyncingRef.current[siteId] = true;
+            hdr.scrollLeft = scrollLeft;
+            requestAnimationFrame(() => {
+                isSyncingRef.current[siteId] = false;
+            });
+        }
+    };
+
+    const handleFreezeMonth = async () => {
+        const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const confirmed = window.confirm(
+            `Are you sure you want to permanently freeze and close ${monthNames[month]} ${year}?\n\nThis will lock all attendance and salary calculations as official payroll history and cannot be undone.`
+        );
+        if (!confirmed) return;
+
+        try {
+            setFreezing(true);
+            const res = await freezeMonthlyMuster(year, month);
+            addToast('success', res.message || `Month ${monthNames[month]} ${year} has been permanently frozen.`);
+            await loadMusterData();
+        } catch (err: any) {
+            addToast('error', err?.response?.data?.detail || 'Failed to freeze month.');
+        } finally {
+            setFreezing(false);
+        }
+    };
+
+    // Collapsible site cards tracker
+    const [collapsedSites, setCollapsedSites] = useState<Set<string>>(new Set());
+    const toggleSiteCollapse = (siteId: string) => {
+        setCollapsedSites(prev => {
+            const next = new Set(prev);
+            if (next.has(siteId)) next.delete(siteId);
+            else next.add(siteId);
+            return next;
+        });
+    };
+
     const loadMusterData = async () => {
         try {
             setLoading(true);
@@ -250,6 +326,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             setSitesData(res.sites || []);
             setDaysInMonth(res.days_in_month || 31);
             setTodayDay(res.today_day || today.getDate());
+            setIsFrozen(Boolean(res.is_frozen));
             setDirtyUpdates(new Map());
             setAddedGuards([]);
             setRemovedGuards([]);
@@ -303,6 +380,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Fast inline cell edit with anti-cheating cross-location duplicate check
     const handleCellChange = (siteId: string, employeeId: string, day: number, rawValue: string) => {
+        if (isFrozen) {
+            addToast('warning', 'This month is frozen and locked. Attendance and duty cells cannot be modified.');
+            return;
+        }
+
         const raw = rawValue.trim().toUpperCase();
         let val = '';
 
@@ -472,6 +554,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Save changes to backend
     const handleSaveChanges = async () => {
+        if (isFrozen) {
+            addToast('warning', 'This month is frozen and locked. Changes cannot be saved.');
+            return;
+        }
+
         const totalChanges = dirtyUpdates.size + addedGuards.length + removedGuards.length;
         if (totalChanges === 0) {
             addToast('info', 'No pending changes to save.');
@@ -500,6 +587,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Clean Orphaned Records from Deleted/Inactive Sites
     const handleCleanupOrphanedAttendance = async () => {
+        if (isFrozen) {
+            addToast('warning', 'This month is frozen and locked. Cannot cleanup records.');
+            return;
+        }
+
         if (!window.confirm(`Clean Orphaned Records?\n\nThis will scan and safely remove any obsolete attendance records linked to deleted or inactive locations for ${year}-${String(month).padStart(2, '0')}.\n\nDo you want to proceed?`)) {
             return;
         }
@@ -518,6 +610,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Add Guard to Site Block with Selected Site Requirement/Position
     const handleAddGuardToSite = (emp: any, req: SiteRequirement) => {
+        if (isFrozen) {
+            addToast('warning', 'This month is frozen and locked. Cannot add new guards.');
+            return;
+        }
+
         if (!activeAddSiteId) return;
 
         // Check if already in this site block
@@ -578,6 +675,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     // Remove Guard from Site Block
     const handleRemoveGuard = (siteId: string, employeeId: string, guardName: string) => {
+        if (isFrozen) {
+            addToast('warning', 'This month is frozen and locked. Cannot remove guards.');
+            return;
+        }
+
         if (!window.confirm(`Are you sure you want to remove ${guardName} from this location block? Clicking Save will wipe this guard's duty pay and attendance records for this month.`)) return;
 
         setSitesData(prev => prev.map(s => {
@@ -821,25 +923,73 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         )}
                     </div>
 
-                    {/* Import Excel */}
-                    <button
-                        onClick={() => setShowImportModal(true)}
-                        style={{ 
+                    {/* Month Frozen Badge */}
+                    {isFrozen && (
+                        <div style={{ 
                             display: 'flex', 
                             alignItems: 'center', 
                             gap: '6px', 
                             padding: '8px 14px', 
                             borderRadius: '8px', 
-                            background: '#0284c7', 
-                            color: '#ffffff', 
-                            border: 'none', 
-                            fontWeight: 700, 
-                            fontSize: '0.88rem',
-                            cursor: 'pointer' 
-                        }}
-                    >
-                        <i className='bx bx-import'></i> Import Excel
-                    </button>
+                            background: '#fef3c7', 
+                            color: '#92400e', 
+                            border: '1px solid #fde68a', 
+                            fontWeight: 800, 
+                            fontSize: '0.88rem' 
+                        }}>
+                            <i className='bx bx-lock-alt' style={{ fontSize: '1.1rem' }}></i>
+                            Month Frozen (Locked)
+                        </div>
+                    )}
+
+                    {/* Freeze Month Button (Available at month-end or past months) */}
+                    {!isFrozen && canFreeze && (
+                        <button
+                            onClick={handleFreezeMonth}
+                            disabled={freezing}
+                            style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '6px', 
+                                padding: '8px 16px', 
+                                borderRadius: '8px', 
+                                background: '#4f46e5', 
+                                color: '#ffffff', 
+                                border: 'none', 
+                                fontWeight: 800, 
+                                fontSize: '0.88rem',
+                                cursor: freezing ? 'not-allowed' : 'pointer',
+                                boxShadow: '0 2px 6px rgba(79, 70, 229, 0.35)',
+                                transition: 'all 0.15s ease'
+                            }}
+                            title="Permanently freeze and lock attendance and salary calculations as official payroll history"
+                        >
+                            <i className={`bx ${freezing ? 'bx-loader-alt bx-spin' : 'bx-lock-alt'}`}></i>
+                            {freezing ? 'Freezing...' : 'Freeze Month'}
+                        </button>
+                    )}
+
+                    {/* Import Excel */}
+                    {!isFrozen && (
+                        <button
+                            onClick={() => setShowImportModal(true)}
+                            style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '6px', 
+                                padding: '8px 14px', 
+                                borderRadius: '8px', 
+                                background: '#0284c7', 
+                                color: '#ffffff', 
+                                border: 'none', 
+                                fontWeight: 700, 
+                                fontSize: '0.88rem',
+                                cursor: 'pointer' 
+                            }}
+                        >
+                            <i className='bx bx-import'></i> Import Excel
+                        </button>
+                    )}
 
                     {/* Export CSV */}
                     <button
@@ -862,53 +1012,80 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     </button>
 
                     {/* Clean Orphaned Records Button */}
-                    <button
-                        onClick={handleCleanupOrphanedAttendance}
-                        disabled={cleaning}
-                        title="Purge obsolete attendance records linked to deleted or inactive locations"
-                        style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: '6px', 
-                            padding: '8px 14px', 
-                            borderRadius: '8px', 
-                            background: '#fff1f2', 
-                            color: '#e11d48', 
-                            border: '1px solid #fecdd3', 
-                            fontWeight: 700, 
-                            fontSize: '0.88rem',
-                            cursor: cleaning ? 'not-allowed' : 'pointer',
-                            transition: 'all 0.15s ease'
-                        }}
-                    >
-                        <i className={`bx ${cleaning ? 'bx-loader-alt bx-spin' : 'bx-trash-alt'}`}></i>
-                        {cleaning ? 'Cleaning...' : 'Clean Deleted Sites'}
-                    </button>
+                    {!isFrozen && (
+                        <button
+                            onClick={handleCleanupOrphanedAttendance}
+                            disabled={cleaning}
+                            title="Purge obsolete attendance records linked to deleted or inactive locations"
+                            style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '6px', 
+                                padding: '8px 14px', 
+                                borderRadius: '8px', 
+                                background: '#fff1f2', 
+                                color: '#e11d48', 
+                                border: '1px solid #fecdd3', 
+                                fontWeight: 700, 
+                                fontSize: '0.88rem',
+                                cursor: cleaning ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.15s ease'
+                            }}
+                        >
+                            <i className={`bx ${cleaning ? 'bx-loader-alt bx-spin' : 'bx-trash-alt'}`}></i>
+                            {cleaning ? 'Cleaning...' : 'Clean Deleted Sites'}
+                        </button>
+                    )}
 
                     {/* Save Changes Button */}
-                    <button
-                        onClick={handleSaveChanges}
-                        disabled={saving || (dirtyUpdates.size === 0 && addedGuards.length === 0 && removedGuards.length === 0)}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '8px 18px',
-                            borderRadius: '8px',
-                            background: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#10b981' : '#94a3b8',
-                            color: '#ffffff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: '0.88rem',
-                            cursor: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? 'pointer' : 'default',
-                            boxShadow: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none'
-                        }}
-                    >
-                        <i className='bx bx-save'></i>
-                        {saving ? 'Saving...' : `Save Changes ${(dirtyUpdates.size + addedGuards.length + removedGuards.length) > 0 ? `(${dirtyUpdates.size + addedGuards.length + removedGuards.length})` : ''}`}
-                    </button>
+                    {!isFrozen && (
+                        <button
+                            onClick={handleSaveChanges}
+                            disabled={saving || (dirtyUpdates.size === 0 && addedGuards.length === 0 && removedGuards.length === 0)}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '8px 18px',
+                                borderRadius: '8px',
+                                background: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#10b981' : '#94a3b8',
+                                color: '#ffffff',
+                                border: 'none',
+                                fontWeight: 700,
+                                fontSize: '0.88rem',
+                                cursor: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? 'pointer' : 'default',
+                                boxShadow: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none'
+                            }}
+                        >
+                            <i className='bx bx-save'></i>
+                            {saving ? 'Saving...' : `Save Changes ${(dirtyUpdates.size + addedGuards.length + removedGuards.length) > 0 ? `(${dirtyUpdates.size + addedGuards.length + removedGuards.length})` : ''}`}
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {/* Frozen Month Notification Banner */}
+            {isFrozen && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    background: '#fffbeb',
+                    border: '1px solid #fde68a',
+                    padding: '12px 20px',
+                    borderRadius: '10px',
+                    color: '#92400e',
+                    fontSize: '0.88rem',
+                    fontWeight: 600,
+                    marginBottom: '20px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                }}>
+                    <i className='bx bx-lock-alt' style={{ fontSize: '1.4rem', color: '#d97706' }}></i>
+                    <div>
+                        <strong>Official Payroll Record Locked:</strong> This month ({month}/{year}) has been permanently frozen. Duty attendance and salary calculations are immutable official payroll history and cannot be edited.
+                    </div>
+                </div>
+            )}
 
             {/* Sub-Banner: Days Count & Quick Legend */}
             <div style={{ 
@@ -983,7 +1160,9 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             )}
 
             {/* Sites Muster Blocks */}
-            {!loading && filteredSites.map((site) => (
+            {!loading && filteredSites.map((site) => {
+                const isCollapsed = collapsedSites.has(site.site_id);
+                return (
                 <div 
                     key={site.site_id} 
                     style={{ 
@@ -991,361 +1170,662 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         background: 'var(--color-surface, #ffffff)', 
                         borderRadius: '12px', 
                         border: '1px solid var(--color-border, #e2e8f0)', 
-                        overflow: 'hidden', 
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' 
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+                        position: 'relative',
+                        width: '100%',
+                        maxWidth: '100%',
+                        boxSizing: 'border-box'
                     }}
                 >
-                    {/* Green Location Header Banner (Matching Excel Screenshot) */}
+                    {/* Combined Sticky Header: Green Location Banner + Date Header Line */}
                     <div style={{ 
-                        background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', 
-                        padding: '12px 24px', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'space-between', 
-                        flexWrap: 'wrap', 
-                        gap: '12px', 
-                        color: '#ffffff' 
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 40,
+                        background: 'var(--color-surface, #ffffff)',
+                        borderRadius: isCollapsed ? '12px' : '12px 12px 0 0',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                        width: '100%',
+                        maxWidth: '100%',
+                        boxSizing: 'border-box'
                     }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ width: 32, height: 32, borderRadius: '6px', background: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
-                                <i className='bx bx-building'></i>
-                            </div>
-                            <div>
-                                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.3px', color: '#ffffff' }}>
-                                    {site.site_name}
-                                </h3>
-                                <span style={{ fontSize: '0.8rem', opacity: 0.9 }}>
-                                    Client: {site.customer_name}
-                                </span>
-                            </div>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ fontSize: '0.85rem', background: 'rgba(0, 0, 0, 0.2)', padding: '6px 14px', borderRadius: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span>Requirements: </span>
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                    {(() => {
-                                        if (site.requirements && site.requirements.length > 0) {
-                                            const countByCode = new Map<string, number>();
-                                            site.requirements.forEach(r => {
-                                                const code = normalizeDesigCode(r.designation_name, r.designation_code);
-                                                countByCode.set(code, (countByCode.get(code) || 0) + (r.required_headcount || 0));
-                                            });
-
-                                            const preferredOrder = ['SUP', 'GD', 'CPO', 'LADY', 'CCTV', 'DEO', 'DVR', 'AG'];
-                                            const sorted = Array.from(countByCode.entries()).sort((a, b) => {
-                                                const idxA = preferredOrder.indexOf(a[0]);
-                                                const idxB = preferredOrder.indexOf(b[0]);
-                                                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-                                                if (idxA !== -1) return -1;
-                                                if (idxB !== -1) return 1;
-                                                return a[0].localeCompare(b[0]);
-                                            });
-
-                                            return sorted.map(([code, count]) => (
-                                                <strong key={code} style={{ 
-                                                    background: 'rgba(255, 255, 255, 0.18)', 
-                                                    padding: '2px 8px', 
-                                                    borderRadius: '4px',
-                                                    fontSize: '0.84rem',
-                                                    letterSpacing: '0.3px'
-                                                }}>
-                                                    {count} {code}
-                                                </strong>
-                                            ));
-                                        }
-
-                                        const fallbackParts: string[] = [];
-                                        if (site.supervisors_req > 0) fallbackParts.push(`${site.supervisors_req} SUP`);
-                                        if (site.guards_req > 0) fallbackParts.push(`${site.guards_req} GD`);
-                                        const fallbackStr = fallbackParts.length > 0 ? fallbackParts.join(' ') : '0 GD';
-                                        return <strong>{fallbackStr}</strong>;
-                                    })()}
+                        {/* Green Location Header Banner */}
+                        <div style={{ 
+                            background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', 
+                            padding: '12px 24px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'space-between', 
+                            flexWrap: 'wrap', 
+                            gap: '12px', 
+                            color: '#ffffff',
+                            borderRadius: isCollapsed ? '12px' : '12px 12px 0 0'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <button
+                                    onClick={() => toggleSiteCollapse(site.site_id)}
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        borderRadius: '6px',
+                                        background: 'rgba(255, 255, 255, 0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '1.2rem',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    title={isCollapsed ? 'Expand site muster sheet' : 'Collapse site muster sheet'}
+                                >
+                                    <i className={`bx ${isCollapsed ? 'bx-chevron-right' : 'bx-chevron-down'}`}></i>
+                                </button>
+                                <div style={{ width: 32, height: 32, borderRadius: '6px', background: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
+                                    <i className='bx bx-building'></i>
+                                </div>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, letterSpacing: '0.3px', color: '#ffffff' }}>
+                                        {site.site_name}
+                                    </h3>
+                                    <span style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+                                        Client: {site.customer_name} &nbsp;•&nbsp; <strong>{site.guards.length} Guards</strong>
+                                    </span>
                                 </div>
                             </div>
 
-                            <button
-                                onClick={() => {
-                                    setActiveAddSiteId(site.site_id);
-                                    setSelectedRequirementIndex(0);
-                                    setGuardSearch('');
-                                }}
-                                style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '6px', 
-                                    background: '#ffffff', 
-                                    color: '#059669', 
-                                    border: 'none', 
-                                    padding: '7px 16px', 
-                                    borderRadius: '6px', 
-                                    fontWeight: 800, 
-                                    fontSize: '0.88rem', 
-                                    cursor: 'pointer', 
-                                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)' 
-                                }}
-                            >
-                                <i className='bx bx-user-plus'></i> Add Guard
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{ fontSize: '0.85rem', background: 'rgba(0, 0, 0, 0.2)', padding: '6px 14px', borderRadius: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>Requirements: </span>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                        {(() => {
+                                            if (site.requirements && site.requirements.length > 0) {
+                                                const countByCode = new Map<string, number>();
+                                                site.requirements.forEach(r => {
+                                                    const code = normalizeDesigCode(r.designation_name, r.designation_code);
+                                                    countByCode.set(code, (countByCode.get(code) || 0) + (r.required_headcount || 0));
+                                                });
 
-                            {/* Location Header Direct Save Button */}
-                            <button
-                                onClick={handleSaveChanges}
-                                disabled={saving || (dirtyUpdates.size === 0 && addedGuards.length === 0 && removedGuards.length === 0)}
-                                style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '6px', 
-                                    background: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#ffffff' : 'rgba(255, 255, 255, 0.25)', 
-                                    color: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#059669' : 'rgba(255, 255, 255, 0.7)', 
-                                    border: 'none', 
-                                    padding: '7px 16px', 
-                                    borderRadius: '6px', 
-                                    fontWeight: 800, 
-                                    fontSize: '0.88rem', 
-                                    cursor: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? 'pointer' : 'default', 
-                                    boxShadow: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
-                                    transition: 'all 0.15s ease'
-                                }}
-                                title="Save changes across all locations"
-                            >
-                                <i className='bx bx-save'></i> {saving ? 'Saving...' : 'Save Changes'}
-                            </button>
-                        </div>
-                    </div>
+                                                const preferredOrder = ['SUP', 'GD', 'CPO', 'LADY', 'CCTV', 'DEO', 'DVR', 'AG'];
+                                                const sorted = Array.from(countByCode.entries()).sort((a, b) => {
+                                                    const idxA = preferredOrder.indexOf(a[0]);
+                                                    const idxB = preferredOrder.indexOf(b[0]);
+                                                    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                                                    if (idxA !== -1) return -1;
+                                                    if (idxB !== -1) return 1;
+                                                    return a[0].localeCompare(b[0]);
+                                                });
 
-                    {/* Table Spreadsheet Matrix */}
-                    <div style={{ overflowX: 'auto', width: '100%' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'center' }}>
-                            <thead>
-                                <tr style={{ background: '#f8fafc', color: '#475569', borderBottom: '2px solid #cbd5e1' }}>
-                                    <th style={{ padding: '8px 6px', width: '32px', position: 'sticky', left: 0, background: '#f8fafc', zIndex: 3 }}>#</th>
-                                    <th style={{ padding: '8px 8px', width: '65px', position: 'sticky', left: '32px', background: '#f8fafc', zIndex: 3, textAlign: 'left' }}>Code</th>
-                                    <th style={{ padding: '8px 8px', width: '55px', position: 'sticky', left: '97px', background: '#f8fafc', zIndex: 3 }}>Desig</th>
-                                    <th style={{ padding: '8px 12px', minWidth: '160px', position: 'sticky', left: '152px', background: '#f8fafc', zIndex: 3, textAlign: 'left' }}>Guard Name</th>
+                                                return sorted.map(([code, count]) => (
+                                                    <strong key={code} style={{ 
+                                                        background: 'rgba(255, 255, 255, 0.18)', 
+                                                        padding: '2px 8px', 
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.84rem',
+                                                        letterSpacing: '0.3px'
+                                                    }}>
+                                                        {count} {code}
+                                                    </strong>
+                                                ));
+                                            }
 
-                                    {/* Days 1 to 31 */}
-                                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
-                                        const isTodayHeader = (d === todayDay);
-                                        return (
-                                            <th 
-                                                key={d} 
-                                                style={{ 
-                                                    padding: '8px 4px', 
-                                                    minWidth: '34px', 
-                                                    borderLeft: '1px solid #e2e8f0',
-                                                    background: isTodayHeader ? '#ecfdf5' : '#f8fafc',
-                                                    color: isTodayHeader ? '#059669' : '#334155',
-                                                    fontWeight: isTodayHeader ? 800 : 700
-                                                }}
-                                            >
-                                                {d}
-                                            </th>
-                                        );
-                                    })}
+                                            const fallbackParts: string[] = [];
+                                            if (site.supervisors_req > 0) fallbackParts.push(`${site.supervisors_req} SUP`);
+                                            if (site.guards_req > 0) fallbackParts.push(`${site.guards_req} GD`);
+                                            const fallbackStr = fallbackParts.length > 0 ? fallbackParts.join(' ') : '0 GD';
+                                            return <strong>{fallbackStr}</strong>;
+                                        })()}
+                                    </div>
+                                </div>
 
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '2px solid #cbd5e1', background: '#f8fafc', color: '#059669', fontWeight: 800 }} title="Total Present shifts">P</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb', fontWeight: 800 }} title="Total Active Overtime shifts">O</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#6d28d9', fontWeight: 800 }} title="Total Overtime Dozing shifts">OD</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '40px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#0f766e', fontWeight: 800 }} title="Worked on Weekly Off">WP</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '45px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 800 }} title="Weekly Off / Leave">W/L</th>
-                                    <th style={{ padding: '8px 8px', minWidth: '55px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc', color: '#059669', fontWeight: 800 }} title="Total Payable Days">Pay Days</th>
-                                    <th style={{ padding: '8px 6px', width: '36px', borderLeft: '1px solid #e2e8f0', background: '#f8fafc' }}>Act</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {site.guards.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={daysInMonth + 11} style={{ padding: '24px', color: '#94a3b8', textAlign: 'center', background: '#ffffff' }}>
-                                            No guards currently deployed at this site for {month}/{year}. Click <strong>[ + Add Guard ]</strong> above to assign personnel.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    site.guards.map((guard, idx) => (
-                                        <tr key={guard.employee_id} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                                            <td style={{ padding: '6px 4px', position: 'sticky', left: 0, background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, color: '#94a3b8', fontWeight: 600 }}>
-                                              {idx + 1}
-                                            </td>
-                                            <td style={{ padding: '6px 8px', position: 'sticky', left: '32px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, fontWeight: 800, color: '#0284c7', textAlign: 'left' }}>
-                                                {guard.employee_code}
-                                            </td>
-                                            <td style={{ padding: '4px 2px', position: 'sticky', left: '97px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, textAlign: 'center', verticalAlign: 'middle' }}>
-                                                {(() => {
-                                                    const dCode = normalizeDesigCode(guard.designation_full, guard.designation);
-                                                    const style = getDesigBadgeStyle(dCode);
-                                                    const sub = getGuardSubBadge(guard, site.requirements);
-                                                    const subStyle = sub ? getSubBadgeStyle(sub) : null;
-                                                    return (
-                                                        <div style={{
-                                                            display: 'inline-flex',
-                                                            flexDirection: 'column',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            gap: '2px',
-                                                            lineHeight: 1
-                                                        }}>
-                                                            <span style={{ 
-                                                                padding: '2px 7px', 
-                                                                borderRadius: '4px', 
-                                                                fontSize: '0.72rem', 
-                                                                fontWeight: 800,
-                                                                background: style.bg,
-                                                                color: style.color,
-                                                                border: `1px solid ${style.border}`,
-                                                                letterSpacing: '0.3px',
-                                                                lineHeight: 1.1
-                                                            }}>
-                                                                {dCode}
-                                                            </span>
-                                                            {sub && subStyle && (
-                                                                <span 
-                                                                    title={`${dCode} (${subStyle.label})`}
-                                                                    style={{
-                                                                        padding: '1px 5px',
-                                                                        borderRadius: '3px',
-                                                                        fontSize: '0.58rem',
-                                                                        fontWeight: 800,
-                                                                        letterSpacing: '0.4px',
-                                                                        lineHeight: 1,
-                                                                        background: subStyle.bg,
-                                                                        color: subStyle.color,
-                                                                        border: `1px solid ${subStyle.border}`,
-                                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
-                                                                    }}
-                                                                >
-                                                                    {sub}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </td>
-                                            <td style={{ padding: '6px 12px', position: 'sticky', left: '152px', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', zIndex: 2, textAlign: 'left', fontWeight: 700, color: 'var(--color-text, #0f172a)', whiteSpace: 'nowrap' }}>
-                                                {guard.name}
-                                            </td>
-
-                                            {/* Days 1 to 31 Interactive Input Cells */}
-                                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
-                                                const cellVal = guard.days[String(d)] || '';
-
-                                                let cellBg = 'transparent';
-                                                let cellColor = '#334155';
-                                                let borderStyle = '1px solid #e2e8f0';
-
-                                                if (cellVal === 'P' || cellVal === '1') {
-                                                    cellBg = '#dcfce7';
-                                                    cellColor = '#15803d';
-                                                } else if (cellVal === 'O' || cellVal === 'OT') {
-                                                    cellBg = '#dbeafe';
-                                                    cellColor = '#1d4ed8';
-                                                } else if (cellVal === 'OD') {
-                                                    cellBg = '#ede9fe';
-                                                    cellColor = '#6d28d9';
-                                                } else if (cellVal === 'PO') {
-                                                    cellBg = '#f3e8ff';
-                                                    cellColor = '#7e22ce';
-                                                } else if (cellVal === 'POD') {
-                                                    cellBg = '#fae8ff';
-                                                    cellColor = '#a21caf';
-                                                } else if (cellVal === 'WP' || cellVal === 'D' || cellVal === 'WO+OT' || cellVal === 'DS') {
-                                                    cellBg = '#ccfbf1';
-                                                    cellColor = '#0f766e';
-                                                } else if (cellVal === 'W' || cellVal === 'WO') {
-                                                    cellBg = '#f1f5f9';
-                                                    cellColor = '#64748b';
-                                                } else if (cellVal === 'A') {
-                                                    cellBg = '#fee2e2';
-                                                    cellColor = '#b91c1c';
-                                                } else if (['L', 'PL', 'SL'].includes(cellVal)) {
-                                                    cellBg = '#fdf2f8';
-                                                    cellColor = '#db2777';
-                                                }
-
-                                                return (
-                                                    <td 
-                                                        key={d} 
-                                                        style={{ 
-                                                            padding: '2px', 
-                                                            borderLeft: borderStyle,
-                                                            background: cellBg,
-                                                            position: 'relative'
-                                                        }}
-                                                    >
-                                                        <input
-                                                            type="text"
-                                                            value={cellVal}
-                                                            onChange={(e) => handleCellChange(site.site_id, guard.employee_id, d, e.target.value)}
-                                                            style={{
-                                                                width: '100%',
-                                                                height: '28px',
-                                                                background: 'transparent',
-                                                                border: 'none',
-                                                                textAlign: 'center',
-                                                                color: cellColor,
-                                                                fontWeight: 800,
-                                                                fontSize: '0.85rem',
-                                                                outline: 'none',
-                                                                cursor: 'pointer'
-                                                            }}
-                                                        />
-                                                    </td>
-                                                );
-                                            })}
-
-                                            <td style={{ padding: '6px 4px', borderLeft: '2px solid #cbd5e1', fontWeight: 800, color: '#15803d', background: '#f0fdf4' }}>{guard.total_present}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#2563eb', background: '#eff6ff' }}>{guard.total_ot}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#6d28d9', background: '#f5f3ff' }}>{guard.total_od || 0}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#0f766e', background: '#f0fdfa' }}>{guard.total_ds}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 700, color: '#64748b' }}>{guard.total_wo + guard.total_leave}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0', fontWeight: 800, color: '#059669', background: '#ecfdf5' }}>{guard.payable_days}</td>
-                                            <td style={{ padding: '6px 4px', borderLeft: '1px solid #e2e8f0' }}>
-                                                <button
-                                                    onClick={() => handleRemoveGuard(site.site_id, guard.employee_id, guard.name)}
-                                                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px', fontSize: '1.1rem' }}
-                                                    title="Remove Guard from site roster"
-                                                >
-                                                    <i className='bx bx-trash'></i>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
+                                {!isFrozen && (
+                                    <button
+                                        onClick={() => {
+                                            setActiveAddSiteId(site.site_id);
+                                            setSelectedRequirementIndex(0);
+                                            setGuardSearch('');
+                                        }}
+                                        style={{ 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            gap: '6px', 
+                                            background: '#ffffff', 
+                                            color: '#059669', 
+                                            border: 'none', 
+                                            padding: '7px 16px', 
+                                            borderRadius: '6px', 
+                                            fontWeight: 800, 
+                                            fontSize: '0.88rem', 
+                                            cursor: 'pointer', 
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)' 
+                                        }}
+                                    >
+                                        <i className='bx bx-user-plus'></i> Add Guard
+                                    </button>
                                 )}
 
-                                {/* Red Paid Vacations Summary Row (Matching Screenshot) */}
-                                <tr style={{ background: '#fef2f2', borderTop: '2px solid #fca5a5', color: '#b91c1c', fontWeight: 800 }}>
-                                    <td colSpan={4} style={{ padding: '8px 14px', textAlign: 'left', position: 'sticky', left: 0, background: '#fef2f2', zIndex: 2 }}>
-                                        Paid Vac / Leaves
-                                    </td>
-                                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
-                                        <td key={d} style={{ padding: '4px', borderLeft: '1px solid #fecaca' }}>
-                                            {site.daily_vacations[String(d)] || 0}
-                                        </td>
-                                    ))}
-                                    <td colSpan={7} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
-                                </tr>
+                                {/* Location Header Direct Save Button */}
+                                {!isFrozen && (
+                                    <button
+                                        onClick={handleSaveChanges}
+                                        disabled={saving || (dirtyUpdates.size === 0 && addedGuards.length === 0 && removedGuards.length === 0)}
+                                        style={{ 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            gap: '6px', 
+                                            background: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#ffffff' : 'rgba(255, 255, 255, 0.25)', 
+                                            color: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '#059669' : 'rgba(255, 255, 255, 0.7)', 
+                                            border: 'none', 
+                                            padding: '7px 16px', 
+                                            borderRadius: '6px', 
+                                            fontWeight: 800, 
+                                            fontSize: '0.88rem', 
+                                            cursor: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? 'pointer' : 'default', 
+                                            boxShadow: (dirtyUpdates.size > 0 || addedGuards.length > 0 || removedGuards.length > 0) ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
+                                            transition: 'all 0.15s ease'
+                                        }}
+                                        title="Save changes across all locations"
+                                    >
+                                        <i className='bx bx-save'></i> {saving ? 'Saving...' : 'Save Changes'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
 
-                                {/* Daily Shifts Fulfilled Row (Matches Client Site Requirements) */}
-                                <tr style={{ background: '#ecfdf5', borderTop: '2px solid #6ee7b7', color: '#047857', fontWeight: 900 }}>
-                                    <td colSpan={4} style={{ padding: '8px 14px', textAlign: 'left', position: 'sticky', left: 0, background: '#ecfdf5', zIndex: 2 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                            <span>Total Shifts Fulfilled</span>
-                                            <span style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.85, background: 'rgba(5, 150, 105, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                                                P=1 | PO=2 | POD=2
-                                            </span>
-                                        </div>
-                                    </td>
-                                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
-                                        <td key={d} style={{ padding: '4px', borderLeft: '1px solid #a7f3d0' }}>
-                                            {site.daily_totals[String(d)] || 0}
-                                        </td>
-                                    ))}
-                                    <td colSpan={7} style={{ borderLeft: '2px solid #cbd5e1' }}></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        {/* Date Header Line (Sticks right below Green Location Banner) */}
+                        {!isCollapsed && (
+                            <div style={{ 
+                                display: 'flex', 
+                                width: '100%', 
+                                maxWidth: '100%',
+                                background: '#f8fafc', 
+                                borderBottom: '2px solid #cbd5e1',
+                                borderTop: '1px solid rgba(0,0,0,0.05)',
+                                boxSizing: 'border-box'
+                            }}>
+                                {/* Fixed Left Columns (362px): # (40px), Code (72px), Desig (60px), Guard Name (190px) */}
+                                <div style={{ 
+                                    width: '362px', 
+                                    minWidth: '362px', 
+                                    maxWidth: '362px', 
+                                    flexShrink: 0,
+                                    display: 'flex', 
+                                    height: '40px',
+                                    background: '#f8fafc', 
+                                    borderRight: '2px solid #cbd5e1', 
+                                    boxShadow: '4px 0 8px rgba(0, 0, 0, 0.08)',
+                                    zIndex: 2,
+                                    boxSizing: 'border-box'
+                                }}>
+                                    <div style={{ width: '40px', minWidth: '40px', maxWidth: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#475569', borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }}>#</div>
+                                    <div style={{ width: '72px', minWidth: '72px', maxWidth: '72px', display: 'flex', alignItems: 'center', paddingLeft: '8px', fontWeight: 700, color: '#475569', borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }}>Code</div>
+                                    <div style={{ width: '60px', minWidth: '60px', maxWidth: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#475569', borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }}>Desig</div>
+                                    <div style={{ width: '190px', minWidth: '190px', maxWidth: '190px', display: 'flex', alignItems: 'center', paddingLeft: '12px', fontWeight: 700, color: '#475569', boxSizing: 'border-box' }}>Guard Name</div>
+                                </div>
+
+                                {/* Horizontally Scrollable Days (1..31) + Summary Headers */}
+                                <div 
+                                    ref={(el) => { headerRefs.current[site.site_id] = el; }}
+                                    onScroll={(e) => syncBodyScroll(site.site_id, e.currentTarget.scrollLeft)}
+                                    onWheel={(e) => {
+                                        const bdy = bodyRefs.current[site.site_id];
+                                        if (bdy && e.deltaX) {
+                                            bdy.scrollLeft += e.deltaX;
+                                        }
+                                    }}
+                                    style={{ 
+                                        flex: '1 1 0px', 
+                                        minWidth: 0,
+                                        maxWidth: '100%',
+                                        overflowX: 'hidden', 
+                                        display: 'flex',
+                                        height: '40px',
+                                        boxSizing: 'border-box'
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', width: `${daysInMonth * 34 + 296}px`, minWidth: `${daysInMonth * 34 + 296}px`, maxWidth: `${daysInMonth * 34 + 296}px`, flexShrink: 0, height: '40px' }}>
+                                        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                                            const isTodayHeader = (d === todayDay);
+                                            return (
+                                                <div 
+                                                    key={d} 
+                                                    style={{ 
+                                                        width: '34px', 
+                                                        minWidth: '34px', 
+                                                        maxWidth: '34px', 
+                                                        display: 'flex', 
+                                                        alignItems: 'center', 
+                                                        justifyContent: 'center', 
+                                                        background: isTodayHeader ? '#ecfdf5' : '#f8fafc',
+                                                        color: isTodayHeader ? '#059669' : '#334155',
+                                                        fontWeight: isTodayHeader ? 800 : 700,
+                                                        borderRight: '1px solid #e2e8f0',
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                >
+                                                    {d}
+                                                </div>
+                                            );
+                                        })}
+                                        <div style={{ width: '40px', minWidth: '40px', maxWidth: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', fontWeight: 800, borderRight: '1px solid #e2e8f0', borderLeft: '2px solid #cbd5e1', boxSizing: 'border-box' }} title="Total Present shifts">P</div>
+                                        <div style={{ width: '40px', minWidth: '40px', maxWidth: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb', fontWeight: 800, borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }} title="Total Active Overtime shifts">O</div>
+                                        <div style={{ width: '40px', minWidth: '40px', maxWidth: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6d28d9', fontWeight: 800, borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }} title="Total Overtime Dozing shifts">OD</div>
+                                        <div style={{ width: '40px', minWidth: '40px', maxWidth: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0f766e', fontWeight: 800, borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }} title="Worked on Weekly Off">WP</div>
+                                        <div style={{ width: '45px', minWidth: '45px', maxWidth: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontWeight: 800, borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }} title="Weekly Off / Leave">W/L</div>
+                                        <div style={{ width: '55px', minWidth: '55px', maxWidth: '55px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', fontWeight: 800, borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }} title="Total Payable Days">Pay Days</div>
+                                        <div style={{ width: '36px', minWidth: '36px', maxWidth: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontWeight: 700, borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }}>Act</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
+
+                    {/* Table Spreadsheet Matrix with horizontal freeze panes */}
+                    {!isCollapsed && (
+                        <div style={{ 
+                            borderRadius: '0 0 12px 12px',
+                            background: 'var(--color-surface, #ffffff)',
+                            position: 'relative',
+                            boxSizing: 'border-box',
+                            overflow: 'hidden'
+                        }}>
+                            {site.guards.length === 0 ? (
+                                <div style={{ 
+                                    padding: '36px 20px', 
+                                    color: '#94a3b8', 
+                                    textAlign: 'center', 
+                                    background: '#ffffff', 
+                                    borderBottom: '1px solid #e2e8f0',
+                                    borderRadius: '0 0 12px 12px' 
+                                }}>
+                                    No guards currently deployed at this site for {month}/{year}. {!isFrozen && <span>Click <strong>[ + Add Guard ]</strong> above to assign personnel.</span>}
+                                </div>
+                            ) : (
+                                <div style={{ 
+                                    display: 'flex', 
+                                    width: '100%', 
+                                    maxWidth: '100%', 
+                                    position: 'relative',
+                                    boxSizing: 'border-box'
+                                }}>
+                                    {/* Left Frozen Pane (362px): # (40px), Code (72px), Desig (60px), Guard Name (190px) */}
+                                    <div style={{
+                                        width: '362px',
+                                        minWidth: '362px',
+                                        maxWidth: '362px',
+                                        flexShrink: 0,
+                                        background: '#ffffff',
+                                        borderRight: '2px solid #cbd5e1',
+                                        boxShadow: '4px 0 8px rgba(0, 0, 0, 0.08)',
+                                        zIndex: 5,
+                                        boxSizing: 'border-box'
+                                    }}>
+                                        <table style={{
+                                            width: '362px',
+                                            minWidth: '362px',
+                                            maxWidth: '362px',
+                                            tableLayout: 'fixed',
+                                            borderCollapse: 'separate',
+                                            borderSpacing: 0,
+                                            fontSize: '0.82rem',
+                                            textAlign: 'center',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            <colgroup>
+                                                <col style={{ width: '40px' }} />
+                                                <col style={{ width: '72px' }} />
+                                                <col style={{ width: '60px' }} />
+                                                <col style={{ width: '190px' }} />
+                                            </colgroup>
+                                            <tbody>
+                                                {site.guards.map((guard, idx) => {
+                                                    const rowKey = `${site.site_id}_${guard.employee_id}`;
+                                                    const isHovered = (hoveredRowKey === rowKey);
+                                                    const rowBg = isHovered ? '#f1f5f9' : (idx % 2 === 0 ? '#ffffff' : '#f8fafc');
+                                                    return (
+                                                        <tr
+                            key={guard.employee_id}
+                            onMouseEnter={() => setHoveredRowKey(rowKey)}
+                            onMouseLeave={() => setHoveredRowKey(null)}
+                            style={{ height: '44px', background: rowBg, transition: 'background-color 0.1s ease' }}
+                        >
+                            <td style={{
+                                padding: '6px 4px',
+                                width: '40px',
+                                minWidth: '40px',
+                                maxWidth: '40px',
+                                height: '44px',
+                                color: '#94a3b8',
+                                fontWeight: 600,
+                                textAlign: 'center',
+                                verticalAlign: 'middle',
+                                borderBottom: '1px solid #e2e8f0',
+                                borderRight: '1px solid #e2e8f0',
+                                boxSizing: 'border-box'
+                            }}>
+                                {idx + 1}
+                            </td>
+                            <td style={{
+                                padding: '6px 8px',
+                                width: '72px',
+                                minWidth: '72px',
+                                maxWidth: '72px',
+                                height: '44px',
+                                fontWeight: 800,
+                                color: '#0284c7',
+                                textAlign: 'left',
+                                verticalAlign: 'middle',
+                                borderBottom: '1px solid #e2e8f0',
+                                borderRight: '1px solid #e2e8f0',
+                                boxSizing: 'border-box'
+                            }}>
+                                {guard.employee_code}
+                            </td>
+                            <td style={{
+                                padding: '4px 2px',
+                                width: '60px',
+                                minWidth: '60px',
+                                maxWidth: '60px',
+                                height: '44px',
+                                textAlign: 'center',
+                                verticalAlign: 'middle',
+                                borderBottom: '1px solid #e2e8f0',
+                                borderRight: '1px solid #e2e8f0',
+                                boxSizing: 'border-box'
+                            }}>
+                                {(() => {
+                                    const dCode = normalizeDesigCode(guard.designation_full, guard.designation);
+                                    const style = getDesigBadgeStyle(dCode);
+                                    const sub = getGuardSubBadge(guard, site.requirements);
+                                    const subStyle = sub ? getSubBadgeStyle(sub) : null;
+                                    return (
+                                        <div style={{
+                                            display: 'inline-flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '2px',
+                                            lineHeight: 1
+                                        }}>
+                                            <span style={{ 
+                                                padding: '2px 6px', 
+                                                borderRadius: '4px', 
+                                                fontSize: '0.72rem', 
+                                                fontWeight: 800, 
+                                                background: style.bg, 
+                                                color: style.color, 
+                                                border: `1px solid ${style.border}`, 
+                                                letterSpacing: '0.3px', 
+                                                lineHeight: 1.1 
+                                            }}>
+                                                {dCode}
+                                            </span>
+                                            {sub && subStyle && (
+                                                <span 
+                                                    title={`${dCode} (${subStyle.label})`} 
+                                                    style={{ 
+                                                        padding: '1px 4px', 
+                                                        borderRadius: '3px', 
+                                                        fontSize: '0.58rem', 
+                                                        fontWeight: 800, 
+                                                        letterSpacing: '0.4px', 
+                                                        lineHeight: 1, 
+                                                        background: subStyle.bg, 
+                                                        color: subStyle.color, 
+                                                        border: `1px solid ${subStyle.border}`, 
+                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)' 
+                                                    }}
+                                                >
+                                                    {sub}
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+                            </td>
+                            <td style={{
+                                padding: '6px 12px',
+                                width: '190px',
+                                minWidth: '190px',
+                                maxWidth: '190px',
+                                height: '44px',
+                                textAlign: 'left',
+                                verticalAlign: 'middle',
+                                fontWeight: 700,
+                                color: 'var(--color-text, #0f172a)',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                borderBottom: '1px solid #e2e8f0',
+                                boxSizing: 'border-box'
+                            }} title={guard.name}>
+                                {guard.name}
+                            </td>
+                        </tr>
+                    );
+                })}
+
+                {/* Red Paid Vacations Summary Row (Left side label) */}
+                <tr style={{ background: '#fef2f2', color: '#b91c1c', fontWeight: 800, height: '38px' }}>
+                    <td 
+                        colSpan={4} 
+                        style={{ 
+                            padding: '8px 14px', 
+                            textAlign: 'left', 
+                            verticalAlign: 'middle',
+                            height: '38px',
+                            borderTop: '2px solid #fca5a5',
+                            borderBottom: '1px solid #fecaca',
+                            boxSizing: 'border-box'
+                        }}
+                    >
+                        Paid Vac / Leaves
+                    </td>
+                </tr>
+
+                {/* Daily Shifts Fulfilled Row (Left side label) */}
+                <tr style={{ background: '#ecfdf5', color: '#047857', fontWeight: 900, height: '38px' }}>
+                    <td 
+                        colSpan={4} 
+                        style={{ 
+                            padding: '8px 14px', 
+                            textAlign: 'left', 
+                            verticalAlign: 'middle',
+                            height: '38px',
+                            borderTop: '2px solid #6ee7b7',
+                            borderBottom: '1px solid #a7f3d0',
+                            boxSizing: 'border-box'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <span>Total Shifts Fulfilled</span>
+                            <span style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.85, background: 'rgba(5, 150, 105, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                P=1 | PO=2 | POD=2
+                            </span>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    {/* Right Scrollable Pane (Days 1..31 + Summaries) */}
+    <div 
+        ref={(el) => { bodyRefs.current[site.site_id] = el; }}
+        onScroll={(e) => syncHeaderScroll(site.site_id, e.currentTarget.scrollLeft)}
+        style={{ 
+            flex: '1 1 0px', 
+            minWidth: 0,
+            maxWidth: '100%',
+            overflowX: 'auto', 
+            background: 'var(--color-surface, #ffffff)',
+            boxSizing: 'border-box'
+        }}
+    >
+        <table style={{ 
+            width: `${daysInMonth * 34 + 296}px`, 
+            minWidth: `${daysInMonth * 34 + 296}px`, 
+            maxWidth: `${daysInMonth * 34 + 296}px`, 
+            borderCollapse: 'separate', 
+            borderSpacing: 0, 
+            fontSize: '0.82rem', 
+            textAlign: 'center',
+            tableLayout: 'fixed',
+            boxSizing: 'border-box'
+        }}>
+            <colgroup>
+                {Array.from({ length: daysInMonth }).map((_, i) => (
+                    <col key={i} style={{ width: '34px' }} />
+                ))}
+                <col style={{ width: '40px' }} />
+                <col style={{ width: '40px' }} />
+                <col style={{ width: '40px' }} />
+                <col style={{ width: '40px' }} />
+                <col style={{ width: '45px' }} />
+                <col style={{ width: '55px' }} />
+                <col style={{ width: '36px' }} />
+            </colgroup>
+            <tbody>
+                {site.guards.map((guard, idx) => {
+                    const rowKey = `${site.site_id}_${guard.employee_id}`;
+                    const isHovered = (hoveredRowKey === rowKey);
+                    const rowBg = isHovered ? '#f1f5f9' : (idx % 2 === 0 ? '#ffffff' : '#f8fafc');
+                    return (
+                        <tr 
+                            key={guard.employee_id} 
+                            onMouseEnter={() => setHoveredRowKey(rowKey)}
+                            onMouseLeave={() => setHoveredRowKey(null)}
+                            style={{ height: '44px', background: rowBg, transition: 'background-color 0.1s ease' }}
+                        >
+                            {/* Days 1 to 31 Interactive Input Cells */}
+                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                                const cellVal = guard.days[String(d)] || '';
+
+                                let cellBg = 'transparent';
+                                let cellColor = '#334155';
+
+                                if (cellVal === 'P' || cellVal === '1') {
+                                    cellBg = '#dcfce7';
+                                    cellColor = '#15803d';
+                                } else if (cellVal === 'O' || cellVal === 'OT') {
+                                    cellBg = '#dbeafe';
+                                    cellColor = '#1d4ed8';
+                                } else if (cellVal === 'OD') {
+                                    cellBg = '#ede9fe';
+                                    cellColor = '#6d28d9';
+                                } else if (cellVal === 'PO') {
+                                    cellBg = '#f3e8ff';
+                                    cellColor = '#7e22ce';
+                                } else if (cellVal === 'POD') {
+                                    cellBg = '#fae8ff';
+                                    cellColor = '#a21caf';
+                                } else if (cellVal === 'WP' || cellVal === 'D' || cellVal === 'WO+OT' || cellVal === 'DS') {
+                                    cellBg = '#ccfbf1';
+                                    cellColor = '#0f766e';
+                                } else if (cellVal === 'W' || cellVal === 'WO') {
+                                    cellBg = '#f1f5f9';
+                                    cellColor = '#64748b';
+                                } else if (cellVal === 'A') {
+                                    cellBg = '#fee2e2';
+                                    cellColor = '#b91c1c';
+                                } else if (['L', 'PL', 'SL'].includes(cellVal)) {
+                                    cellBg = '#fdf2f8';
+                                    cellColor = '#db2777';
+                                }
+
+                                return (
+                                    <td 
+                                        key={d} 
+                                        style={{ 
+                                            padding: '2px', 
+                                            width: '34px',
+                                            minWidth: '34px',
+                                            maxWidth: '34px', 
+                                            height: '44px',
+                                            verticalAlign: 'middle',
+                                            borderBottom: '1px solid #e2e8f0',
+                                            borderRight: '1px solid #e2e8f0',
+                                            background: cellBg,
+                                            position: 'relative',
+                                            boxSizing: 'border-box'
+                                        }}
+                                    >
+                                        <input
+                                            type="text"
+                                            value={cellVal}
+                                            disabled={isFrozen}
+                                            readOnly={isFrozen}
+                                            onChange={(e) => handleCellChange(site.site_id, guard.employee_id, d, e.target.value)}
+                                            style={{
+                                                width: '100%',
+                                                height: '28px',
+                                                background: 'transparent',
+                                                border: 'none',
+                                                textAlign: 'center',
+                                                color: cellColor,
+                                                fontWeight: 800,
+                                                fontSize: '0.85rem',
+                                                outline: 'none',
+                                                cursor: isFrozen ? 'not-allowed' : 'pointer'
+                                            }}
+                                        />
+                                    </td>
+                                );
+                            })}
+
+                            <td style={{ padding: '6px 4px', width: '40px', minWidth: '40px', maxWidth: '40px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', borderLeft: '2px solid #cbd5e1', fontWeight: 800, color: '#15803d', background: '#f0fdf4', boxSizing: 'border-box' }}>{guard.total_present}</td>
+                            <td style={{ padding: '6px 4px', width: '40px', minWidth: '40px', maxWidth: '40px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', fontWeight: 800, color: '#2563eb', background: '#eff6ff', boxSizing: 'border-box' }}>{guard.total_ot}</td>
+                            <td style={{ padding: '6px 4px', width: '40px', minWidth: '40px', maxWidth: '40px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', fontWeight: 800, color: '#6d28d9', background: '#f5f3ff', boxSizing: 'border-box' }}>{guard.total_od || 0}</td>
+                            <td style={{ padding: '6px 4px', width: '40px', minWidth: '40px', maxWidth: '40px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', fontWeight: 800, color: '#0f766e', background: '#f0fdfa', boxSizing: 'border-box' }}>{guard.total_ds}</td>
+                            <td style={{ padding: '6px 4px', width: '45px', minWidth: '45px', maxWidth: '45px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', fontWeight: 700, color: '#64748b', boxSizing: 'border-box' }}>{guard.total_wo + guard.total_leave}</td>
+                            <td style={{ padding: '6px 4px', width: '55px', minWidth: '55px', maxWidth: '55px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', fontWeight: 800, color: '#059669', background: '#ecfdf5', boxSizing: 'border-box' }}>{guard.payable_days}</td>
+                            <td style={{ padding: '6px 4px', width: '36px', minWidth: '36px', maxWidth: '36px', height: '44px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', boxSizing: 'border-box' }}>
+                                {!isFrozen ? (
+                                    <button
+                                        onClick={() => handleRemoveGuard(site.site_id, guard.employee_id, guard.name)}
+                                        style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px', fontSize: '1.1rem' }}
+                                        title="Remove Guard from site roster"
+                                    >
+                                        <i className='bx bx-trash'></i>
+                                    </button>
+                                ) : (
+                                    <i className='bx bx-lock-alt' style={{ color: '#94a3b8', fontSize: '0.95rem' }} title="Month is frozen (Locked)"></i>
+                                )}
+                            </td>
+                        </tr>
+                    );
+                })}
+
+                {/* Red Paid Vacations Summary Row */}
+                <tr style={{ background: '#fef2f2', color: '#b91c1c', fontWeight: 800, height: '38px' }}>
+                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
+                        <td key={d} style={{ padding: '4px', height: '38px', verticalAlign: 'middle', borderTop: '2px solid #fca5a5', borderBottom: '1px solid #fecaca', borderRight: '1px solid #fecaca', width: '34px', minWidth: '34px', maxWidth: '34px', boxSizing: 'border-box' }}>
+                            {site.daily_vacations[String(d)] || 0}
+                        </td>
+                    ))}
+                    <td colSpan={7} style={{ height: '38px', borderTop: '2px solid #fca5a5', borderBottom: '1px solid #fecaca', borderLeft: '2px solid #cbd5e1', background: '#fef2f2', boxSizing: 'border-box' }}></td>
+                </tr>
+
+                {/* Daily Shifts Fulfilled Row */}
+                <tr style={{ background: '#ecfdf5', color: '#047857', fontWeight: 900, height: '38px' }}>
+                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
+                        <td key={d} style={{ padding: '4px', height: '38px', verticalAlign: 'middle', borderTop: '2px solid #6ee7b7', borderBottom: '1px solid #a7f3d0', borderRight: '1px solid #a7f3d0', width: '34px', minWidth: '34px', maxWidth: '34px', boxSizing: 'border-box' }}>
+                            {site.daily_totals[String(d)] || 0}
+                        </td>
+                    ))}
+                    <td colSpan={7} style={{ height: '38px', borderTop: '2px solid #6ee7b7', borderBottom: '1px solid #a7f3d0', borderLeft: '2px solid #cbd5e1', background: '#ecfdf5', boxSizing: 'border-box' }}></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+                            )}
+                        </div>
+                    )}
                 </div>
-            ))}
+                );
+            })}
 
             {/* Modal: Add Guard to Site Block */}
             {activeAddSiteId && (() => {

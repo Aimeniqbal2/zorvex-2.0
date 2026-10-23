@@ -1332,6 +1332,11 @@ export const cleanupOrphanedAttendance = async (year?: number, month?: number): 
     return response.data;
 };
 
+export const freezeMonthlyMuster = async (year: number, month: number): Promise<any> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/freeze-month/', { year, month });
+    return response.data;
+};
+
 // Re-export apiClient for modal components
 export { apiClient } from '../../api/client';
 

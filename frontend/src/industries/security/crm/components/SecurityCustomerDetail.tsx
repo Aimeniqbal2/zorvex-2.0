@@ -677,12 +677,6 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         >
                             <i className='bx bx-envelope'></i> Send Email
                         </Button>
-                        <Button 
-                            variant="primary" 
-                            onClick={() => handleCreateRequirement()}
-                        >
-                            <i className='bx bx-clipboard'></i> Set Final Requirements
-                        </Button>
                     </div>
                 }
             />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type {
     SecurityProposal, ProposalVersion, ProposalServiceLine,
     ContractEquipmentRequirement, ProposalAdditionalCharge,
@@ -27,7 +27,6 @@ interface FinalProposalTabProps {
     serviceTypes: SecurityServiceType[];
     onRefresh: () => Promise<void>;
 }
-
 export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
     proposal,
     assessments,
@@ -144,6 +143,81 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
             });
         }
     }, [activeVersion?.id]);
+
+    // Live calculation engine for Costing & Taxes matching Fast Costing Grid / Sheet 1 formulas
+    const liveCosting = useMemo(() => {
+        const totalStrength = Number(activeVersion?.total_guard_strength ?? 0);
+        const monthlySale = Number(activeVersion?.total_monthly_sale ?? 0);
+        const monthlySalary = Number(activeVersion?.total_monthly_salary ?? 0);
+
+        const overheadPerGuard = Number(termsState.overhead_per_guard !== '' && termsState.overhead_per_guard !== undefined ? termsState.overhead_per_guard : (activeVersion?.overhead_per_guard ?? 6000));
+        const totalExpense = totalStrength * overheadPerGuard;
+
+        const serviceChargesPerGuard = Number(termsState.service_charges_per_guard !== '' && termsState.service_charges_per_guard !== undefined ? termsState.service_charges_per_guard : (activeVersion?.service_charges_per_guard ?? 0));
+        const totalServiceCharges = serviceChargesPerGuard;
+
+        // Sales Tax Engine (Matching Sheet 1 / Fast Costing Grid)
+        // 1. TOTAL_SALE: Total Monthly Sale × %
+        // 2. SERVICE_CHARGES: Total Count × Service Charges × %
+        // 3. MANUAL: Sales Tax Override in PKR
+        const stRate = Number(termsState.tax_rate !== '' && termsState.tax_rate !== undefined ? termsState.tax_rate : (activeVersion?.tax_rate ?? 8));
+        const rawStBasis = termsState.sales_tax_basis || activeVersion?.sales_tax_basis || 'TOTAL_SALE';
+        const stBasis = (rawStBasis as string) === 'INVOICE_AMOUNT' ? 'TOTAL_SALE' : rawStBasis;
+        let salesTax = 0;
+        if (stBasis === 'MANUAL') {
+            salesTax = Number(termsState.sales_tax_override !== '' && termsState.sales_tax_override !== undefined ? termsState.sales_tax_override : (activeVersion?.sales_tax_override ?? 0));
+        } else if (stBasis === 'SERVICE_CHARGES') {
+            const count = totalStrength > 0 ? totalStrength : 1;
+            salesTax = (count * serviceChargesPerGuard) * (stRate / 100);
+        } else {
+            salesTax = monthlySale * (stRate / 100);
+        }
+
+        const invoiceAmount = monthlySale + salesTax;
+
+        // Withholding Tax Engine (Matching Sheet 1 / Fast Costing Grid)
+        // 1. INVOICE_AMOUNT: Invoice Amount × %
+        // 2. SERVICE_CHARGES: Total Count × Service Charges × %
+        // 3. MANUAL: WHT Override in PKR
+        const whtRate = Number(termsState.withholding_tax_rate !== '' && termsState.withholding_tax_rate !== undefined ? termsState.withholding_tax_rate : (activeVersion?.withholding_tax_rate ?? 7));
+        const whtBasis = termsState.withholding_tax_basis || activeVersion?.withholding_tax_basis || 'INVOICE_AMOUNT';
+        let wht = 0;
+        if (whtBasis === 'MANUAL') {
+            wht = Number(termsState.withholding_tax_override !== '' && termsState.withholding_tax_override !== undefined ? termsState.withholding_tax_override : (activeVersion?.withholding_tax_override ?? 0));
+        } else if (whtBasis === 'SERVICE_CHARGES') {
+            const count = totalStrength > 0 ? totalStrength : 1;
+            wht = (count * serviceChargesPerGuard) * (whtRate / 100);
+        } else {
+            wht = invoiceAmount * (whtRate / 100);
+        }
+
+        const sessi = Number(termsState.total_sessi !== '' && termsState.total_sessi !== undefined ? termsState.total_sessi : (activeVersion?.total_sessi ?? 0));
+        const eobi = Number(termsState.total_eobi !== '' && termsState.total_eobi !== undefined ? termsState.total_eobi : (activeVersion?.total_eobi ?? 0));
+
+        const difference = monthlySale - monthlySalary - wht - sessi - eobi;
+        const diffPerHead = totalStrength > 0 ? (difference / totalStrength) : 0;
+        const profitLoss = monthlySale - monthlySalary - totalExpense - wht;
+
+        return {
+            totalStrength,
+            monthlySale,
+            monthlySalary,
+            overheadPerGuard,
+            totalExpense,
+            serviceChargesPerGuard,
+            totalServiceCharges,
+            salesTaxRate: stRate,
+            salesTax: Math.round(salesTax * 100) / 100,
+            invoiceAmount: Math.round(invoiceAmount * 100) / 100,
+            taxWhtRate: whtRate,
+            wht: Math.round(wht * 100) / 100,
+            sessi,
+            eobi,
+            difference: Math.round(difference * 100) / 100,
+            diffPerHead: Math.round(diffPerHead * 100) / 100,
+            profitLoss: Math.round(profitLoss * 100) / 100
+        };
+    }, [activeVersion, termsState]);
 
     const handleSaveTerms = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -883,7 +957,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                         className="fp-select"
                                     >
                                         <option value="TOTAL_SALE">Total Monthly Sale × %</option>
-                                        <option value="SERVICE_CHARGES">On Service Charges × %</option>
+                                        <option value="SERVICE_CHARGES">Total Count × Service Charges × %</option>
                                         <option value="MANUAL">Manual Entry (PKR)</option>
                                     </select>
                                     {termsState.sales_tax_basis === 'MANUAL' && (
@@ -1032,7 +1106,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Contract Strength</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#38bdf8' }}>
-                                    {activeVersion?.total_guard_strength ?? 0} Guards
+                                    {liveCosting.totalStrength} Guards
                                 </span>
                             </div>
                             <div className="fp-costing-line">
@@ -1040,7 +1114,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Total Monthly Sale</span>
                                 </div>
                                 <span className="val-col">
-                                    PKR {Number(activeVersion?.total_monthly_sale ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.monthlySale).toLocaleString()}
                                 </span>
                             </div>
                             <div className="fp-costing-line">
@@ -1048,7 +1122,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Total Guard Salary</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#fb923c' }}>
-                                    PKR {Number(activeVersion?.total_monthly_salary ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.monthlySalary).toLocaleString()}
                                 </span>
                             </div>
                         </div>
@@ -1061,7 +1135,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Operations Overhead</span>
                                 </div>
                                 <span className="val-col">
-                                    PKR {Number(activeVersion?.total_monthly_expense ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.totalExpense).toLocaleString()}
                                 </span>
                             </div>
                             <div className="fp-costing-line">
@@ -1069,15 +1143,15 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Service Charges</span>
                                 </div>
                                 <span className="val-col">
-                                    PKR {Number(activeVersion?.total_service_charges ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.totalServiceCharges).toLocaleString()}
                                 </span>
                             </div>
                             <div className="fp-costing-line">
                                 <div className="label-col">
-                                    <span>Sales Tax ({activeVersion?.tax_rate ?? 8}%)</span>
+                                    <span>Sales Tax ({liveCosting.salesTaxRate}%)</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#f59e0b' }}>
-                                    PKR {Number(activeVersion?.sales_tax_amount ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.salesTax).toLocaleString()}
                                 </span>
                             </div>
                             <div className="fp-costing-line">
@@ -1085,25 +1159,25 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Total Invoice Amount</span>
                                 </div>
                                 <span className="val-col" style={{ fontWeight: 700, color: 'var(--color-text)' }}>
-                                    PKR {Number(activeVersion?.total_invoice_amount ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.invoiceAmount).toLocaleString()}
                                 </span>
                             </div>
                             <div className="fp-costing-line">
                                 <div className="label-col">
-                                    <span>Tax WHT ({activeVersion?.withholding_tax_rate ?? 7}%)</span>
+                                    <span>Tax WHT ({liveCosting.taxWhtRate}%)</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#ef4444' }}>
-                                    PKR {Number(activeVersion?.withholding_tax_amount ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.wht).toLocaleString()}
                                 </span>
                             </div>
-                            {(Number(activeVersion?.total_sessi ?? 0) > 0 || Number(activeVersion?.total_eobi ?? 0) > 0) && (
+                            {(Number(liveCosting.sessi) > 0 || Number(liveCosting.eobi) > 0) && (
                                 <>
                                     <div className="fp-costing-line">
                                         <div className="label-col">
                                             <span>SESSI (Statutory)</span>
                                         </div>
                                         <span className="val-col">
-                                            PKR {Number(activeVersion?.total_sessi ?? 0).toLocaleString()}
+                                            PKR {Number(liveCosting.sessi).toLocaleString()}
                                         </span>
                                     </div>
                                     <div className="fp-costing-line">
@@ -1111,7 +1185,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                             <span>EOBI (Statutory)</span>
                                         </div>
                                         <span className="val-col">
-                                            PKR {Number(activeVersion?.total_eobi ?? 0).toLocaleString()}
+                                            PKR {Number(liveCosting.eobi).toLocaleString()}
                                         </span>
                                     </div>
                                 </>
@@ -1127,7 +1201,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Gross Margin</div>
                                 </div>
                                 <div style={{ fontSize: '16px', fontWeight: 800, fontFamily: 'monospace' }}>
-                                    PKR {Number(activeVersion?.total_difference ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.difference).toLocaleString()}
                                 </div>
                             </div>
 
@@ -1136,16 +1210,16 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <span>Margin Per Head</span>
                                 </div>
                                 <span className="val-col" style={{ color: '#818cf8', fontWeight: 700 }}>
-                                    PKR {Number(activeVersion?.difference_per_head ?? 0).toLocaleString()} / guard
+                                    PKR {Number(liveCosting.diffPerHead).toLocaleString()} / guard
                                 </span>
                             </div>
 
-                            <div className={`fp-costing-box-profit ${Number(activeVersion?.net_profit_loss ?? 0) >= 0 ? 'profit' : 'loss'}`}>
+                            <div className={`fp-costing-box-profit ${Number(liveCosting.profitLoss) >= 0 ? 'profit' : 'loss'}`}>
                                 <div>
                                     <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Net Profit / Loss</div>
                                 </div>
                                 <div style={{ fontSize: '18px', fontWeight: 800, fontFamily: 'monospace' }}>
-                                    PKR {Number(activeVersion?.net_profit_loss ?? 0).toLocaleString()}
+                                    PKR {Number(liveCosting.profitLoss).toLocaleString()}
                                 </div>
                             </div>
                         </div>
@@ -1283,7 +1357,7 @@ export const FinalProposalTab: React.FC<FinalProposalTabProps> = ({
                                     <div className="fp-grand-total-sub">Total commercial proposal offer</div>
                                 </div>
                                 <div className="fp-grand-total-amount">
-                                    PKR {Number(activeVersion?.total_invoice_amount || 0).toLocaleString()}
+                                    PKR {Number(liveCosting.invoiceAmount || activeVersion?.total_invoice_amount || 0).toLocaleString()}
                                 </div>
                             </div>
                         </div>
