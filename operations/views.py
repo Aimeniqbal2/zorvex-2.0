@@ -4376,6 +4376,39 @@ class MonthlyMusterCleanupOrphanedAttendanceView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+class MonthlyMusterFreezeMonthView(APIView):
+    """
+    POST /api/operations/monthly-muster/freeze-month/
+    Locks and freezes all attendance and duty pay for the given month, creating immutable historical payroll records.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        company = _resolve_company_for_api_view(request)
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        year = request.data.get('year')
+        month = request.data.get('month')
+        if not year or not month:
+            return Response({'detail': 'Both year and month are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid year or month format.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            res = MonthlyMusterService.freeze_month(company=company, year=year, month=month, user=request.user)
+            return Response(res, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception("Error freezing monthly muster: %s", e)
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 
 
 

@@ -64,6 +64,100 @@ class MonthlyMusterService:
             return 'GD'
 
     @staticmethod
+    def get_site_guard_daily_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None, fallback_monthly_salary=None):
+        """
+        Dynamically resolve base daily rate for a guard at this site & designation,
+        prioritizing CRM ProposalServiceLine (Location Guard Salary / days_in_month).
+        """
+        return MonthlyMusterService.get_site_overtime_rate(
+            site=site,
+            desig=desig,
+            days_in_month=days_in_month,
+            prefetched_lines=prefetched_lines,
+            prefetched_posts=prefetched_posts,
+            fallback_monthly_salary=fallback_monthly_salary
+        )
+
+    @staticmethod
+    def recalculate_unfrozen_duties_for_site(site, year=None, month=None):
+        """
+        Dynamically recalculates all un-frozen DailyDutyPay records for a site,
+        updating rates, amounts, and audit notes from the latest CRM ProposalServiceLine.
+        """
+        if not site:
+            return 0
+        import calendar
+        from operations.models import DailyDutyPay, AttendanceStatus, DutyType, Deployment
+
+        qs = DailyDutyPay.objects.filter(
+            site=site,
+            is_frozen=False,
+            is_deleted=False
+        ).select_related('employee', 'employee__designation')
+
+        if year and month:
+            qs = qs.filter(duty_date__year=year, duty_date__month=month)
+
+        updated_count = 0
+        deps = list(Deployment.objects.filter(site=site, is_deleted=False).select_related('designation', 'post'))
+        deps_map = {str(d.employee_id): d for d in deps}
+
+        for ddp in qs:
+            target_date = ddp.duty_date
+            emp = ddp.employee
+            days_in_month = calendar.monthrange(target_date.year, target_date.month)[1]
+            guard_dep = deps_map.get(str(emp.id))
+            effective_desig = guard_dep.designation if guard_dep and guard_dep.designation else emp.designation
+            fallback_sal = (guard_dep.location_monthly_salary if guard_dep and guard_dep.location_monthly_salary else (guard_dep.post.monthly_pay_rate if guard_dep and guard_dep.post and guard_dep.post.monthly_pay_rate else None))
+
+            daily_rate = MonthlyMusterService.get_site_guard_daily_rate(
+                site=site,
+                desig=effective_desig,
+                days_in_month=days_in_month,
+                fallback_monthly_salary=fallback_sal
+            )
+            dozing_rate = MonthlyMusterService.get_site_dozing_overtime_rate(site=site, desig=effective_desig)
+
+            # Update according to attendance status and duty type
+            if ddp.attendance_status == AttendanceStatus.OVERTIME_DOZING:
+                ddp.daily_payable_rate = dozing_rate
+                ddp.payable_amount = dozing_rate
+                ddp.notes = f"Muster: Overtime Dozing Shift at {site.name}"
+            elif ddp.duty_type == DutyType.OVERTIME or ddp.attendance_status == AttendanceStatus.OVERTIME:
+                ddp.daily_payable_rate = daily_rate
+                ddp.payable_amount = daily_rate
+                ddp.notes = f"Muster: Active Overtime Shift at {site.name}"
+            elif ddp.attendance_status in [AttendanceStatus.WORKED_WEEKLY_OFF, AttendanceStatus.DOUBLE_SHIFT]:
+                wp_total = (daily_rate * Decimal('2.00')).quantize(Decimal('0.01'))
+                ddp.daily_payable_rate = daily_rate
+                ddp.payable_amount = wp_total
+                ddp.notes = f"Muster: Worked on Week Off (Double Pay: Base {daily_rate} + Base {daily_rate}) at {site.name}"
+            elif ddp.attendance_status == AttendanceStatus.PRESENT:
+                ddp.daily_payable_rate = daily_rate
+                ddp.payable_amount = daily_rate
+                ddp.notes = f"Muster: Primary Shift at {site.name}"
+            elif ddp.attendance_status in [AttendanceStatus.WEEKLY_OFF, AttendanceStatus.OFF_DAY, AttendanceStatus.HOLIDAY]:
+                ddp.daily_payable_rate = daily_rate
+                ddp.payable_amount = daily_rate
+                ddp.notes = f"Muster: Scheduled Weekly Off at {site.name}"
+            elif ddp.attendance_status in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]:
+                ddp.daily_payable_rate = daily_rate
+                ddp.payable_amount = Decimal('0.00')
+                if ddp.attendance_status == AttendanceStatus.ABSENT:
+                    ddp.notes = f"Muster: Absent at {site.name}"
+                else:
+                    ddp.notes = f"Muster: Unpaid Leave at {site.name}"
+            else:
+                pct = ddp.payable_percentage or Decimal('100.00')
+                ddp.daily_payable_rate = daily_rate
+                ddp.payable_amount = (daily_rate * (pct / Decimal('100.00'))).quantize(Decimal('0.01'))
+
+            ddp.save(update_fields=['daily_payable_rate', 'payable_amount', 'notes', 'updated_at'])
+            updated_count += 1
+
+        return updated_count
+
+    @staticmethod
     def get_site_overtime_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None, fallback_monthly_salary=None):
         """
         Active Overtime (O) rate.
@@ -644,11 +738,20 @@ class MonthlyMusterService:
                 'daily_vacations': {str(k): v for k, v in daily_vacations.items()},
             })
 
+        is_frozen = DailyDutyPay.objects.filter(
+            company=company,
+            duty_date__gte=start_date,
+            duty_date__lte=end_date,
+            is_frozen=True,
+            is_deleted=False
+        ).exists()
+
         return {
             'year': year,
             'month': month,
             'days_in_month': days_in_month,
             'today_day': current_day if is_current_month else (days_in_month if today > end_date else 1),
+            'is_frozen': is_frozen,
             'sites': site_blocks
         }
 
@@ -676,6 +779,16 @@ class MonthlyMusterService:
         with transaction.atomic():
             start_date = date(year, month, 1)
             end_date = date(year, month, days_in_month)
+
+            is_frozen = DailyDutyPay.objects.filter(
+                company=company,
+                duty_date__gte=start_date,
+                duty_date__lte=end_date,
+                is_frozen=True,
+                is_deleted=False
+            ).exists()
+            if is_frozen:
+                raise ValidationError({'detail': 'This month is permanently frozen and locked for payroll. Changes cannot be saved.'})
 
             # 2. Process Removed Guards
             for rm in removed_guards:
@@ -804,14 +917,13 @@ class MonthlyMusterService:
                 effective_post = guard_dep.post if guard_dep and guard_dep.post else None
                 effective_desig = guard_dep.designation if guard_dep and guard_dep.designation else emp.designation
 
-                if guard_dep and guard_dep.location_monthly_salary:
-                    site_monthly_sal = guard_dep.location_monthly_salary
-                elif effective_post and effective_post.monthly_pay_rate:
-                    site_monthly_sal = effective_post.monthly_pay_rate
-                else:
-                    site_monthly_sal = Decimal('35000.00')
-
-                daily_rate = (site_monthly_sal / Decimal(str(days_in_month))).quantize(Decimal('0.01'))
+                # Dynamically resolve daily rate prioritizing CRM ProposalServiceLine (Location Guard Salary)
+                daily_rate = MonthlyMusterService.get_site_guard_daily_rate(
+                    site,
+                    desig=effective_desig,
+                    fallback_monthly_salary=(guard_dep.location_monthly_salary if guard_dep and guard_dep.location_monthly_salary else (effective_post.monthly_pay_rate if effective_post and effective_post.monthly_pay_rate else None)),
+                    days_in_month=days_in_month
+                )
                 # Active Overtime (O) rate strictly equals 1 full day base salary, identical to Present (P)
                 ot_rate = daily_rate
                 # Overtime Dozing (OD) rate strictly reads manual amount from CRM ProposalServiceLine
@@ -1567,4 +1679,38 @@ class MonthlyMusterService:
             'cleaned_attendances': att_count,
             'message': f"Cleaned up {ddp_count} duty records and {att_count} attendance records from deleted/inactive sites."
         }
+
+    @staticmethod
+    def freeze_month(company, year: int, month: int, user=None):
+        """
+        Permanently freezes all DailyDutyPay and WorkforceAttendance records for the given month.
+        Once frozen, records cannot be modified or overwritten by CRM rate updates or muster edits.
+        """
+        days_in_month = calendar.monthrange(year, month)[1]
+        start_date = date(year, month, 1)
+        end_date = date(year, month, days_in_month)
+
+        with transaction.atomic():
+            count = DailyDutyPay.objects.filter(
+                company=company,
+                duty_date__gte=start_date,
+                duty_date__lte=end_date,
+                is_deleted=False
+            ).update(is_frozen=True)
+
+            WorkforceAttendance.objects.filter(
+                company=company,
+                date__gte=start_date,
+                date__lte=end_date,
+                is_deleted=False
+            ).update(is_finalized=True)
+
+        return {
+            'status': 'success',
+            'year': year,
+            'month': month,
+            'frozen_records_count': count,
+            'message': f"Monthly Duty Muster records for {month}/{year} are permanently frozen and closed."
+        }
+
 

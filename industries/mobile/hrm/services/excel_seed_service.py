@@ -159,8 +159,77 @@ class MobileExcelSeedService:
                 }
             )
 
+        # Seed Company Policy
+        from ..models import CompanyPolicy, OnboardingCandidate, DEFAULT_SOFTECH_POLICY
+        from datetime import date
+        CompanyPolicy.objects.get_or_create(
+            company=company,
+            title='Rules & Regulations',
+            defaults={
+                'content': DEFAULT_SOFTECH_POLICY,
+                'version': '1.0',
+                'is_active': True,
+                'created_by_name': 'Sheikh Muhammad Afnan (CEO)'
+            }
+        )
+
+        # Seed Sample Onboarding Candidates (from Softech Appointment Letters)
+        OnboardingCandidate.objects.get_or_create(
+            company=company,
+            full_name='Shahzaib Akbar',
+            defaults={
+                'phone': '0300-1234567',
+                'address': '1st floor Shop#169 Star City Mall, Saddar, Karachi.',
+                'position': 'W.O (Management)',
+                'department_type': MobileDepartment.MANAGEMENT,
+                'offered_salary': Decimal('18000.00'),
+                'allowance': '-',
+                'backup_work': 'W.O (Management)',
+                'working_hours': '11:00 to 9:00 (Closing)',
+                'notice_period': 'One Month',
+                'appointment_date': date(2025, 6, 11),
+                'appointment_month': 'June',
+                'ceo_name': 'Sheikh Muhammad Afnan',
+                'director_name': 'Shahzaib Ali',
+                'status': 'OFFERED',
+                'first_week_checklist': {
+                    'induction': True,
+                    'toolset_assigned': True,
+                    'policy_signed': True,
+                    'login_created': False
+                }
+            }
+        )
+
+        OnboardingCandidate.objects.get_or_create(
+            company=company,
+            full_name='Subhan Shaikh',
+            defaults={
+                'phone': '0321-9876543',
+                'address': '1st floor Shop#169 Star City Mall, Saddar, Karachi.',
+                'position': 'Mobile Hardware Technician',
+                'department_type': MobileDepartment.HARDWARE,
+                'offered_salary': Decimal('20000.00'),
+                'allowance': 'Travel 1000 Pkr/= (Every Week)',
+                'backup_work': '-',
+                'working_hours': '11:00 to 9:00',
+                'notice_period': 'One – Two Month',
+                'appointment_date': date(2025, 10, 1),
+                'appointment_month': 'October',
+                'ceo_name': 'Sheikh Muhammad Afnan',
+                'director_name': 'Shahzaib Ali',
+                'status': 'OFFERED',
+                'first_week_checklist': {
+                    'induction': True,
+                    'toolset_assigned': True,
+                    'policy_signed': True,
+                    'login_created': True
+                }
+            }
+        )
+
         return {
             'status': 'success',
             'seeded_employees': len(created_employees),
-            'message': f"Successfully seeded {len(created_employees)} technicians and September 2026 attendance/payroll."
+            'message': f"Successfully seeded {len(created_employees)} technicians, policies, onboarding candidates, and September 2026 attendance/payroll."
         }

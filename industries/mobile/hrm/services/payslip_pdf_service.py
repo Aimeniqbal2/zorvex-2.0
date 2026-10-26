@@ -1,11 +1,12 @@
 import io
+import os
 from decimal import Decimal
 from datetime import date
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -153,10 +154,40 @@ class MobilePayslipPDFService:
 
         story = []
 
-        # Company Header
+        # Company Header with Logo support
         company_name = company.name if company else "SOFTECH Mobile Pvt Limited"
-        story.append(Paragraph(company_name.upper(), title_style))
-        story.append(Paragraph("Mobile Sales, Services & Technical Repair Lab", subtitle_style))
+        logo_flowable = None
+        if company and getattr(company, 'logo', None):
+            try:
+                if hasattr(company.logo, 'path') and os.path.exists(company.logo.path):
+                    logo_flowable = Image(company.logo.path, width=1.1 * inch, height=0.55 * inch)
+            except Exception:
+                logo_flowable = None
+
+        if logo_flowable:
+            hdr_table = Table(
+                [
+                    [
+                        logo_flowable,
+                        [
+                            Paragraph(company_name.upper(), title_style),
+                            Paragraph("Mobile Sales, Services & Technical Repair Lab", subtitle_style),
+                        ]
+                    ]
+                ],
+                colWidths=[90, 450]
+            )
+            hdr_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            story.append(hdr_table)
+        else:
+            story.append(Paragraph(company_name.upper(), title_style))
+            story.append(Paragraph("Mobile Sales, Services & Technical Repair Lab", subtitle_style))
+
         story.append(Spacer(1, 6))
         story.append(Paragraph(f"SALARY SLIP — {month_label.upper()}", badge_style))
         story.append(Spacer(1, 14))

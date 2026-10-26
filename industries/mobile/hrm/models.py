@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import models
+from django.utils import timezone
 from erp_core.models import BaseModel
 
 class MobileDepartment(models.TextChoices):
@@ -61,6 +62,15 @@ class TechnicianProfile(BaseModel):
     phone_2_model = models.CharField(max_length=100, blank=True, default='')
     phone_2_imei_1 = models.CharField(max_length=50, blank=True, default='')
     phone_2_imei_2 = models.CharField(max_length=50, blank=True, default='')
+
+    # Extended Personal Details & Shop Records
+    cnic = models.CharField(max_length=30, blank=True, default='')
+    emergency_contact_name = models.CharField(max_length=100, blank=True, default='')
+    emergency_contact_phone = models.CharField(max_length=50, blank=True, default='')
+    residential_address = models.TextField(blank=True, default='')
+    blood_group = models.CharField(max_length=10, blank=True, default='')
+    photo_url = models.CharField(max_length=500, blank=True, default='')
+    document_urls = models.JSONField(default=list, blank=True, help_text="Uploaded docs: [{'name': 'CNIC Front', 'url': '...'}, ...]")
 
     class Meta:
         ordering = ['employee__first_name']
@@ -251,3 +261,185 @@ class MobileMonthlyPayroll(BaseModel):
 
     def __str__(self):
         return f"{self.employee.first_name} Payroll {self.year}-{self.month:02d}: Net Rs. {self.gross_total}"
+
+
+DEFAULT_SOFTECH_POLICY = """SOFTECH MOBILE (SERVICE & SALE)
+Rules & Regulations
+
+1. If An Employee comes whole month on time (1 or 2 Late) with 0 Uninformed holiday in a month, they will be rewarded with Rs. 1,000 Bonus Amount with salary.
+2. If An Employee comes whole month with Zero Holiday, they will be Rewarded 1 Full Day of Salary.
+3. Employees have relief of 10 minutes in their shift time before being marked Late (L).
+4. Last time to enter in lab is 01:00 hour after shift start time for Technical / W.O Staff.
+5. 1 Half Day quota per month is allowed with prior approval and confirmation.
+6. Request permission 2 days before for Half Day. Once administration approves, confirmation will be issued. (Consistent late or non-punctuality will lead to warnings).
+7. Example for Half Day: Request permission on 01 January or before for Half Day required on 03 January.
+8. Penalty of Rs. 1,000 will be imposed on unapproved holiday / absence.
+9. Saturday unapproved holiday will mark Sunday holiday as well.
+10. Personal private work is strictly not allowed at the work place.
+11. Personal mobile phones will be repaired free of cost (labour charge waived).
+12. Friday / Ramzan prayers will be offered in groups, one technician from each table at a time.
+13. No PD & Salary Advances / Loans will be provided without executive management approval.
+14. External mobile phones / customer devices are not allowed in the work area except assigned testing devices. Any unauthorized device found will be dealt with strictly.
+15. All departments are divided (Hardware, Software, Panel/Glass, Sales, Management); staff should focus strictly on their designated departmental duties.
+16. Consistent lateness and uninformed holidays will result in formal disciplinary warnings."""
+
+
+class CompanyPolicy(BaseModel):
+    """
+    Company-wide Rules & Regulations policy.
+    Editable by Company Admin, branded with company logo and name, auto-propagates across tenant.
+    """
+    title = models.CharField(max_length=255, default='Rules & Regulations')
+    content = models.TextField(default=DEFAULT_SOFTECH_POLICY)
+    effective_date = models.DateField(default=timezone.localdate)
+    version = models.CharField(max_length=20, default='1.0')
+    is_active = models.BooleanField(default=True)
+    created_by_name = models.CharField(max_length=100, default='Administration')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.title} v{self.version} - {self.company.name if self.company else ''}"
+
+
+class OnboardingStatus(models.TextChoices):
+    APPLIED = 'APPLIED', 'Applied'
+    INTERVIEWING = 'INTERVIEWING', 'Interviewing'
+    OFFERED = 'OFFERED', 'Offered'
+    HIRED = 'HIRED', 'Hired / Converted'
+    REJECTED = 'REJECTED', 'Rejected'
+
+
+class OnboardingCandidate(BaseModel):
+    """
+    Hiring & Onboarding pipeline for workshop technicians and staff.
+    Stores interview terms, appointment letter parameters (Softech template), and first-week checklist.
+    """
+    full_name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=50, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    address = models.TextField(blank=True, default='1st floor Shop#169 Star City Mall, Saddar, Karachi.')
+    position = models.CharField(max_length=100, default='Mobile Hardware Technician')
+    department_type = models.CharField(
+        max_length=50,
+        choices=MobileDepartment.choices,
+        default=MobileDepartment.HARDWARE
+    )
+    offered_salary = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('20000.00'))
+    allowance = models.CharField(max_length=150, blank=True, default='-')
+    backup_work = models.CharField(max_length=150, blank=True, default='-')
+    working_hours = models.CharField(max_length=100, default='11:00 to 9:00 (Closing)')
+    notice_period = models.CharField(max_length=100, default='One Month')
+    appointment_date = models.DateField(null=True, blank=True)
+    appointment_month = models.CharField(max_length=50, blank=True, default='June')
+    ceo_name = models.CharField(max_length=100, default='Sheikh Muhammad Afnan')
+    director_name = models.CharField(max_length=100, default='Shahzaib Ali')
+    status = models.CharField(
+        max_length=30,
+        choices=OnboardingStatus.choices,
+        default=OnboardingStatus.APPLIED
+    )
+    first_week_checklist = models.JSONField(
+        default=dict,
+        help_text="Checklist: {'shop_induction': true, 'toolset_issued': false, 'policy_signed': false, 'login_created': false}"
+    )
+    notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.full_name} ({self.position}) - {self.status}"
+
+
+class LeaveType(models.TextChoices):
+    CASUAL = 'CASUAL', 'Casual Leave'
+    SICK = 'SICK', 'Sick / Medical'
+    HALF_DAY = 'HALF_DAY', 'Half Day (Relief)'
+    EMERGENCY = 'EMERGENCY', 'Emergency Leave'
+
+
+class LeaveRequestStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending Admin Review'
+    APPROVED = 'APPROVED', 'Approved'
+    REJECTED = 'REJECTED', 'Rejected'
+
+
+class EmployeeLeaveRequest(BaseModel):
+    """
+    Employee permission & leave request workflow.
+    Submitted by staff (self-service) and reviewed by Company Admin.
+    """
+    employee = models.ForeignKey(
+        'hrm.Employee',
+        on_delete=models.CASCADE,
+        related_name='mobile_leave_requests'
+    )
+    leave_type = models.CharField(
+        max_length=30,
+        choices=LeaveType.choices,
+        default=LeaveType.HALF_DAY
+    )
+    request_date = models.DateField()
+    advance_notice_days = models.PositiveIntegerField(
+        default=2,
+        help_text="Days in advance notification (e.g. 2 days)"
+    )
+    reason = models.TextField()
+    status = models.CharField(
+        max_length=20,
+        choices=LeaveRequestStatus.choices,
+        default=LeaveRequestStatus.PENDING
+    )
+    admin_notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.employee.first_name} - {self.get_leave_type_display()} on {self.request_date} ({self.status})"
+
+
+class ExitClearanceStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Notice Period Active'
+    CLEARANCE = 'CLEARANCE', 'Under Clearance'
+    COMPLETED = 'COMPLETED', 'Exit Completed / Relieved'
+    WITHDRAWN = 'WITHDRAWN', 'Withdrawn'
+
+
+class EmployeeExitRequest(BaseModel):
+    """
+    Resignation and exit workflow with 1-month notice period countdown and handover checklist.
+    """
+    employee = models.ForeignKey(
+        'hrm.Employee',
+        on_delete=models.CASCADE,
+        related_name='mobile_exit_requests'
+    )
+    resignation_date = models.DateField()
+    last_working_day = models.DateField()
+    reason = models.TextField()
+    handover_completed = models.BooleanField(default=False)
+    devices_returned = models.BooleanField(default=False)
+    clearance_status = models.CharField(
+        max_length=20,
+        choices=ExitClearanceStatus.choices,
+        default=ExitClearanceStatus.PENDING
+    )
+    admin_remarks = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.employee.first_name} Exit ({self.clearance_status}) - LWD {self.last_working_day}"
+
+    @property
+    def days_remaining(self) -> int:
+        import datetime
+        if not self.last_working_day:
+            return 0
+        diff = (self.last_working_day - datetime.date.today()).days
+        return max(0, diff)
+

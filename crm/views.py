@@ -78,16 +78,23 @@ class CRMEntityViewSet(BaseCRMViewSet):
         entity.save(update_fields=['is_deleted', 'active', 'updated_at'])
 
         try:
-            from security_crm.models import ClientLocation, SecurityProposal, ProposalServiceLine
+            from security_crm.models import ClientLocation, SecurityProposal, ProposalVersion, ProposalServiceLine, ContractEquipmentRequirement
             from security_crm.services.workflow import SecurityProposalWorkflowService
-            from operations.models import OperationalSite, SecurityPost, ServiceContract, SiteStaffingRequirement, Deployment
+            from operations.models import OperationalSite, SecurityPost, ServiceContract, SiteStaffingRequirement, Deployment, DailyDutyPay
+            from hrm.models import WorkforceAttendance
+            from crm.models import CRMContact
 
+            # 1. Contacts
+            CRMContact.objects.filter(entity=entity).update(is_deleted=True)
+
+            # 2. Locations and location-level cascades
             locations = list(ClientLocation.objects.filter(customer=entity))
             for loc in locations:
                 SecurityProposalWorkflowService.cascade_delete_client_location(loc)
-
             ClientLocation.objects.filter(customer=entity).update(is_deleted=True, is_active=False)
-            sites = OperationalSite.objects.filter(crm_entity=entity)
+
+            # 3. Operational Sites
+            sites = list(OperationalSite.objects.filter(crm_entity=entity))
             for s in sites:
                 s.is_deleted = True
                 s.is_active = False
@@ -96,9 +103,16 @@ class CRMEntityViewSet(BaseCRMViewSet):
                 SiteStaffingRequirement.objects.filter(site=s).update(is_deleted=True, is_active=False)
                 Deployment.objects.filter(site=s).update(is_deleted=True)
 
+            # 4. Proposals, versions, and service lines
             ProposalServiceLine.objects.filter(proposal_version__proposal__customer=entity).update(is_deleted=True)
+            ContractEquipmentRequirement.objects.filter(proposal_version__proposal__customer=entity).update(is_deleted=True)
+            ProposalVersion.objects.filter(proposal__customer=entity).update(is_deleted=True, status='ARCHIVED')
             SecurityProposal.objects.filter(customer=entity).update(is_deleted=True, status='CANCELLED')
             ServiceContract.objects.filter(crm_entity=entity).update(is_deleted=True, status='CANCELLED')
+
+            # 5. Duty pay and attendances
+            DailyDutyPay.objects.filter(client=entity).delete()
+            WorkforceAttendance.objects.filter(site__crm_entity=entity).delete()
         except Exception:
             pass
 

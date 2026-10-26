@@ -282,7 +282,7 @@ class ProposalVersion(BaseModel):
 
     @property
     def sales_tax_amount(self):
-        """Sales Tax computed on Total Sale, Service Charges, or manual override."""
+        """Sales Tax computed on Total Sale, Service Charges (Total Count * Service Charges), or manual override."""
         from decimal import Decimal
         basis = getattr(self, 'sales_tax_basis', 'TOTAL_SALE')
         if basis == 'MANUAL':
@@ -291,7 +291,10 @@ class ProposalVersion(BaseModel):
             return Decimal(str(self.sales_tax_override)).quantize(Decimal('0.01'))
         rate = Decimal(str(self.tax_rate if self.tax_rate is not None else 0)) / Decimal('100.00')
         if basis == 'SERVICE_CHARGES':
-            return (self.total_service_charges * rate).quantize(Decimal('0.01'))
+            strength = Decimal(str(self.total_guard_strength))
+            sc = Decimal(str(self.service_charges_per_guard or 0))
+            sc_base = (strength * sc) if strength > 0 else sc
+            return (sc_base * rate).quantize(Decimal('0.01'))
         return (self.total_monthly_sale * rate).quantize(Decimal('0.01'))
 
     @property
@@ -301,7 +304,7 @@ class ProposalVersion(BaseModel):
 
     @property
     def withholding_tax_amount(self):
-        """WHT / Income Tax on Invoice Amount, or Total Count * Service Charges, or manual override."""
+        """WHT / Income Tax on Invoice Amount, Service Charges (Total Count * Service Charges), or manual override."""
         from decimal import Decimal
         basis = getattr(self, 'withholding_tax_basis', 'INVOICE_AMOUNT')
         if basis == 'MANUAL':
@@ -310,7 +313,10 @@ class ProposalVersion(BaseModel):
             return Decimal(str(self.withholding_tax_override)).quantize(Decimal('0.01'))
         rate = Decimal(str(self.withholding_tax_rate if self.withholding_tax_rate is not None else 0)) / Decimal('100.00')
         if basis == 'SERVICE_CHARGES':
-            return (self.total_service_charges * rate).quantize(Decimal('0.01'))
+            strength = Decimal(str(self.total_guard_strength))
+            sc = Decimal(str(self.service_charges_per_guard or 0))
+            sc_base = (strength * sc) if strength > 0 else sc
+            return (sc_base * rate).quantize(Decimal('0.01'))
         return (self.total_invoice_amount * rate).quantize(Decimal('0.01'))
 
     @property

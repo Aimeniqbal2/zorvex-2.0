@@ -804,7 +804,7 @@ class SecurityProposalWorkflowService:
         Synchronizes a CRM proposal, its ClientLocations, and service requirements
         into Operations (OperationalSites, ServiceContracts, ContractRates, and SecurityPosts).
         """
-        from operations.models import ServiceContract, ServiceContractStatus, OperationalSite, ContractRate, SecurityPost
+        from operations.models import ServiceContract, ServiceContractStatus, OperationalSite, ContractRate, SecurityPost, Deployment
         from hrm.models import Designation
         from decimal import Decimal
         from django.utils import timezone
@@ -990,6 +990,27 @@ class SecurityProposalWorkflowService:
                         sp.is_active = True
                         sp.save(update_fields=['post_name', 'required_designation', 'daily_pay_rate', 'monthly_pay_rate', 'required_headcount', 'service_contract', 'is_active'])
 
+                    # Sync active deployments at this site & designation to the new salary
+                    if sal and target_site:
+                        dep_qs = Deployment.objects.filter(
+                            company=proposal.company,
+                            site=target_site,
+                            is_deleted=False
+                        )
+                        if desig:
+                            dep_matches = dep_qs.filter(designation=desig)
+                            if dep_matches.exists():
+                                dep_matches.update(location_monthly_salary=sal)
+                            else:
+                                dep_qs.update(location_monthly_salary=sal)
+                        else:
+                            dep_qs.update(location_monthly_salary=sal)
+
+                    # Dynamic recalculation for all un-frozen DailyDutyPay records at this site
+                    if target_site:
+                        from operations.services.monthly_muster_service import MonthlyMusterService
+                        MonthlyMusterService.recalculate_unfrozen_duties_for_site(target_site)
+
                     # Also sync to Operations SiteStaffingRequirement for coverage views
                     try:
                         from operations.models import Shift, SiteStaffingRequirement
@@ -1106,7 +1127,24 @@ class SecurityProposalWorkflowService:
                 line.is_deleted = True
                 line.save(update_fields=['is_deleted', 'updated_at'])
 
-            # 2. Delete equipment and staffing recommendations for this location
+            # 2. Delete dedicated SecurityProposals (Final Requirements) created for this specific location
+            from security_crm.models import ProposalVersion
+            loc_proposals = list(SecurityProposal.objects.filter(
+                Q(location=location) |
+                Q(customer=customer, title__iexact=f"{customer.name} - {loc_name} Requirements") |
+                Q(customer=customer, title__icontains=loc_name)
+            ))
+            for lp in loc_proposals:
+                if lp in proposals_to_resync:
+                    proposals_to_resync.remove(lp)
+                lp.is_deleted = True
+                lp.status = 'CANCELLED'
+                lp.save(update_fields=['is_deleted', 'status', 'updated_at'])
+                ProposalVersion.objects.filter(proposal=lp).update(is_deleted=True, status='ARCHIVED')
+                ProposalServiceLine.objects.filter(proposal_version__proposal=lp).update(is_deleted=True)
+                ContractEquipmentRequirement.objects.filter(proposal_version__proposal=lp).update(is_deleted=True)
+
+            # 3. Delete equipment and staffing recommendations for this location
             ContractEquipmentRequirement.objects.filter(location=location).update(is_deleted=True)
             AssessmentStaffingRecommendation.objects.filter(location=location).update(is_deleted=True)
 

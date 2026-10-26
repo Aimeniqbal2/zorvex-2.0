@@ -2096,6 +2096,11 @@ class CostingGridBatchSyncView(APIView):
                                 is_deleted=False
                             ).delete()
 
+                    proposal.approved_version = version
+                    proposal.status = SecurityProposalStatus.ACTIVE
+                    proposal.is_handoff_ready = True
+                    proposal.save(update_fields=['approved_version', 'status', 'is_handoff_ready'])
+
                     proposals_to_sync.add(proposal)
                     synced_count += 1
 

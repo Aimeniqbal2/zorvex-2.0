@@ -1239,25 +1239,25 @@ class SecurityCRMTests(TestCase):
         # Col AG: Service Charges = Flat PKR 3,000 (overall, not multiplied by AA)
         self.assertEqual(version.total_service_charges, Decimal('3000.00'))
 
-        # Col AH: Sales Tax (8% on Service Charges) = 3,000 * 0.08 = 240
-        self.assertEqual(version.sales_tax_amount, Decimal('240.00'))
+        # Col AH: Sales Tax (8% on Service Charges) = 5 * 3,000 * 0.08 = 1,200
+        self.assertEqual(version.sales_tax_amount, Decimal('1200.00'))
 
-        # Col AI: Invoice Amount = Y + AH = 190,000 + 240 = 190,240
-        self.assertEqual(version.total_invoice_amount, Decimal('190240.00'))
+        # Col AI: Invoice Amount = Y + AH = 190,000 + 1,200 = 191,200
+        self.assertEqual(version.total_invoice_amount, Decimal('191200.00'))
 
-        # Col AC: Withholding Tax (7% on Service Charges) = 3,000 * 0.07 = 210
-        self.assertEqual(version.withholding_tax_amount, Decimal('210.00'))
+        # Col AC: Withholding Tax (7% on Service Charges) = 5 * 3,000 * 0.07 = 1,050
+        self.assertEqual(version.withholding_tax_amount, Decimal('1050.00'))
 
         # Col AJ: Total Difference = Y - Z - AC - AE - AF
-        # = 190,000 - 119,000 - 210 - 500 - 600 = 69,690
-        self.assertEqual(version.total_difference, Decimal('69690.00'))
+        # = 190,000 - 119,000 - 1,050 - 500 - 600 = 68,850
+        self.assertEqual(version.total_difference, Decimal('68850.00'))
 
-        # Col AK: Difference Per Head = AJ / AA = 69,690 / 5 = 13,938
-        self.assertEqual(version.difference_per_head, Decimal('13938.00'))
+        # Col AK: Difference Per Head = AJ / AA = 68,850 / 5 = 13,770
+        self.assertEqual(version.difference_per_head, Decimal('13770.00'))
 
         # Col AD: Net Profit / Loss = Y - AC - AB - Z
-        # = 190,000 - 210 - 30,000 - 119,000 = 40,790
-        self.assertEqual(version.net_profit_loss, Decimal('40790.00'))
+        # = 190,000 - 1,050 - 30,000 - 119,000 = 39,950
+        self.assertEqual(version.net_profit_loss, Decimal('39950.00'))
 
     def test_frozen_version_immutability(self):
         """Test modifying service lines, equipment, or terms on frozen versions is blocked."""

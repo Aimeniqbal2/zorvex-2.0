@@ -66,6 +66,7 @@ class User(AbstractUser):
         ('hardware_technician',  'Hardware Technician'),
         ('software_technician',  'Software Technician'),
         ('cashier',              'Cashier'),
+        ('sales',                'Sales'),
         ('staff',                'Staff'),
     )
     role = models.CharField(max_length=25, choices=ROLE_CHOICES, default='staff')

@@ -12,6 +12,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['role'] = user.role
         token['company_id'] = str(user.company_id) if user.company_id else None
         
+        emp = getattr(user, 'employee_profile_new', None)
+        token['employee_id'] = str(emp.id) if emp else None
+
         if getattr(user, 'company', None):
             token['company_name'] = user.company.name
             token['company_logo'] = user.company.logo.url if user.company.logo else None
