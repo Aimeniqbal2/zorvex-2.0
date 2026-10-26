@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuthStore } from '../../../auth/authStore';
 import { mobileHrmApi } from './mobileHrmApi';
 import type { Technician, PayrollRecord } from './types';
 
@@ -12,28 +13,64 @@ interface MobilePayslipViewerTabProps {
 }
 
 export const MobilePayslipViewerTab: React.FC<MobilePayslipViewerTabProps> = ({ initialEmployeeId }) => {
+    const user = useAuthStore(s => s.user);
+    const companyLogoUrl = user?.company_logo
+        ? (user.company_logo.startsWith('http') ? user.company_logo : `http://127.0.0.1:8000${user.company_logo}`)
+        : null;
+    const companyName = user?.company_name || 'SOFTECH MOBILE & REPAIR LAB';
+
     const [year, setYear] = useState<number>(2026);
     const [month, setMonth] = useState<number>(9); // September 2026 default
-    const [technicians, setTechnicians] = useState<Technician[]>([]);
+    const [employeeOptions, setEmployeeOptions] = useState<{ id: string; label: string }[]>([]);
     const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(initialEmployeeId || '');
     const [payrollRecord, setPayrollRecord] = useState<PayrollRecord | null>(null);
     const [loading, setLoading] = useState(false);
     const [downloading, setDownloading] = useState(false);
 
     useEffect(() => {
-        const loadTechs = async () => {
+        let isMounted = true;
+        const loadInitial = async () => {
             try {
-                const list = await mobileHrmApi.getTechnicians();
-                setTechnicians(list);
-                if (!selectedEmployeeId && list.length > 0) {
-                    setSelectedEmployeeId(list[0].employee);
+                setLoading(true);
+                const [techList, overview] = await Promise.all([
+                    mobileHrmApi.getTechnicians().catch(() => []),
+                    mobileHrmApi.getPayrollOverview(year, month).catch(() => ({ records: [] }))
+                ]);
+                if (!isMounted) return;
+
+                const optionsMap = new Map<string, string>();
+                techList.forEach((t: Technician) => {
+                    optionsMap.set(t.employee, `${t.employee_name} (${t.employee_code} - ${t.department_display})`);
+                });
+                (overview.records || []).forEach((r: any) => {
+                    if (!optionsMap.has(r.employee_id)) {
+                        optionsMap.set(r.employee_id, `${r.employee_name} (${r.employee_code} - ${r.department})`);
+                    }
+                });
+
+                const opts = Array.from(optionsMap.entries()).map(([id, label]) => ({ id, label }));
+                setEmployeeOptions(opts);
+
+                let targetEmpId = selectedEmployeeId || initialEmployeeId || '';
+                if ((!targetEmpId || !optionsMap.has(targetEmpId)) && opts.length > 0) {
+                    targetEmpId = opts[0].id;
+                    setSelectedEmployeeId(targetEmpId);
+                }
+
+                if (targetEmpId) {
+                    const match = (overview.records || []).find((r: any) => r.employee_id === targetEmpId);
+                    setPayrollRecord(match || null);
                 }
             } catch (err) {
-                console.error('Failed to load technicians:', err);
+                console.error('Failed to load payslip data:', err);
+            } finally {
+                if (isMounted) setLoading(false);
             }
         };
-        loadTechs();
-    }, []);
+
+        loadInitial();
+        return () => { isMounted = false; };
+    }, [year, month]);
 
     useEffect(() => {
         if (initialEmployeeId) {
@@ -41,24 +78,20 @@ export const MobilePayslipViewerTab: React.FC<MobilePayslipViewerTabProps> = ({ 
         }
     }, [initialEmployeeId]);
 
-    useEffect(() => {
-        if (!selectedEmployeeId) return;
-
-        const loadRecord = async () => {
-            try {
-                setLoading(true);
-                const overview = await mobileHrmApi.getPayrollOverview(year, month);
-                const match = overview.records.find(r => r.employee_id === selectedEmployeeId);
-                setPayrollRecord(match || null);
-            } catch (err) {
-                console.error('Failed to load payslip:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        loadRecord();
-    }, [selectedEmployeeId, year, month]);
+    const handleSelectEmployee = async (empId: string) => {
+        setSelectedEmployeeId(empId);
+        if (!empId) return;
+        try {
+            setLoading(true);
+            const overview = await mobileHrmApi.getPayrollOverview(year, month);
+            const match = (overview.records || []).find(r => r.employee_id === empId);
+            setPayrollRecord(match || null);
+        } catch (err) {
+            console.error('Failed to load payslip for employee:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleDownloadPdf = async () => {
         if (!selectedEmployeeId || !payrollRecord) return;
@@ -100,12 +133,12 @@ export const MobilePayslipViewerTab: React.FC<MobilePayslipViewerTabProps> = ({ 
                 boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                    {/* Technician Selector */}
+                    {/* Employee / Staff Selector */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Technician:</span>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Employee / Staff:</span>
                         <select
                             value={selectedEmployeeId}
-                            onChange={e => setSelectedEmployeeId(e.target.value)}
+                            onChange={e => handleSelectEmployee(e.target.value)}
                             style={{
                                 padding: '8px 14px',
                                 borderRadius: '8px',
@@ -114,14 +147,18 @@ export const MobilePayslipViewerTab: React.FC<MobilePayslipViewerTabProps> = ({ 
                                 fontWeight: 600,
                                 background: '#f8fafc',
                                 outline: 'none',
-                                minWidth: '220px'
+                                minWidth: '240px'
                             }}
                         >
-                            {technicians.map(t => (
-                                <option key={t.employee} value={t.employee}>
-                                    {t.employee_name} ({t.employee_code} - {t.department_display})
-                                </option>
-                            ))}
+                            {employeeOptions.length === 0 ? (
+                                <option value="">No employees found</option>
+                            ) : (
+                                employeeOptions.map(opt => (
+                                    <option key={opt.id} value={opt.id}>
+                                        {opt.label}
+                                    </option>
+                                ))
+                            )}
                         </select>
                     </div>
 
@@ -254,9 +291,18 @@ export const MobilePayslipViewerTab: React.FC<MobilePayslipViewerTabProps> = ({ 
                     }}>
                         {/* Header */}
                         <div style={{ textAlign: 'center', marginBottom: '24px', borderBottom: '2px solid #0f172a', paddingBottom: '16px' }}>
-                            <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                SOFTECH MOBILE & REPAIR LAB
-                            </h2>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginBottom: '8px' }}>
+                                {companyLogoUrl && (
+                                    <img
+                                        src={companyLogoUrl}
+                                        alt={companyName}
+                                        style={{ height: '44px', maxWidth: '100px', objectFit: 'contain' }}
+                                    />
+                                )}
+                                <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    {companyName}
+                                </h2>
+                            </div>
                             <div style={{ fontSize: '13px', color: '#475569', marginTop: '4px' }}>
                                 Smart Device Diagnostics, Micro-Soldering & Display Refurbishing Centre
                             </div>
