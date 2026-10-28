@@ -1396,11 +1396,17 @@ class TemporaryServiceRequest(BaseModel):
         ('COMPLETED', 'Completed'),
         ('CANCELLED', 'Cancelled'),
     ]
+    BILLING_CHOICES = [
+        ('MONTHLY_CONSOLIDATED', 'Consolidate into Client Monthly Invoice'),
+        ('STANDALONE', 'Standalone One-Time Invoice'),
+    ]
     crm_entity = models.ForeignKey('crm.CRMEntity', on_delete=models.RESTRICT, related_name='temporary_services')
     title = models.CharField(max_length=200)
     reference_number = models.CharField(max_length=100)
     site_name = models.CharField(max_length=255, blank=True)
     operational_site = models.ForeignKey('OperationalSite', null=True, blank=True, on_delete=models.SET_NULL)
+    is_temporary_site = models.BooleanField(default=False)
+    billing_type = models.CharField(max_length=50, choices=BILLING_CHOICES, default='MONTHLY_CONSOLIDATED')
     start_datetime = models.DateTimeField()
     end_datetime = models.DateTimeField()
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='DRAFT')
@@ -1408,6 +1414,10 @@ class TemporaryServiceRequest(BaseModel):
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='requested_temp_services')
     approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='approved_temp_services')
     completed_at = models.DateTimeField(null=True, blank=True)
+    total_manpower_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_equipment_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    grand_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     def clean(self):
         super().clean()
@@ -1417,13 +1427,27 @@ class TemporaryServiceRequest(BaseModel):
             raise ValidationError({'operational_site': 'Operational Site must belong to the same company.'})
 
 class TemporaryServiceLine(BaseModel):
+    LINE_TYPE_CHOICES = [
+        ('MANPOWER', 'Manpower / Guarding'),
+        ('EQUIPMENT', 'Security Equipment'),
+        ('VEHICLE', 'Escort / Vehicle'),
+        ('PROTOCOL', 'VIP Protocol / Convoy'),
+    ]
     temporary_service = models.ForeignKey(TemporaryServiceRequest, on_delete=models.CASCADE, related_name='lines')
-    designation = models.ForeignKey('hrm.Designation', on_delete=models.RESTRICT)
-    required_headcount = models.PositiveIntegerField(default=1)
-    billing_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    pay_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    line_type = models.CharField(max_length=30, choices=LINE_TYPE_CHOICES, default='MANPOWER')
+    designation = models.ForeignKey('hrm.Designation', on_delete=models.RESTRICT, null=True, blank=True)
+    required_headcount = models.PositiveIntegerField(default=1)  # Headcount for manpower; quantity for equipment/vehicle
+    billing_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Daily billing rate
+    pay_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Daily guard pay rate
     shift_start = models.TimeField(null=True, blank=True)
     shift_end = models.TimeField(null=True, blank=True)
+    item_name = models.CharField(max_length=200, blank=True)
+    category = models.CharField(max_length=50, blank=True)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    days_count = models.PositiveIntegerField(default=1)
+    tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
 
     def clean(self):
@@ -1432,6 +1456,26 @@ class TemporaryServiceLine(BaseModel):
             raise ValidationError({'temporary_service': 'Temporary Service must belong to the same company.'})
         if self.designation_id and str(self.designation.company_id) != str(self.company_id):
             raise ValidationError({'designation': 'Designation must belong to the same company.'})
+
+class TemporaryServiceAssignment(BaseModel):
+    """
+    Tracks specific workforce employees (guards) deployed to a Temporary Service.
+    """
+    temporary_service = models.ForeignKey(TemporaryServiceRequest, on_delete=models.CASCADE, related_name='assigned_guards')
+    service_line = models.ForeignKey(TemporaryServiceLine, on_delete=models.SET_NULL, null=True, blank=True, related_name='guard_assignments')
+    employee = models.ForeignKey('hrm.Employee', on_delete=models.CASCADE, related_name='temp_service_assignments')
+    designation = models.ForeignKey('hrm.Designation', on_delete=models.SET_NULL, null=True, blank=True)
+    daily_pay_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    daily_billing_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    notes = models.TextField(blank=True)
+
+    def clean(self):
+        super().clean()
+        if self.temporary_service_id and str(self.temporary_service.company_id) != str(self.company_id):
+            raise ValidationError({'temporary_service': 'Temporary Service must belong to the same company.'})
+        if self.employee_id and str(self.employee.company_id) != str(self.company_id):
+            raise ValidationError({'employee': 'Employee must belong to the same company.'})
+
 
 class QAChecklistTemplate(BaseModel):
     name = models.CharField(max_length=200)
@@ -2354,6 +2398,58 @@ class InspectionCriterionPolicy(BaseModel):
 
     def __str__(self):
         return f"{self.name or self.criterion_code}: -{self.deduction_weight} pts"
+
+
+class AutoAttendanceConfig(BaseModel):
+    """
+    Tenant-configurable settings for automatic attendance generation in Security Operations.
+    Enables automatic generation of daily muster attendance for active deployed guards
+    based on the preceding day's attendance code and tenant-defined lag/buffer (delay_days).
+    """
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether auto-attendance generation is active for this company."
+    )
+    delay_days = models.PositiveIntegerField(
+        default=2,
+        help_text="Number of days prior to current date for auto-attendance (e.g. 2 = auto-mark T-2 using T-3)."
+    )
+    last_run_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent auto-attendance execution."
+    )
+    last_run_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="The most recent target duty date processed by auto-attendance."
+    )
+    notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Audit notes or execution summary from the latest run."
+    )
+
+    class Meta(BaseModel.Meta):
+        verbose_name = 'Auto Attendance Configuration'
+        verbose_name_plural = 'Auto Attendance Configurations'
+
+    def __str__(self):
+        status = "Enabled" if self.is_enabled else "Disabled"
+        return f"{self.company.name if self.company else 'System'} - Auto Attendance: {status} ({self.delay_days} days delay)"
+
+    @classmethod
+    def get_for_company(cls, company):
+        if not company:
+            return None
+        config = cls.objects.filter(company=company).first()
+        if not config:
+            config = cls.objects.create(
+                company=company,
+                is_enabled=True,
+                delay_days=2
+            )
+        return config
 
 
 

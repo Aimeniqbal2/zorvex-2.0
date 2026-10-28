@@ -465,7 +465,7 @@ export const cancelServiceInvoice = async (id: string): Promise<any> => {
 // ---------------------------------------------------------------------------
 // Phase S-9: Temporary Services
 // ---------------------------------------------------------------------------
-import type { TemporaryServiceRequest } from './types';
+import type { TemporaryServiceRequest, TemporaryMusterGridResponse } from './types';
 
 export const getTemporaryServices = async (params?: Record<string, any>): Promise<PaginatedResponse<TemporaryServiceRequest>> => {
     const response = await apiClient.get('/api/operations/temporary-services/', { params });
@@ -487,8 +487,54 @@ export const updateTemporaryService = async (id: string, data: Partial<Temporary
     return response.data;
 };
 
+export const deleteTemporaryService = async (id: string): Promise<void> => {
+    await apiClient.delete(`/api/operations/temporary-services/${id}/`);
+};
+
 export const actionTemporaryService = async (id: string, action: string, data: any = {}): Promise<any> => {
     const response = await apiClient.post(`/api/operations/temporary-services/${id}/${action}/`, data);
+    return response.data;
+};
+
+export const assignTemporaryGuards = async (id: string, guards: Array<{
+    employee_id: string;
+    designation_id?: string;
+    daily_pay_rate: number;
+    daily_billing_rate: number;
+    notes?: string;
+}>): Promise<any> => {
+    const response = await apiClient.post(`/api/operations/temporary-services/${id}/assign-guards/`, { guards });
+    return response.data;
+};
+
+export const unassignTemporaryGuard = async (id: string, payload: { employee_id?: string; assignment_id?: string }): Promise<any> => {
+    const response = await apiClient.post(`/api/operations/temporary-services/${id}/unassign-guard/`, payload);
+    return response.data;
+};
+
+export const generateTemporaryInvoice = async (id: string): Promise<any> => {
+    const response = await apiClient.post(`/api/operations/temporary-services/${id}/generate-invoice/`);
+    return response.data;
+};
+
+export const getTemporaryMusterGrid = async (year: number, month: number): Promise<TemporaryMusterGridResponse> => {
+    const response = await apiClient.get('/api/operations/temporary-services/muster-grid/', {
+        params: { year, month }
+    });
+    return response.data;
+};
+
+export const saveTemporaryMusterAttendance = async (year: number, month: number, updates: Array<{
+    service_id: string;
+    employee_id: string;
+    day: number;
+    code: string;
+}>): Promise<any> => {
+    const response = await apiClient.post('/api/operations/temporary-services/save-muster-attendance/', {
+        year,
+        month,
+        updates
+    });
     return response.data;
 };
 
@@ -1337,8 +1383,32 @@ export const freezeMonthlyMuster = async (year: number, month: number): Promise<
     return response.data;
 };
 
+export interface AutoAttendanceConfig {
+    is_enabled: boolean;
+    delay_days: number;
+    last_run_at: string | null;
+    last_run_date: string | null;
+    notes: string;
+}
+
+export const getAutoAttendanceConfig = async (): Promise<AutoAttendanceConfig> => {
+    const response = await apiClient.get('/api/operations/monthly-muster/auto-attendance-config/');
+    return response.data;
+};
+
+export const updateAutoAttendanceConfig = async (data: { is_enabled?: boolean; delay_days?: number }): Promise<AutoAttendanceConfig & { detail: string }> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/auto-attendance-config/', data);
+    return response.data;
+};
+
+export const runAutoAttendance = async (params?: { target_date?: string; fill_month_up_to_target?: boolean; overwrite_existing?: boolean }): Promise<any> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/run-auto-attendance/', params || {});
+    return response.data;
+};
+
 // Re-export apiClient for modal components
 export { apiClient } from '../../api/client';
+
 
 
 

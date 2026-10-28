@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getMonthlyMusterGrid, saveMonthlyMusterUpdates, importMonthlyMusterExcel, cleanupOrphanedAttendance, freezeMonthlyMuster, apiClient } from '../api';
+import { 
+    getMonthlyMusterGrid, 
+    saveMonthlyMusterUpdates, 
+    importMonthlyMusterExcel, 
+    cleanupOrphanedAttendance, 
+    freezeMonthlyMuster, 
+    getAutoAttendanceConfig, 
+    updateAutoAttendanceConfig, 
+    runAutoAttendance, 
+    apiClient 
+} from '../api';
+import type { AutoAttendanceConfig } from '../api';
 import { useToastStore } from '../../../stores/toastStore';
+import { TemporaryServicesMusterSection } from './TemporaryServicesMusterSection';
 
 interface GuardRow {
     employee_id: string;
@@ -206,6 +218,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
     const { addToast } = useToastStore();
     const today = new Date();
 
+    const [musterMode, setMusterMode] = useState<'REGULAR' | 'TEMPORARY'>('REGULAR');
     const [year, setYear] = useState<number>(today.getFullYear());
     const [month, setMonth] = useState<number>(today.getMonth() + 1);
     const [selectedSiteFilter, setSelectedSiteFilter] = useState<string>('ALL');
@@ -247,6 +260,19 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
     const [isFrozen, setIsFrozen] = useState<boolean>(false);
     const [freezing, setFreezing] = useState<boolean>(false);
     const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+
+    // Auto Attendance State
+    const [autoConfig, setAutoConfig] = useState<AutoAttendanceConfig | null>(null);
+    const [showAutoModal, setShowAutoModal] = useState<boolean>(false);
+    const [savingAutoConfig, setSavingAutoConfig] = useState<boolean>(false);
+    const [runningAuto, setRunningAuto] = useState<boolean>(false);
+
+    // Auto Attendance Modal Form State
+    const [modalIsEnabled, setModalIsEnabled] = useState<boolean>(true);
+    const [modalDelayDays, setModalDelayDays] = useState<number>(2);
+    const [modalTargetDate, setModalTargetDate] = useState<string>('');
+    const [modalFillMonth, setModalFillMonth] = useState<boolean>(true);
+    const [modalOverwrite, setModalOverwrite] = useState<boolean>(false);
 
     // Can freeze if not already frozen and month is ended (past month or at month-end day)
     const canFreeze = useMemo(() => {
@@ -327,6 +353,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             setDaysInMonth(res.days_in_month || 31);
             setTodayDay(res.today_day || today.getDate());
             setIsFrozen(Boolean(res.is_frozen));
+            if (res.auto_attendance_config) {
+                setAutoConfig(res.auto_attendance_config);
+                setModalIsEnabled(res.auto_attendance_config.is_enabled);
+                setModalDelayDays(res.auto_attendance_config.delay_days);
+            }
             setDirtyUpdates(new Map());
             setAddedGuards([]);
             setRemovedGuards([]);
@@ -337,6 +368,88 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             setLoading(false);
         }
     };
+
+    const fetchAutoConfig = async () => {
+        try {
+            const cfg = await getAutoAttendanceConfig();
+            setAutoConfig(cfg);
+            setModalIsEnabled(cfg.is_enabled);
+            setModalDelayDays(cfg.delay_days);
+        } catch (e) {
+            console.error('Failed to load auto attendance config:', e);
+        }
+    };
+
+    const handleSaveAutoConfig = async () => {
+        try {
+            setSavingAutoConfig(true);
+            const updated = await updateAutoAttendanceConfig({
+                is_enabled: modalIsEnabled,
+                delay_days: modalDelayDays,
+            });
+            setAutoConfig(updated);
+            addToast('success', updated.detail || 'Auto attendance settings updated.');
+            setShowAutoModal(false);
+        } catch (err: any) {
+            addToast('error', err?.response?.data?.detail || 'Failed to update auto attendance settings.');
+        } finally {
+            setSavingAutoConfig(false);
+        }
+    };
+
+    const handleTriggerRunAuto = async () => {
+        if (isFrozen) {
+            addToast('warning', 'This month is frozen and locked. Auto-attendance cannot modify frozen records.');
+            return;
+        }
+        try {
+            setRunningAuto(true);
+            const payload: any = {
+                fill_month_up_to_target: modalFillMonth,
+                overwrite_existing: modalOverwrite,
+            };
+            if (modalTargetDate.trim()) {
+                payload.target_date = modalTargetDate.trim();
+            }
+            const res = await runAutoAttendance(payload);
+            if (res.status === 'success') {
+                addToast('success', `⚡ Auto Attendance Completed: ${res.new_records_created} records created (${res.existing_records_skipped} existing preserved) for date ${res.target_date}.`);
+                await loadMusterData();
+                if (autoConfig) {
+                    setAutoConfig({
+                        ...autoConfig,
+                        last_run_at: new Date().toISOString(),
+                        last_run_date: res.target_date,
+                    });
+                }
+            } else {
+                addToast('info', res.message || 'Auto attendance completed with no updates.');
+            }
+        } catch (err: any) {
+            console.error('Failed to run auto attendance:', err);
+            addToast('error', err?.response?.data?.detail || 'Failed to run auto attendance.');
+        } finally {
+            setRunningAuto(false);
+        }
+    };
+
+    const calculatedTargetDate = useMemo(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - modalDelayDays);
+        const yr = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
+        const dy = String(d.getDate()).padStart(2, '0');
+        return `${yr}-${mo}-${dy}`;
+    }, [modalDelayDays]);
+
+    const calculatedPrevDate = useMemo(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - modalDelayDays - 1);
+        const yr = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
+        const dy = String(d.getDate()).padStart(2, '0');
+        return `${yr}-${mo}-${dy}`;
+    }, [modalDelayDays]);
 
     useEffect(() => {
         loadMusterData();
@@ -818,9 +931,57 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                             <i className='bx bx-spreadsheet'></i>
                         </div>
                         <div>
-                            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-text, #0f172a)' }}>Monthly Duty Muster Register</h2>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>Full-screen operational attendance sheet & overtime matrix</span>
+                            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-text, #0f172a)' }}>
+                                {musterMode === 'REGULAR' ? 'Monthly Duty Muster Register' : 'Temporary Services Duty Muster'}
+                            </h2>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>
+                                {musterMode === 'REGULAR' 
+                                    ? 'Full-screen operational attendance sheet & overtime matrix' 
+                                    : 'Active-date constrained event attendance & dual-wing equipment billing'}
+                            </span>
                         </div>
+                    </div>
+
+                    {/* Mode Switcher */}
+                    <div style={{ display: 'flex', backgroundColor: 'var(--color-bg, #f1f5f9)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border, #cbd5e1)' }}>
+                        <button
+                            type="button"
+                            onClick={() => setMusterMode('REGULAR')}
+                            style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                fontWeight: 700,
+                                fontSize: '0.84rem',
+                                cursor: 'pointer',
+                                backgroundColor: musterMode === 'REGULAR' ? 'var(--color-surface, #ffffff)' : 'transparent',
+                                color: musterMode === 'REGULAR' ? '#059669' : 'var(--color-text-muted, #64748b)',
+                                boxShadow: musterMode === 'REGULAR' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                transition: 'all 0.15s ease'
+                            }}
+                        >
+                            <i className="bx bx-spreadsheet" style={{ marginRight: '6px' }} />
+                            Regular Monthly Muster
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setMusterMode('TEMPORARY')}
+                            style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                fontWeight: 700,
+                                fontSize: '0.84rem',
+                                cursor: 'pointer',
+                                backgroundColor: musterMode === 'TEMPORARY' ? 'var(--color-primary, #2563eb)' : 'transparent',
+                                color: musterMode === 'TEMPORARY' ? '#ffffff' : 'var(--color-text-muted, #64748b)',
+                                boxShadow: musterMode === 'TEMPORARY' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                transition: 'all 0.15s ease'
+                            }}
+                        >
+                            <i className="bx bx-bolt-circle" style={{ marginRight: '6px' }} />
+                            Temporary Services Muster
+                        </button>
                     </div>
                 </div>
 
@@ -1011,6 +1172,46 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         <i className='bx bx-export'></i> Export
                     </button>
 
+                    {/* Auto Attendance Settings Button */}
+                    <button
+                        onClick={() => {
+                            if (autoConfig) {
+                                setModalIsEnabled(autoConfig.is_enabled);
+                                setModalDelayDays(autoConfig.delay_days);
+                            } else {
+                                fetchAutoConfig();
+                            }
+                            setShowAutoModal(true);
+                        }}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '8px 14px',
+                            borderRadius: '8px',
+                            background: autoConfig?.is_enabled ? '#ecfdf5' : '#f8fafc',
+                            color: autoConfig?.is_enabled ? '#047857' : '#64748b',
+                            border: autoConfig?.is_enabled ? '1px solid #a7f3d0' : '1px solid var(--color-border, #cbd5e1)',
+                            fontWeight: 700,
+                            fontSize: '0.88rem',
+                            cursor: 'pointer',
+                            boxShadow: autoConfig?.is_enabled ? '0 1px 3px rgba(16, 185, 129, 0.2)' : 'none',
+                            transition: 'all 0.15s ease'
+                        }}
+                        title="Automated attendance engine settings & manual trigger"
+                    >
+                        <i className={`bx ${autoConfig?.is_enabled ? 'bx-check-shield' : 'bx-cog'}`} style={{ fontSize: '1.1rem' }}></i>
+                        {autoConfig ? (
+                            autoConfig.is_enabled ? (
+                                <span>Auto: <strong style={{ color: '#065f46' }}>ON</strong> ({autoConfig.delay_days}d lag)</span>
+                            ) : (
+                                <span>Auto: <strong style={{ color: '#64748b' }}>OFF</strong></span>
+                            )
+                        ) : (
+                            <span>Auto Attendance</span>
+                        )}
+                    </button>
+
                     {/* Clean Orphaned Records Button */}
                     {!isFrozen && (
                         <button
@@ -1064,6 +1265,15 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 </div>
             </div>
 
+            {musterMode === 'TEMPORARY' ? (
+                <TemporaryServicesMusterSection 
+                    year={year} 
+                    month={month} 
+                    onBack={onBack}
+                    onSwitchToRegular={() => setMusterMode('REGULAR')}
+                />
+            ) : (
+                <>
             {/* Frozen Month Notification Banner */}
             {isFrozen && (
                 <div style={{
@@ -2117,6 +2327,274 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         </form>
                     </div>
                 </div>
+            )}
+
+            {/* Modal: Automated Attendance Settings & Runner */}
+            {showAutoModal && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '20px' }}>
+                    <div style={{ background: 'var(--color-surface, #ffffff)', width: '100%', maxWidth: '640px', borderRadius: '16px', border: '1px solid var(--color-border, #cbd5e1)', padding: '24px 28px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', maxHeight: '90vh', overflowY: 'auto' }}>
+                        
+                        {/* Header */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid var(--color-border, #e2e8f0)', paddingBottom: '14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{ width: 44, height: 44, borderRadius: '10px', background: modalIsEnabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: modalIsEnabled ? '#059669' : '#64748b', fontSize: '1.6rem' }}>
+                                    <i className={`bx ${modalIsEnabled ? 'bx-bot' : 'bx-cog'}`}></i>
+                                </div>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--color-text, #0f172a)', fontWeight: 800 }}>Automated Attendance Settings</h3>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                                        <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>Company-scoped attendance automation & previous-day rule engine</span>
+                                        <span style={{ padding: '2px 8px', borderRadius: '999px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', fontSize: '0.72rem', fontWeight: 700 }}>Tenant Isolated</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowAutoModal(false)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '1.3rem', cursor: 'pointer', padding: '4px' }}>✕</button>
+                        </div>
+
+                        {/* Toggle Switch: Enable / Disable */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: modalIsEnabled ? '#ecfdf5' : 'var(--color-bg, #f8fafc)', borderRadius: '10px', border: modalIsEnabled ? '1px solid #a7f3d0' : '1px solid var(--color-border, #cbd5e1)', marginBottom: '16px', transition: 'all 0.2s ease' }}>
+                            <div>
+                                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: modalIsEnabled ? '#065f46' : 'var(--color-text, #0f172a)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span>Automated Attendance System</span>
+                                    {modalIsEnabled ? (
+                                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: '#10b981', color: '#ffffff', fontWeight: 800 }}>ACTIVE</span>
+                                    ) : (
+                                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: '#94a3b8', color: '#ffffff', fontWeight: 800 }}>DISABLED</span>
+                                    )}
+                                </div>
+                                <div style={{ fontSize: '0.82rem', color: modalIsEnabled ? '#047857' : 'var(--color-text-muted, #64748b)', marginTop: '2px' }}>
+                                    {modalIsEnabled 
+                                        ? 'The engine runs automatically when the muster sheet is viewed or via background schedule.'
+                                        : 'Auto attendance generation is currently stopped for this company.'}
+                                </div>
+                            </div>
+                            <label style={{ position: 'relative', display: 'inline-block', width: '52px', height: '28px', cursor: 'pointer' }}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={modalIsEnabled} 
+                                    onChange={(e) => setModalIsEnabled(e.target.checked)}
+                                    style={{ opacity: 0, width: 0, height: 0 }}
+                                />
+                                <span style={{
+                                    position: 'absolute', inset: 0,
+                                    backgroundColor: modalIsEnabled ? '#10b981' : '#cbd5e1',
+                                    borderRadius: '28px',
+                                    transition: '0.2s ease',
+                                }}>
+                                    <span style={{
+                                        position: 'absolute', height: '20px', width: '20px', left: modalIsEnabled ? '26px' : '4px', bottom: '4px',
+                                        backgroundColor: '#ffffff',
+                                        borderRadius: '50%',
+                                        transition: '0.2s ease',
+                                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                                    }} />
+                                </span>
+                            </label>
+                        </div>
+
+                        {/* Delay Days Selection (Lag / Buffer) */}
+                        <div style={{ marginBottom: '18px', padding: '16px', background: 'var(--color-bg, #f8fafc)', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)' }}>
+                            <label style={{ display: 'block', fontWeight: 800, fontSize: '0.9rem', color: 'var(--color-text, #0f172a)', marginBottom: '6px' }}>
+                                Attendance Lag Buffer (Days Delay)
+                            </label>
+                            <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: 'var(--color-text-muted, #64748b)', lineHeight: '1.4' }}>
+                                Specifies how many days behind the current date attendance is auto-marked. For example, on <strong>27th Oct</strong> with a <strong>2-day lag</strong>, attendance is auto-marked for <strong>25th Oct</strong> based on <strong>24th Oct</strong>.
+                            </p>
+
+                            {/* Preset Buttons */}
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                                {[
+                                    { days: 1, label: '1 Day Lag (Yesterday)' },
+                                    { days: 2, label: '2 Days Lag (Recommended Default)' },
+                                    { days: 3, label: '3 Days Lag' },
+                                ].map(preset => (
+                                    <button
+                                        key={preset.days}
+                                        type="button"
+                                        onClick={() => setModalDelayDays(preset.days)}
+                                        style={{
+                                            padding: '6px 14px',
+                                            borderRadius: '6px',
+                                            border: modalDelayDays === preset.days ? '2px solid #0284c7' : '1px solid var(--color-border, #cbd5e1)',
+                                            background: modalDelayDays === preset.days ? '#e0f2fe' : 'var(--color-surface, #ffffff)',
+                                            color: modalDelayDays === preset.days ? '#0369a1' : 'var(--color-text, #0f172a)',
+                                            fontWeight: modalDelayDays === preset.days ? 800 : 600,
+                                            fontSize: '0.82rem',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s ease'
+                                        }}
+                                    >
+                                        {modalDelayDays === preset.days ? '✓ ' : ''}{preset.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Custom Number Input & Live Preview */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>Custom Lag:</span>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={30}
+                                        value={modalDelayDays}
+                                        onChange={(e) => setModalDelayDays(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
+                                        style={{
+                                            width: '70px',
+                                            padding: '6px 10px',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--color-border, #cbd5e1)',
+                                            background: 'var(--color-surface, #ffffff)',
+                                            color: 'var(--color-text, #0f172a)',
+                                            fontWeight: 800,
+                                            fontSize: '0.9rem',
+                                            textAlign: 'center'
+                                        }}
+                                    />
+                                    <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted, #64748b)' }}>days</span>
+                                </div>
+
+                                <div style={{ flex: 1, padding: '6px 12px', borderRadius: '6px', background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.8rem', color: '#166534' }}>
+                                    📅 Today: <strong>{new Date().toISOString().split('T')[0]}</strong> ➔ Fills for <strong>{calculatedTargetDate}</strong> based on <strong>{calculatedPrevDate}</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Attendance Code Transformation Rules Matrix */}
+                        <div style={{ marginBottom: '18px', padding: '14px 16px', background: '#fffbeb', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                            <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                                <i className='bx bx-git-branch' style={{ fontSize: '1.1rem' }}></i>
+                                Previous Day ➔ Target Day Transformation Rules
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', fontSize: '0.8rem' }}>
+                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
+                                    <span style={{ color: '#059669', fontWeight: 800 }}>P, PO, POD, WP, W</span><br />
+                                    ➔ Marks <strong style={{ color: '#059669' }}>P (Present)</strong>
+                                </div>
+                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
+                                    <span style={{ color: '#dc2626', fontWeight: 800 }}>A (Absent)</span><br />
+                                    ➔ Marks <strong style={{ color: '#dc2626' }}>A (Absent)</strong>
+                                </div>
+                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
+                                    <span style={{ color: '#d97706', fontWeight: 800 }}>L (Leave)</span><br />
+                                    ➔ Marks <strong style={{ color: '#d97706' }}>L (Leave)</strong>
+                                </div>
+                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
+                                    <span style={{ color: '#64748b', fontWeight: 800 }}>O, OD, Blank</span><br />
+                                    ➔ Leaves <strong style={{ color: '#64748b' }}>Blank (No Code)</strong>
+                                </div>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#b45309', marginTop: '8px' }}>
+                                💡 <em>Non-destructive:</em> Existing manual inputs are never overwritten unless explicitly requested below. Operators only manage exceptions!
+                            </div>
+                        </div>
+
+                        {/* Manual Trigger Section */}
+                        <div style={{ marginBottom: '20px', padding: '14px 16px', background: 'var(--color-bg, #f1f5f9)', borderRadius: '10px', border: '1px solid var(--color-border, #cbd5e1)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--color-text, #0f172a)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <i className='bx bx-play-circle' style={{ fontSize: '1.2rem', color: '#4f46e5' }}></i>
+                                    Manual On-Demand Execution
+                                </div>
+                                {autoConfig?.last_run_at && (
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)' }}>
+                                        Last run: {new Date(autoConfig.last_run_at).toLocaleString()}
+                                    </span>
+                                )}
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text, #0f172a)', marginBottom: '4px' }}>Target Date (optional):</label>
+                                    <input
+                                        type="date"
+                                        value={modalTargetDate}
+                                        onChange={(e) => setModalTargetDate(e.target.value)}
+                                        placeholder={calculatedTargetDate}
+                                        style={{
+                                            width: '100%',
+                                            padding: '6px 10px',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--color-border, #cbd5e1)',
+                                            background: 'var(--color-surface, #ffffff)',
+                                            color: 'var(--color-text, #0f172a)',
+                                            fontSize: '0.85rem'
+                                        }}
+                                    />
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)' }}>Leave blank to use current lag buffer ({calculatedTargetDate})</span>
+                                </div>
+
+                                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--color-text, #0f172a)', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={modalFillMonth}
+                                            onChange={(e) => setModalFillMonth(e.target.checked)}
+                                        />
+                                        <span>Fill missing month days chronologically</span>
+                                    </label>
+
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#b91c1c', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={modalOverwrite}
+                                            onChange={(e) => setModalOverwrite(e.target.checked)}
+                                        />
+                                        <span>Overwrite existing records (Use with caution)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={handleTriggerRunAuto}
+                                disabled={runningAuto || isFrozen}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px 16px',
+                                    borderRadius: '8px',
+                                    background: '#4f46e5',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    fontWeight: 800,
+                                    fontSize: '0.9rem',
+                                    cursor: runningAuto || isFrozen ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    boxShadow: '0 2px 6px rgba(79, 70, 229, 0.35)',
+                                    transition: 'all 0.15s ease'
+                                }}
+                            >
+                                <i className={`bx ${runningAuto ? 'bx-loader-alt bx-spin' : 'bx-zap'}`} style={{ fontSize: '1.2rem' }}></i>
+                                {runningAuto ? 'Running Auto Attendance Engine...' : '⚡ Run Auto Attendance Now'}
+                            </button>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--color-border, #e2e8f0)', paddingTop: '16px' }}>
+                            <button
+                                type="button"
+                                onClick={() => setShowAutoModal(false)}
+                                style={{ padding: '8px 18px', borderRadius: '8px', background: 'var(--color-bg, #f1f5f9)', color: 'var(--color-text, #0f172a)', border: '1px solid var(--color-border, #cbd5e1)', fontWeight: 600, cursor: 'pointer' }}
+                            >
+                                Close
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveAutoConfig}
+                                disabled={savingAutoConfig}
+                                style={{ padding: '8px 22px', borderRadius: '8px', background: '#059669', color: '#ffffff', border: 'none', fontWeight: 800, cursor: savingAutoConfig ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            >
+                                {savingAutoConfig ? <i className='bx bx-loader-alt bx-spin'></i> : <i className='bx bx-check'></i>}
+                                {savingAutoConfig ? 'Saving...' : 'Save Configuration'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+                </>
             )}
         </div>
     );

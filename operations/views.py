@@ -6,8 +6,10 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Count, Q, OuterRef, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
+from decimal import Decimal
 from datetime import date, timedelta
 from erp_core.views import TenantModelViewSet
 from erp_core.permissions import RolePermission
@@ -21,7 +23,7 @@ from .models import (
     PostShiftRequirement, DutyRoster, DutyRosterStatus, DutyReplacement, DutySwap,
     DutyAssignment, DutyAssignmentStatus,
     ExtraDuty,
-    TemporaryServiceRequest, TemporaryServiceLine,
+    TemporaryServiceRequest, TemporaryServiceLine, TemporaryServiceAssignment,
     QAChecklistTemplate, QAChecklistItem, QAInspection,
     QAInspectionResponse, QAFinding, CorrectiveAction,
     IncidentReport, IncidentAttachment, DailyActivityReport, DailyActivityEntry,
@@ -32,7 +34,7 @@ from .serializers import (
     OperationalSiteSerializer, ServiceContractSerializer,
     ContractRateSerializer, DeploymentSerializer,
     DutyAssignmentSerializer, ExtraDutySerializer,
-    TemporaryServiceRequestSerializer, TemporaryServiceLineSerializer,
+    TemporaryServiceRequestSerializer, TemporaryServiceLineSerializer, TemporaryServiceAssignmentSerializer,
     QAChecklistTemplateSerializer, QAChecklistItemSerializer, QAInspectionSerializer,
     QAInspectionResponseSerializer, QAFindingSerializer, CorrectiveActionSerializer,
     DeploymentListSerializer, SecurityAttendanceSerializer,
@@ -2490,11 +2492,205 @@ class StaffingCoverageView(APIView):
 
 
 class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
-    queryset = TemporaryServiceRequest.objects.all().prefetch_related('lines').select_related('crm_entity', 'operational_site', 'requested_by', 'approved_by')
+    queryset = TemporaryServiceRequest.objects.all().prefetch_related(
+        'lines', 'assigned_guards', 'assigned_guards__employee', 'assigned_guards__designation'
+    ).select_related('crm_entity', 'operational_site', 'requested_by', 'approved_by')
     serializer_class = TemporaryServiceRequestSerializer
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     required_module = 'security_ops'
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        crm_entity_id = self.request.query_params.get('crm_entity')
+        if crm_entity_id:
+            qs = qs.filter(crm_entity_id=crm_entity_id)
+        year_str = self.request.query_params.get('year')
+        month_str = self.request.query_params.get('month')
+        if year_str and month_str:
+            try:
+                import calendar
+                from datetime import date
+                y, m = int(year_str), int(month_str)
+                d_in_m = calendar.monthrange(y, m)[1]
+                qs = qs.filter(start_datetime__date__lte=date(y, m, d_in_m), end_datetime__date__gte=date(y, m, 1))
+            except ValueError:
+                pass
+        return qs
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        company_id = self._resolve_company(request)
+        data = request.data.copy()
+        lines_data = data.pop('lines', [])
+        guards_data = data.pop('assigned_guards', [])
+
+        if not data.get('reference_number'):
+            from erp_core.models import DocumentSequence
+            from companies.models import Company
+            comp_obj = Company.objects.filter(id=company_id).first()
+            data['reference_number'] = DocumentSequence.get_next_number(comp_obj, 'TEMP_SERVICE', 'TSR-')
+
+        # Scenario 2 / 3: If temporary site is requested and no site selected, auto-create site
+        if data.get('is_temporary_site') and not data.get('operational_site') and data.get('site_name'):
+            from operations.models import OperationalSite
+            from crm.models import CRMEntity
+            crm_ent = CRMEntity.objects.filter(id=data.get('crm_entity'), company_id=company_id).first()
+            if crm_ent:
+                site = OperationalSite.objects.create(
+                    company_id=company_id,
+                    crm_entity=crm_ent,
+                    name=data.get('site_name'),
+                    address=data.get('site_name') or 'Event / Temporary Venue'
+                )
+                data['operational_site'] = str(site.id)
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        ts = serializer.save(company_id=company_id, requested_by=request.user)
+
+        self._save_lines_and_guards(ts, lines_data, guards_data)
+        return Response(self.get_serializer(ts).data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        ts = self.get_object()
+        data = request.data.copy()
+        lines_data = data.pop('lines', None)
+        guards_data = data.pop('assigned_guards', None)
+
+        # Scenario 2 / 3: If temporary site is requested and no site selected, auto-create site
+        if data.get('is_temporary_site') and not data.get('operational_site') and data.get('site_name') and not ts.operational_site:
+            from operations.models import OperationalSite
+            from crm.models import CRMEntity
+            crm_ent = CRMEntity.objects.filter(id=data.get('crm_entity') or ts.crm_entity_id, company=ts.company).first()
+            if crm_ent:
+                site = OperationalSite.objects.create(
+                    company=ts.company,
+                    crm_entity=crm_ent,
+                    name=data.get('site_name'),
+                    address=data.get('site_name') or 'Event / Temporary Venue'
+                )
+                data['operational_site'] = str(site.id)
+
+        serializer = self.get_serializer(ts, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        ts = serializer.save()
+
+        if lines_data is not None or guards_data is not None:
+            self._save_lines_and_guards(ts, lines_data, guards_data)
+
+        return Response(self.get_serializer(ts).data, status=status.HTTP_200_OK)
+
+    def _save_lines_and_guards(self, ts, lines_data, guards_data):
+        from decimal import Decimal
+        from hrm.models import Employee, Designation
+
+        # Sync lines if provided
+        if lines_data is not None:
+            if isinstance(lines_data, str):
+                import json
+                try:
+                    lines_data = json.loads(lines_data)
+                except Exception:
+                    lines_data = []
+            ts.lines.all().delete()
+            manpower_cost = Decimal('0.00')
+            equip_cost = Decimal('0.00')
+            tax_total = Decimal('0.00')
+
+            days_span = (ts.end_datetime.date() - ts.start_datetime.date()).days + 1
+            if days_span < 1:
+                days_span = 1
+
+            for ld in lines_data:
+                if isinstance(ld, str):
+                    import json
+                    try:
+                        ld = json.loads(ld)
+                    except Exception:
+                        continue
+                l_type = ld.get('line_type', 'MANPOWER')
+                headcount = int(ld.get('required_headcount', 1))
+                line_days = int(ld.get('days_count') or days_span)
+                b_rate = Decimal(str(ld.get('billing_rate', 0)))
+                p_rate = Decimal(str(ld.get('pay_rate', 0)))
+                d_rate = Decimal(str(ld.get('daily_rate', 0)))
+                tax_pct = Decimal(str(ld.get('tax_percent', 0)))
+
+                rate = b_rate if l_type == 'MANPOWER' else (d_rate or b_rate)
+                if l_type == 'MANPOWER':
+                    line_amt = Decimal(headcount) * Decimal(line_days) * rate
+                    manpower_cost += line_amt
+                else:
+                    base = Decimal(headcount) * Decimal(line_days) * rate
+                    line_tax = (base * (tax_pct / Decimal('100.00'))).quantize(Decimal('0.01'))
+                    line_amt = base + line_tax
+                    equip_cost += base
+                    tax_total += line_tax
+
+                desig_id = ld.get('designation') or ld.get('designation_id')
+                TemporaryServiceLine.objects.create(
+                    company=ts.company,
+                    temporary_service=ts,
+                    line_type=l_type,
+                    designation_id=desig_id if l_type == 'MANPOWER' else None,
+                    required_headcount=headcount,
+                    billing_rate=rate,
+                    pay_rate=p_rate,
+                    shift_start=ld.get('shift_start') or None,
+                    shift_end=ld.get('shift_end') or None,
+                    item_name=ld.get('item_name', ''),
+                    category=ld.get('category', ''),
+                    days_count=line_days,
+                    tax_percent=tax_pct,
+                    total_amount=line_amt,
+                    notes=ld.get('notes', '')
+                )
+
+            ts.total_manpower_cost = manpower_cost
+            ts.total_equipment_cost = equip_cost
+            ts.tax_amount = tax_total
+            ts.grand_total = manpower_cost + equip_cost + tax_total
+            ts.save(update_fields=['total_manpower_cost', 'total_equipment_cost', 'tax_amount', 'grand_total'])
+
+        # Sync guards if provided
+        if guards_data is not None:
+            if isinstance(guards_data, str):
+                import json
+                try:
+                    guards_data = json.loads(guards_data)
+                except Exception:
+                    guards_data = []
+            ts.assigned_guards.all().delete()
+            for gd in guards_data:
+                if isinstance(gd, str):
+                    import json
+                    try:
+                        gd = json.loads(gd)
+                    except Exception:
+                        continue
+                emp_id = gd.get('employee_id')
+                emp = Employee.objects.filter(id=emp_id, company=ts.company).first()
+                if not emp:
+                    continue
+                desig_id = gd.get('designation_id') or emp.designation_id
+                desig = Designation.objects.filter(id=desig_id, company=ts.company).first()
+                daily_p = Decimal(str(gd.get('daily_pay_rate', 0)))
+                daily_b = Decimal(str(gd.get('daily_billing_rate', 0)))
+
+                TemporaryServiceAssignment.objects.create(
+                    company=ts.company,
+                    temporary_service=ts,
+                    employee=emp,
+                    designation=desig,
+                    daily_pay_rate=daily_p,
+                    daily_billing_rate=daily_b,
+                    notes=gd.get('notes', '')
+                )
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -2504,62 +2700,21 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         ts.status = 'APPROVED'
         ts.approved_by = request.user
         ts.save()
-        return Response({'status': 'Approved', 'id': ts.id})
+        return Response({'status': 'Approved', 'id': str(ts.id)})
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
         ts = self.get_object()
-        if ts.status != 'APPROVED':
-            return Response({'error': 'Only APPROVED services can be confirmed'}, status=status.HTTP_400_BAD_REQUEST)
         ts.status = 'CONFIRMED'
         ts.save()
-        return Response({'status': 'Confirmed', 'id': ts.id})
+        return Response({'status': 'Confirmed', 'id': str(ts.id)})
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         ts = self.get_object()
         ts.status = 'CANCELLED'
         ts.save()
-        return Response({'status': 'Cancelled', 'id': ts.id})
-        
-    @action(detail=True, methods=['post'])
-    def generate_duties(self, request, pk=None):
-        ts = self.get_object()
-        if ts.status not in ['APPROVED', 'CONFIRMED']:
-            return Response({'error': 'Service must be approved/confirmed.'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        employees_payload = request.data.get('assignments', [])
-        created_count = 0
-        from .models import DutyAssignment
-        from hrm.models import Employee
-        
-        for assignment in employees_payload:
-            emp_id = assignment.get('employee_id')
-            line_id = assignment.get('line_id')
-            date_str = assignment.get('date')
-            try:
-                from django.utils.dateparse import parse_date
-                if isinstance(date_str, str):
-                    parsed_date = parse_date(date_str)
-                else:
-                    parsed_date = date_str
-                    
-                emp = Employee.objects.get(id=emp_id, company=ts.company)
-                line = ts.lines.get(id=line_id)
-                DutyAssignment.objects.create(
-                    company=ts.company,
-                    temporary_service=ts,
-                    employee=emp,
-                    site=ts.operational_site,
-                    date=parsed_date,
-                    start_time=line.shift_start,
-                    end_time=line.shift_end,
-                )
-                created_count += 1
-            except Exception as e:
-                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-                
-        return Response({'status': f'{created_count} duties generated.'})
+        return Response({'status': 'Cancelled', 'id': str(ts.id)})
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
@@ -2567,58 +2722,459 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         ts.status = 'COMPLETED'
         ts.completed_at = timezone.now()
         ts.save()
-        return Response({'status': 'Completed', 'id': ts.id})
+        return Response({'status': 'Completed', 'id': str(ts.id)})
+
+    @action(detail=True, methods=['post'], url_path='assign-guards')
+    def assign_guards(self, request, pk=None):
+        ts = self.get_object()
+        guards = request.data.get('guards', [])
+        from hrm.models import Employee, Designation
+        created_count = 0
+        with transaction.atomic():
+            for g in guards:
+                emp_id = g.get('employee_id')
+                emp = Employee.objects.filter(id=emp_id, company=ts.company).first()
+                if not emp:
+                    continue
+                desig_id = g.get('designation_id') or emp.designation_id
+                desig = Designation.objects.filter(id=desig_id, company=ts.company).first()
+                daily_pay = Decimal(str(g.get('daily_pay_rate', 0)))
+                daily_bill = Decimal(str(g.get('daily_billing_rate', 0)))
+
+                TemporaryServiceAssignment.objects.update_or_create(
+                    company=ts.company,
+                    temporary_service=ts,
+                    employee=emp,
+                    defaults={
+                        'designation': desig,
+                        'daily_pay_rate': daily_pay,
+                        'daily_billing_rate': daily_bill,
+                        'notes': g.get('notes', '')
+                    }
+                )
+                created_count += 1
+
+        return Response({
+            'status': 'success',
+            'assigned_count': created_count,
+            'message': f'Assigned {created_count} guards to {ts.reference_number}.'
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='unassign-guard')
+    def unassign_guard(self, request, pk=None):
+        ts = self.get_object()
+        emp_id = request.data.get('employee_id')
+        asgn_id = request.data.get('assignment_id')
+        if asgn_id:
+            TemporaryServiceAssignment.objects.filter(id=asgn_id, temporary_service=ts).delete()
+        elif emp_id:
+            TemporaryServiceAssignment.objects.filter(employee_id=emp_id, temporary_service=ts).delete()
+        return Response({'status': 'success', 'message': 'Guard unassigned.'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='muster-grid')
+    def muster_grid(self, request):
+        company_id = self._resolve_company(request)
+        year_str = request.query_params.get('year')
+        month_str = request.query_params.get('month')
+        today = timezone.now().date()
+        year = int(year_str) if year_str else today.year
+        month = int(month_str) if month_str else today.month
         
-    @action(detail=True, methods=['post'])
+        import calendar
+        from datetime import date
+        days_in_month = calendar.monthrange(year, month)[1]
+        m_start = date(year, month, 1)
+        m_end = date(year, month, days_in_month)
+
+        services_qs = TemporaryServiceRequest.objects.filter(
+            company_id=company_id,
+            start_datetime__date__lte=m_end,
+            end_datetime__date__gte=m_start,
+            is_deleted=False
+        ).exclude(status='CANCELLED').select_related(
+            'crm_entity', 'operational_site'
+        ).prefetch_related(
+            'lines', 'assigned_guards', 'assigned_guards__employee', 'assigned_guards__designation'
+        ).order_by('-start_datetime')
+
+        from hrm.models import WorkforceAttendance, AttendanceStatus
+        from operations.models import DailyDutyPay
+
+        site_ids = [ts.operational_site_id for ts in services_qs if ts.operational_site_id]
+        
+        attendances = list(WorkforceAttendance.objects.filter(
+            company_id=company_id,
+            site_id__in=site_ids,
+            date__gte=m_start,
+            date__lte=m_end,
+            is_deleted=False
+        ).select_related('employee'))
+
+        att_map = {}
+        for a in attendances:
+            code = 'P'
+            if a.status in [AttendanceStatus.PRESENT]:
+                code = 'P'
+            elif a.status in [AttendanceStatus.ABSENT]:
+                code = 'A'
+            elif a.status in [AttendanceStatus.LEAVE, AttendanceStatus.UNPAID_LEAVE]:
+                code = 'L'
+            elif a.status in [AttendanceStatus.OVERTIME]:
+                code = 'O'
+            elif a.status in [AttendanceStatus.OVERTIME_DOZING]:
+                code = 'OD'
+            elif a.status in [AttendanceStatus.WORKED_WEEKLY_OFF, AttendanceStatus.DOUBLE_SHIFT]:
+                code = 'WP'
+            elif a.status in [AttendanceStatus.WEEKLY_OFF, AttendanceStatus.OFF_DAY]:
+                code = 'W'
+            att_map[(str(a.site_id), str(a.employee_id), a.date.day)] = code
+
+        services_data = []
+        for ts in services_qs:
+            ts_start = ts.start_datetime.date()
+            ts_end = ts.end_datetime.date()
+
+            active_days = []
+            for d in range(1, days_in_month + 1):
+                cur_d = date(year, month, d)
+                if ts_start <= cur_d <= ts_end:
+                    active_days.append(d)
+
+            guards_data = []
+            total_guards_billed = Decimal('0.00')
+            total_guards_pay = Decimal('0.00')
+
+            site_id_str = str(ts.operational_site_id) if ts.operational_site_id else ''
+
+            for asgn in ts.assigned_guards.all():
+                emp = asgn.employee
+                emp_id_str = str(emp.id)
+                days_dict = {}
+                p_count = 0
+                a_count = 0
+                l_count = 0
+
+                daily_pay = asgn.daily_pay_rate or Decimal('0.00')
+                daily_bill = asgn.daily_billing_rate or Decimal('0.00')
+
+                for d in range(1, days_in_month + 1):
+                    if d in active_days:
+                        code = att_map.get((site_id_str, emp_id_str, d), '')
+                        days_dict[str(d)] = code
+                        if code in ['P', 'PO', 'POD', 'WP', '1']:
+                            p_count += 1
+                        elif code in ['A', '0']:
+                            a_count += 1
+                        elif code in ['L', 'PL', 'SL']:
+                            l_count += 1
+                    else:
+                        days_dict[str(d)] = 'OFF_RANGE'
+
+                attended_days = p_count if (p_count + a_count + l_count > 0) else len(active_days)
+                guard_pay = Decimal(attended_days) * daily_pay
+                client_bill = Decimal(attended_days) * daily_bill
+
+                total_guards_pay += guard_pay
+                total_guards_billed += client_bill
+
+                guards_data.append({
+                    'assignment_id': str(asgn.id),
+                    'employee_id': emp_id_str,
+                    'employee_code': getattr(emp, 'previous_employee_code', None) or getattr(emp, 'display_code', None) or getattr(emp, 'employee_code', '') or '',
+                    'name': f"{emp.first_name} {emp.last_name or ''}".strip(),
+                    'designation': asgn.designation.name if asgn.designation else (emp.designation.name if emp.designation else 'GD'),
+                    'daily_pay_rate': float(daily_pay),
+                    'daily_billing_rate': float(daily_bill),
+                    'days': days_dict,
+                    'total_present': p_count,
+                    'total_absent': a_count,
+                    'total_leave': l_count,
+                    'attended_days': attended_days,
+                    'total_guard_pay': float(guard_pay),
+                    'total_client_bill': float(client_bill),
+                })
+
+            equipment_lines = []
+            total_equipment_billed = Decimal('0.00')
+            for l in ts.lines.all():
+                if l.line_type != 'MANPOWER':
+                    qty = l.required_headcount or 1
+                    days = l.days_count or ((ts_end - ts_start).days + 1)
+                    rate = l.billing_rate or Decimal('0.00')
+                    tax = l.tax_percent or Decimal('0.00')
+                    base = Decimal(qty) * Decimal(days) * rate
+                    tax_val = base * (tax / Decimal('100.00'))
+                    total = base + tax_val
+                    total_equipment_billed += total
+
+                    equipment_lines.append({
+                        'id': str(l.id),
+                        'line_type': l.line_type,
+                        'item_name': l.item_name or l.category or 'Equipment Item',
+                        'category': l.category or l.line_type,
+                        'quantity': qty,
+                        'days_count': days,
+                        'daily_rate': float(rate),
+                        'tax_percent': float(tax),
+                        'tax_amount': float(tax_val),
+                        'total_amount': float(total),
+                        'notes': l.notes or ''
+                    })
+
+            grand_total = total_guards_billed + total_equipment_billed
+
+            services_data.append({
+                'id': str(ts.id),
+                'reference_number': ts.reference_number,
+                'title': ts.title,
+                'crm_entity_id': str(ts.crm_entity_id),
+                'crm_entity_name': ts.crm_entity.name if ts.crm_entity else 'Client',
+                'operational_site_id': site_id_str,
+                'site_name': ts.site_name or (ts.operational_site.name if ts.operational_site else 'Temporary Site'),
+                'is_temporary_site': ts.is_temporary_site,
+                'billing_type': ts.billing_type,
+                'start_date': ts_start.isoformat(),
+                'end_date': ts_end.isoformat(),
+                'active_days': active_days,
+                'status': ts.status,
+                'notes': ts.notes or '',
+                'guards': guards_data,
+                'equipment_lines': equipment_lines,
+                'totals': {
+                    'manpower_billed': float(total_guards_billed),
+                    'manpower_guard_pay': float(total_guards_pay),
+                    'equipment_billed': float(total_equipment_billed),
+                    'grand_total': float(grand_total)
+                }
+            })
+
+        return Response({
+            'year': year,
+            'month': month,
+            'days_in_month': days_in_month,
+            'services': services_data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='save-muster-attendance')
+    def save_muster_attendance(self, request):
+        company_id = self._resolve_company(request)
+        updates = request.data.get('updates', [])
+        year = int(request.data.get('year', timezone.now().year))
+        month = int(request.data.get('month', timezone.now().month))
+
+        from datetime import date
+        from hrm.models import WorkforceAttendance, AttendanceStatus, Employee
+        from operations.models import DailyDutyPay, DutyType
+
+        updated_count = 0
+        with transaction.atomic():
+            for u in updates:
+                service_id = u.get('service_id')
+                emp_id = u.get('employee_id')
+                day = int(u.get('day'))
+                raw_code = str(u.get('code', '')).strip().upper()
+
+                ts = TemporaryServiceRequest.objects.filter(id=service_id, company_id=company_id).first()
+                if not ts:
+                    continue
+
+                ts_start = ts.start_datetime.date()
+                ts_end = ts.end_datetime.date()
+                duty_date = date(year, month, day)
+
+                if not (ts_start <= duty_date <= ts_end):
+                    return Response({
+                        'error': f'Day {day} is outside the active dates ({ts_start} to {ts_end}) for {ts.reference_number}.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                emp = Employee.objects.filter(id=emp_id, company_id=company_id).first()
+                if not emp:
+                    continue
+
+                asgn = ts.assigned_guards.filter(employee=emp).first()
+                daily_pay = asgn.daily_pay_rate if asgn else Decimal('0.00')
+
+                att_status = AttendanceStatus.PRESENT
+                payable_amount = daily_pay
+                if raw_code in ['P', '1']:
+                    att_status = AttendanceStatus.PRESENT
+                    payable_amount = daily_pay
+                elif raw_code in ['A', '0']:
+                    att_status = AttendanceStatus.ABSENT
+                    payable_amount = Decimal('0.00')
+                elif raw_code in ['L', 'PL', 'SL']:
+                    att_status = AttendanceStatus.LEAVE
+                    payable_amount = Decimal('0.00')
+                elif raw_code in ['O']:
+                    att_status = AttendanceStatus.OVERTIME
+                    payable_amount = daily_pay
+                elif raw_code in ['OD']:
+                    att_status = AttendanceStatus.OVERTIME_DOZING
+                    payable_amount = daily_pay
+                elif raw_code in ['WP']:
+                    att_status = AttendanceStatus.WORKED_WEEKLY_OFF
+                    payable_amount = daily_pay * Decimal('2.00')
+                elif raw_code == '':
+                    WorkforceAttendance.objects.filter(
+                        company_id=company_id, site=ts.operational_site, employee=emp, date=duty_date
+                    ).delete()
+                    DailyDutyPay.objects.filter(
+                        company_id=company_id, site=ts.operational_site, employee=emp, duty_date=duty_date
+                    ).delete()
+                    updated_count += 1
+                    continue
+
+                WorkforceAttendance.objects.update_or_create(
+                    company_id=company_id,
+                    site=ts.operational_site,
+                    employee=emp,
+                    date=duty_date,
+                    defaults={
+                        'status': att_status,
+                        'notes': f"Temporary Service: {ts.reference_number}"
+                    }
+                )
+
+                DailyDutyPay.objects.update_or_create(
+                    company_id=company_id,
+                    site=ts.operational_site,
+                    employee=emp,
+                    duty_date=duty_date,
+                    defaults={
+                        'attendance_status': att_status,
+                        'duty_type': DutyType.PRIMARY if raw_code not in ['O', 'OD'] else DutyType.OVERTIME,
+                        'daily_payable_rate': daily_pay,
+                        'payable_amount': payable_amount,
+                        'notes': f"Temporary Service: {ts.reference_number} ({ts.title})"
+                    }
+                )
+                updated_count += 1
+
+        return Response({
+            'status': 'success',
+            'updated_count': updated_count,
+            'message': f'Successfully updated {updated_count} attendance records.'
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='generate-invoice')
     def generate_invoice(self, request, pk=None):
         ts = self.get_object()
-        if ts.status != 'COMPLETED':
-            return Response({'error': 'Service must be completed.'}, status=status.HTTP_400_BAD_REQUEST)
-            
         from billing.models import ServiceInvoice, ServiceInvoiceLine
-        
-        existing = ServiceInvoice.objects.filter(company=ts.company, invoice_number=f'TS-{ts.id}').first()
+        from decimal import Decimal
+
+        existing = ServiceInvoice.objects.filter(company=ts.company, invoice_number=f'TS-{ts.reference_number}').first()
+        if not existing:
+            existing = ServiceInvoice.objects.filter(company=ts.company, invoice_number=f'TS-{ts.id}').first()
+
         if existing:
-            return Response({'status': 'Invoice already exists', 'invoice_id': existing.id})
-            
+            return Response({
+                'status': 'Invoice already exists',
+                'invoice_id': str(existing.id),
+                'invoice_number': existing.invoice_number,
+                'total_amount': float(existing.total_amount)
+            }, status=status.HTTP_200_OK)
+
+        ts_start = ts.start_datetime.date()
+        ts_end = ts.end_datetime.date()
+        days_span = (ts_end - ts_start).days + 1
+        if days_span < 1:
+            days_span = 1
+
         invoice = ServiceInvoice.objects.create(
             company=ts.company,
             crm_entity=ts.crm_entity,
-            period_start=ts.start_datetime.date(),
-            period_end=ts.end_datetime.date(),
-            invoice_number=f'TS-{ts.id}',
-            notes=f"Billing for Temporary Service {ts.reference_number}"
+            period_start=ts_start,
+            period_end=ts_end,
+            invoice_number=f'TS-{ts.reference_number}',
+            notes=f"Billing for Temporary Service: {ts.title} ({ts.reference_number})"
         )
-        
-        from decimal import Decimal
-        total_amount = Decimal(0)
-        
-        for line in ts.lines.all():
-            days = (ts.end_datetime.date() - ts.start_datetime.date()).days + 1
-            if line.shift_start and line.shift_end:
-                h1 = line.shift_start.hour + line.shift_start.minute/60.0
-                h2 = line.shift_end.hour + line.shift_end.minute/60.0
-                hours = h2 - h1 if h2 > h1 else 24 - h1 + h2
-            else:
-                hours = 8
-            
-            amount = Decimal(line.required_headcount) * line.billing_rate * Decimal(int(hours)) * Decimal(days)
+
+        subtotal = Decimal('0.00')
+        tax_total = Decimal('0.00')
+
+        # 1. Manpower lines
+        for line in ts.lines.filter(line_type='MANPOWER'):
+            line_days = line.days_count or days_span
+            qty = line.required_headcount or 1
+            rate = line.billing_rate or Decimal('0.00')
+            amt = Decimal(qty) * Decimal(line_days) * rate
+
             ServiceInvoiceLine.objects.create(
                 company=ts.company,
                 service_invoice=invoice,
                 designation=line.designation,
                 operational_site=ts.operational_site,
-                description=f"{line.designation.name} ({line.required_headcount} pax, {int(hours)}h/day, {days} days)",
-                hours=Decimal(int(hours)) * Decimal(days) * Decimal(line.required_headcount),
-                rate=line.billing_rate,
-                amount=amount
+                description=f"Temporary Security: {line.designation.name if line.designation else 'Guard'} ({qty} guards × {line_days} days)",
+                hours=Decimal(qty) * Decimal(line_days) * Decimal('12.00'),
+                rate=rate,
+                amount=amt
             )
-            total_amount += amount
-            
-        invoice.subtotal = total_amount
-        invoice.total_amount = total_amount
+            subtotal += amt
+
+        # 2. Equipment, Vehicles & Protocol lines
+        for line in ts.lines.exclude(line_type='MANPOWER'):
+            qty = line.required_headcount or 1
+            line_days = line.days_count or days_span
+            rate = line.billing_rate or Decimal('0.00')
+            tax_pct = line.tax_percent or Decimal('0.00')
+            base = Decimal(qty) * Decimal(line_days) * rate
+            line_tax = (base * (tax_pct / Decimal('100.00'))).quantize(Decimal('0.01'))
+
+            ServiceInvoiceLine.objects.create(
+                company=ts.company,
+                service_invoice=invoice,
+                designation=None,
+                operational_site=ts.operational_site,
+                description=f"Temporary {line.get_line_type_display()}: {line.item_name or line.category} ({qty} qty × {line_days} days @ PKR {rate}/day)",
+                hours=Decimal(qty) * Decimal(line_days),
+                rate=rate,
+                amount=base
+            )
+            subtotal += base
+            tax_total += line_tax
+
+        invoice.subtotal = subtotal
+        invoice.tax_amount = tax_total
+        invoice.total_amount = subtotal + tax_total
         invoice.save()
-        return Response({'status': 'Invoice generated', 'invoice_id': invoice.id})
+
+        ts.grand_total = invoice.total_amount
+        ts.save(update_fields=['grand_total'])
+
+        return Response({
+            'status': 'success',
+            'message': f'Invoice {invoice.invoice_number} generated successfully.',
+            'invoice_id': str(invoice.id),
+            'invoice_number': invoice.invoice_number,
+            'total_amount': float(invoice.total_amount)
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='generate_invoice')
+    def generate_invoice_underscore(self, request, pk=None):
+        return self.generate_invoice(request, pk)
+
+    @action(detail=True, methods=['post'], url_path='generate_duties')
+    def generate_duties(self, request, pk=None):
+        ts = self.get_object()
+        assignments = request.data.get('assignments', [])
+        from operations.models import DutyAssignment
+        created = 0
+        for a in assignments:
+            emp_id = a.get('employee_id')
+            line_id = a.get('line_id')
+            d_date = a.get('date')
+            if emp_id and d_date:
+                DutyAssignment.objects.create(
+                    company=ts.company,
+                    temporary_service=ts,
+                    employee_id=emp_id,
+                    operational_site=ts.operational_site,
+                    duty_date=d_date,
+                    notes=f"Auto duty for {ts.reference_number}"
+                )
+                created += 1
+        return Response({'status': 'success', 'created_duties': created}, status=status.HTTP_200_OK)
+
 
 class TemporaryServiceLineViewSet(BaseSecurityOpsViewSet):
     queryset = TemporaryServiceLine.objects.all().select_related('designation')
@@ -4406,6 +4962,104 @@ class MonthlyMusterFreezeMonthView(APIView):
         except Exception as e:
             logger.exception("Error freezing monthly muster: %s", e)
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MonthlyMusterAutoAttendanceConfigView(APIView):
+    """
+    GET /api/operations/monthly-muster/auto-attendance-config/
+    POST /api/operations/monthly-muster/auto-attendance-config/
+    Manage company-scoped auto attendance configuration.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        company = _resolve_company_for_api_view(request)
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        from operations.models import AutoAttendanceConfig
+        config = AutoAttendanceConfig.get_for_company(company)
+        return Response({
+            'is_enabled': config.is_enabled,
+            'delay_days': config.delay_days,
+            'last_run_at': config.last_run_at.isoformat() if config.last_run_at else None,
+            'last_run_date': config.last_run_date.isoformat() if config.last_run_date else None,
+            'notes': config.notes or '',
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        company = _resolve_company_for_api_view(request)
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        from operations.models import AutoAttendanceConfig
+        config = AutoAttendanceConfig.get_for_company(company)
+
+        is_enabled = request.data.get('is_enabled')
+        if is_enabled is not None:
+            config.is_enabled = bool(is_enabled)
+
+        delay_days = request.data.get('delay_days')
+        if delay_days is not None:
+            try:
+                delay_days_int = int(delay_days)
+                if delay_days_int < 1:
+                    return Response({'detail': 'Delay days must be at least 1.'}, status=status.HTTP_400_BAD_REQUEST)
+                config.delay_days = delay_days_int
+            except (ValueError, TypeError):
+                return Response({'detail': 'Invalid delay_days format.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        config.save()
+        return Response({
+            'detail': 'Auto attendance configuration updated successfully.',
+            'is_enabled': config.is_enabled,
+            'delay_days': config.delay_days,
+            'last_run_at': config.last_run_at.isoformat() if config.last_run_at else None,
+            'last_run_date': config.last_run_date.isoformat() if config.last_run_date else None,
+            'notes': config.notes or '',
+        }, status=status.HTTP_200_OK)
+
+
+class MonthlyMusterRunAutoAttendanceView(APIView):
+    """
+    POST /api/operations/monthly-muster/run-auto-attendance/
+    Manually triggers the auto-attendance engine for the current company.
+    Accepts optional parameters:
+      - target_date (YYYY-MM-DD)
+      - fill_month_up_to_target (bool, default True)
+      - overwrite_existing (bool, default False)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        company = _resolve_company_for_api_view(request)
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        target_date_str = request.data.get('target_date')
+        target_date = None
+        if target_date_str:
+            try:
+                from datetime import datetime
+                target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': 'Invalid target_date format. Expected YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        fill_month_up_to_target = request.data.get('fill_month_up_to_target', True)
+        overwrite_existing = request.data.get('overwrite_existing', False)
+
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            result = MonthlyMusterService.run_auto_attendance_for_company(
+                company=company,
+                user=request.user,
+                target_date=target_date,
+                fill_month_up_to_target=bool(fill_month_up_to_target),
+                overwrite_existing=bool(overwrite_existing),
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception("Error running auto attendance: %s", e)
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 

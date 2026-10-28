@@ -595,38 +595,144 @@ export interface ServiceInvoice {
 // Phase S-9: Temporary Services
 // ---------------------------------------------------------------------------
 
+export type TemporaryServiceLineType = 'MANPOWER' | 'EQUIPMENT' | 'VEHICLE' | 'PROTOCOL';
+
 export interface TemporaryServiceLine {
-    id: string;
-    temporary_service: string;
-    designation: string;
+    id?: string;
+    temporary_service?: string;
+    line_type: TemporaryServiceLineType;
+    designation?: string | null;
     designation_name?: string;
-    quantity: number | string;
-    rate: number | string;
-    amount: number | string;
-    created_at: string;
-    updated_at: string;
+    designation_id?: string | null;
+    required_headcount: number;
+    billing_rate: number;
+    pay_rate: number;
+    daily_rate?: number;
+    shift_start?: string | null;
+    shift_end?: string | null;
+    item_name?: string;
+    category?: string;
+    start_date?: string | null;
+    end_date?: string | null;
+    days_count?: number;
+    tax_percent?: number;
+    total_amount?: number;
+    notes?: string;
+    created_at?: string;
+    updated_at?: string;
 }
 
-export type TemporaryServiceStatus = 'DRAFT' | 'REQUESTED' | 'APPROVED' | 'CONFIRMED' | 'COMPLETED';
+export interface TemporaryServiceAssignment {
+    id?: string;
+    temporary_service?: string;
+    service_line?: string | null;
+    employee: string;
+    employee_id?: string;
+    employee_code?: string;
+    employee_name?: string;
+    designation?: string | null;
+    designation_id?: string | null;
+    designation_name?: string;
+    daily_pay_rate: number;
+    daily_billing_rate: number;
+    notes?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export type TemporaryServiceStatus = 'DRAFT' | 'REQUESTED' | 'APPROVED' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 
 export interface TemporaryServiceRequest {
     id: string;
     crm_entity: string;
     crm_entity_name?: string;
+    title: string;
+    reference_number: string;
+    site_name?: string;
     operational_site: string | null;
     operational_site_name?: string;
-    reference_number: string;
+    is_temporary_site?: boolean;
+    billing_type?: 'MONTHLY_CONSOLIDATED' | 'STANDALONE';
     start_datetime: string;
     end_datetime: string;
     status: TemporaryServiceStatus;
-    requested_by: string | null;
+    requested_by?: string | null;
     requested_by_name?: string;
-    approved_by: string | null;
+    approved_by?: string | null;
     approved_by_name?: string;
+    completed_at?: string | null;
+    total_manpower_cost?: number;
+    total_equipment_cost?: number;
+    tax_amount?: number;
+    grand_total?: number;
     notes: string;
     lines?: TemporaryServiceLine[];
+    assigned_guards?: TemporaryServiceAssignment[];
     created_at: string;
     updated_at: string;
+}
+
+export interface TemporaryMusterGuard {
+    assignment_id: string;
+    employee_id: string;
+    employee_code: string;
+    name: string;
+    designation: string;
+    daily_pay_rate: number;
+    daily_billing_rate: number;
+    days: Record<string, string>;
+    total_present: number;
+    total_absent: number;
+    total_leave: number;
+    attended_days: number;
+    total_guard_pay: number;
+    total_client_bill: number;
+}
+
+export interface TemporaryMusterEquipmentLine {
+    id: string;
+    line_type: TemporaryServiceLineType;
+    item_name: string;
+    category: string;
+    quantity: number;
+    days_count: number;
+    daily_rate: number;
+    tax_percent: number;
+    tax_amount: number;
+    total_amount: number;
+    notes: string;
+}
+
+export interface TemporaryMusterServiceBlock {
+    id: string;
+    reference_number: string;
+    title: string;
+    crm_entity_id: string;
+    crm_entity_name: string;
+    operational_site_id: string;
+    site_name: string;
+    is_temporary_site: boolean;
+    billing_type: 'MONTHLY_CONSOLIDATED' | 'STANDALONE';
+    start_date: string;
+    end_date: string;
+    active_days: number[];
+    status: TemporaryServiceStatus;
+    notes: string;
+    guards: TemporaryMusterGuard[];
+    equipment_lines: TemporaryMusterEquipmentLine[];
+    totals: {
+        manpower_billed: number;
+        manpower_guard_pay: number;
+        equipment_billed: number;
+        grand_total: number;
+    };
+}
+
+export interface TemporaryMusterGridResponse {
+    year: number;
+    month: number;
+    days_in_month: number;
+    services: TemporaryMusterServiceBlock[];
 }
 
 // ---------------------------------------------------------------------------

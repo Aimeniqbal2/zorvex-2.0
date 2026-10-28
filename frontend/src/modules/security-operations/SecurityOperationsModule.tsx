@@ -143,7 +143,7 @@ export const SecurityOperationsModule: React.FC = () => {
             case 'staffing':
                 return <DeploymentsView />;
             case 'temporary_services':
-                return <TemporaryServicesView />;
+                return <TemporaryServicesView onNavigateToMuster={() => handleNavigate('monthly_muster')} />;
             case 'qa_inspections':
                 return <QAInspectionsView />;
             case 'qa_actions':

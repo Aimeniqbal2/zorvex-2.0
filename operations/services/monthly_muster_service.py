@@ -1,6 +1,6 @@
 import calendar
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q
@@ -11,7 +11,7 @@ from erp_core.models import BaseModel
 from operations.models import (
     OperationalSite, SecurityPost, Deployment, DailyDutyPay, DutyType,
     DailyPayRateSource, DailyPayCalculationStatus, DeploymentStatus,
-    DeploymentAssignmentType
+    DeploymentAssignmentType, AutoAttendanceConfig
 )
 from hrm.models import Employee, WorkforceAttendance, AttendanceStatus, Designation
 from operations.services.attendance_validation_service import AttendanceValidationService, normalize_attendance_code
@@ -277,6 +277,27 @@ class MonthlyMusterService:
         today = timezone.now().date()
         is_current_month = (today.year == year and today.month == month)
         current_day = today.day if is_current_month else (32 if today > end_date else 0)
+
+        # Check and run tenant Auto Attendance if active and requested month is current
+        config = AutoAttendanceConfig.get_for_company(company)
+        if config and config.is_enabled and is_current_month:
+            delay = config.delay_days if config.delay_days is not None else 2
+            calc_target_date = today - timedelta(days=delay)
+            if calc_target_date >= start_date:
+                needs_run = True
+                if config.last_run_date and config.last_run_date >= calc_target_date:
+                    if config.last_run_at and config.last_run_at.date() == today:
+                        needs_run = False
+                if needs_run:
+                    try:
+                        MonthlyMusterService.run_auto_attendance_for_company(
+                            company=company,
+                            target_date=calc_target_date,
+                            fill_month_up_to_target=True,
+                            overwrite_existing=False
+                        )
+                    except Exception:
+                        pass
 
         # 1. Fetch active operational sites strictly mirroring active CRM entities and active locations
         from security_crm.models import ClientLocation, ProposalServiceLine
@@ -746,12 +767,20 @@ class MonthlyMusterService:
             is_deleted=False
         ).exists()
 
+        config = AutoAttendanceConfig.get_for_company(company)
         return {
             'year': year,
             'month': month,
             'days_in_month': days_in_month,
             'today_day': current_day if is_current_month else (days_in_month if today > end_date else 1),
             'is_frozen': is_frozen,
+            'auto_attendance_config': {
+                'is_enabled': config.is_enabled,
+                'delay_days': config.delay_days,
+                'last_run_at': config.last_run_at.isoformat() if config.last_run_at else None,
+                'last_run_date': config.last_run_date.isoformat() if config.last_run_date else None,
+                'notes': config.notes
+            },
             'sites': site_blocks
         }
 
@@ -1712,5 +1741,234 @@ class MonthlyMusterService:
             'frozen_records_count': count,
             'message': f"Monthly Duty Muster records for {month}/{year} are permanently frozen and closed."
         }
+
+    @staticmethod
+    def resolve_auto_attendance_code(prev_code: str) -> str:
+        """
+        Evaluates attendance code on day (D - 1) and determines auto-attendance code for day D.
+        Exact mapping rules:
+        - P / 1 -> 'P' (Present)
+        - PO / POD -> 'P' (Present + OT resolves to primary Present)
+        - WP / D / DS / WO+OT -> 'P' (Worked Weekly Off resolves to Present)
+        - W / WO -> 'P' (Weekly Off resolves to Present on next duty)
+        - A / ABSENT -> 'A' (Absent)
+        - L / PL / SL / LEAVE -> 'L' (Leave)
+        - O / OT -> '' (Blank, no duty created)
+        - OD / OVERTIME_DOZING -> '' (Blank, no duty created)
+        - Blank / None -> '' (Blank, no duty created)
+        """
+        if not prev_code:
+            return ''
+        c = str(prev_code).strip().upper()
+        if c in ['P', '1', 'PO', 'POD', 'WP', 'D', 'DS', 'WO+OT', 'W', 'WO']:
+            return 'P'
+        elif c in ['A', 'ABSENT']:
+            return 'A'
+        elif c in ['L', 'PL', 'SL', 'LEAVE']:
+            return 'L'
+        elif c in ['O', 'OT', 'OD', 'OVERTIME', 'OVERTIME_DOZING']:
+            return ''
+        return ''
+
+    @staticmethod
+    def get_guard_previous_day_code(company, site, employee, prev_date) -> str:
+        """
+        Queries and returns the unified attendance code for an employee at a site on prev_date.
+        Inspects DailyDutyPay (Primary, Overtime, Overtime Dozing) and falls back to WorkforceAttendance.
+        """
+        from operations.models import DailyDutyPay, DutyType, AttendanceStatus
+        from hrm.models import WorkforceAttendance
+
+        duties = list(DailyDutyPay.objects.filter(
+            company=company,
+            site=site,
+            employee=employee,
+            duty_date=prev_date,
+            is_deleted=False
+        ))
+
+        if duties:
+            has_prim = any(d.duty_type == DutyType.PRIMARY for d in duties)
+            has_ot = any(d.duty_type == DutyType.OVERTIME for d in duties)
+            has_od = any(d.attendance_status == AttendanceStatus.OVERTIME_DOZING for d in duties)
+            prim_duty = next((d for d in duties if d.duty_type == DutyType.PRIMARY), None)
+            prim_st = prim_duty.attendance_status if prim_duty else None
+
+            if has_prim and has_od and prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                return 'POD'
+            elif has_prim and has_ot and prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                return 'PO'
+            elif has_od and (not has_prim or prim_st in [AttendanceStatus.OVERTIME_DOZING, 'OVERTIME_DOZING', 'OD']):
+                return 'OD'
+            elif has_ot and (not has_prim or prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']):
+                return 'O'
+            elif has_prim:
+                if prim_st in [AttendanceStatus.OVERTIME_DOZING, 'OVERTIME_DOZING', 'OD']:
+                    return 'OD'
+                elif prim_st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']:
+                    return 'O'
+                elif prim_st in [AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP', AttendanceStatus.DOUBLE_SHIFT, 'DOUBLE_SHIFT']:
+                    return 'WP'
+                elif prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                    return 'P'
+                elif prim_st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO', AttendanceStatus.OFF_DAY, 'OFF_DAY']:
+                    return 'W'
+                elif prim_st in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
+                    return 'A'
+                elif prim_st in ['LEAVE', 'PAID_LEAVE', 'SICK_LEAVE', 'L', 'PL', AttendanceStatus.ON_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.UNPAID_LEAVE]:
+                    return 'L'
+
+        # Fallback to WorkforceAttendance
+        att = WorkforceAttendance.objects.filter(
+            company=company,
+            site=site,
+            employee=employee,
+            date=prev_date,
+            is_deleted=False
+        ).first()
+
+        if att:
+            st = att.status
+            if st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
+                return 'P'
+            elif st in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
+                return 'A'
+            elif st in [AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP', AttendanceStatus.DOUBLE_SHIFT, 'DOUBLE_SHIFT']:
+                return 'WP'
+            elif st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO', AttendanceStatus.OFF_DAY, 'OFF_DAY']:
+                return 'W'
+            elif st in [AttendanceStatus.OVERTIME, 'OVERTIME', 'O']:
+                return 'O'
+            elif st in [AttendanceStatus.OVERTIME_DOZING, 'OVERTIME_DOZING', 'OD']:
+                return 'OD'
+            elif st in ['LEAVE', 'PAID_LEAVE', 'SICK_LEAVE', 'L', 'PL', AttendanceStatus.ON_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.UNPAID_LEAVE]:
+                return 'L'
+
+        return ''
+
+    @staticmethod
+    def run_auto_attendance_for_company(
+        company,
+        user=None,
+        target_date=None,
+        fill_month_up_to_target=True,
+        overwrite_existing=False
+    ):
+        """
+        Executes automatic attendance generation for a tenant company based on AutoAttendanceConfig.
+        If target_date is None, target_date = today - timedelta(days=config.delay_days).
+        Sequentially processes dates so dependencies (D-1 -> D) are satisfied.
+        """
+        from operations.models import AutoAttendanceConfig, OperationalSite, Deployment, DeploymentStatus, DailyDutyPay
+        import calendar
+        from datetime import date, timedelta
+        from django.utils import timezone
+
+        if not company:
+            return {'status': 'error', 'message': 'Company context required.', 'records_created': 0}
+
+        config = AutoAttendanceConfig.get_for_company(company)
+        if not config.is_enabled and target_date is None:
+            return {'status': 'disabled', 'message': 'Auto-attendance is disabled for this company.', 'records_created': 0}
+
+        today = timezone.now().date()
+        if target_date is None:
+            delay = config.delay_days if config.delay_days is not None else 2
+            target_date = today - timedelta(days=delay)
+        elif isinstance(target_date, str):
+            from datetime import datetime
+            target_date = datetime.strptime(target_date.strip(), '%Y-%m-%d').date()
+
+        if fill_month_up_to_target:
+            month_start = date(target_date.year, target_date.month, 1)
+            begin_date = month_start
+            total_days = (target_date - begin_date).days + 1
+            if total_days > 0:
+                dates_to_process = [begin_date + timedelta(days=i) for i in range(total_days)]
+            else:
+                dates_to_process = [target_date]
+        else:
+            dates_to_process = [target_date]
+
+        total_created = 0
+        days_processed = []
+
+        sites = list(OperationalSite.objects.filter(company=company, is_active=True, is_deleted=False))
+        if not sites:
+            return {'status': 'success', 'message': 'No active operational sites found for this company.', 'records_created': 0}
+
+        for d in dates_to_process:
+            days_in_m = calendar.monthrange(d.year, d.month)[1]
+            m_start = date(d.year, d.month, 1)
+            m_end = date(d.year, d.month, days_in_m)
+            is_frozen = DailyDutyPay.objects.filter(
+                company=company,
+                duty_date__gte=m_start,
+                duty_date__lte=m_end,
+                is_frozen=True,
+                is_deleted=False
+            ).exists()
+            if is_frozen:
+                continue
+
+            prev_d = d - timedelta(days=1)
+            active_deps = list(Deployment.objects.filter(
+                company=company,
+                site__in=sites,
+                is_deleted=False,
+                status=DeploymentStatus.ACTIVE,
+                start_date__lte=d
+            ).filter(
+                Q(end_date__isnull=True) | Q(end_date__gte=d)
+            ).select_related('site', 'employee'))
+
+            day_updates = []
+            for dep in active_deps:
+                has_existing = DailyDutyPay.objects.filter(
+                    company=company,
+                    site=dep.site,
+                    employee=dep.employee,
+                    duty_date=d,
+                    is_deleted=False
+                ).exists()
+
+                if has_existing and not overwrite_existing:
+                    continue
+
+                prev_code = MonthlyMusterService.get_guard_previous_day_code(company, dep.site, dep.employee, prev_d)
+                target_code = MonthlyMusterService.resolve_auto_attendance_code(prev_code)
+
+                if target_code in ['P', 'A', 'L']:
+                    day_updates.append({
+                        'site_id': str(dep.site.id),
+                        'employee_id': str(dep.employee.id),
+                        'day': d.day,
+                        'code': target_code
+                    })
+
+            if day_updates:
+                MonthlyMusterService.save_monthly_muster_updates(
+                    company=company,
+                    user=user,
+                    year=d.year,
+                    month=d.month,
+                    updates=day_updates
+                )
+                total_created += len(day_updates)
+                days_processed.append(d.isoformat())
+
+        config.last_run_at = timezone.now()
+        config.last_run_date = target_date
+        config.notes = f"Auto attendance executed. Processed {len(days_processed)} day(s), generated {total_created} duties up to {target_date}."
+        config.save(update_fields=['last_run_at', 'last_run_date', 'notes', 'updated_at'])
+
+        return {
+            'status': 'success',
+            'target_date': target_date.isoformat(),
+            'records_created': total_created,
+            'days_processed': days_processed,
+            'message': config.notes
+        }
+
 
 

@@ -23,7 +23,9 @@ from .views import (
     MonthlyMusterGridView, MonthlyMusterSaveView,
     MonthlyMusterExcelImportView, MonthlyMusterGuardLedgerView,
     MonthlyMusterCleanupOrphanedAttendanceView,
-    MonthlyMusterFreezeMonthView
+    MonthlyMusterFreezeMonthView,
+    MonthlyMusterAutoAttendanceConfigView,
+    MonthlyMusterRunAutoAttendanceView
 )
 
 router = DefaultRouter()
@@ -85,5 +87,7 @@ urlpatterns = [
     path('monthly-muster/freeze-month/', MonthlyMusterFreezeMonthView.as_view(), name='monthly-muster-freeze-month'),
     path('monthly-muster/import-excel/', MonthlyMusterExcelImportView.as_view(), name='monthly-muster-import-excel'),
     path('monthly-muster/guard-ledger/', MonthlyMusterGuardLedgerView.as_view(), name='monthly-muster-guard-ledger'),
+    path('monthly-muster/auto-attendance-config/', MonthlyMusterAutoAttendanceConfigView.as_view(), name='monthly-muster-auto-config'),
+    path('monthly-muster/run-auto-attendance/', MonthlyMusterRunAutoAttendanceView.as_view(), name='monthly-muster-run-auto'),
     path('', include(router.urls)),
 ]

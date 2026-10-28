@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from hrm.models import PayrollRun, Payslip, PayslipLine
 from .models import (
     OperationalSite, ServiceContract, ContractRate,
-    TemporaryServiceRequest, TemporaryServiceLine,
+    TemporaryServiceRequest, TemporaryServiceLine, TemporaryServiceAssignment,
     QAChecklistTemplate, QAChecklistItem, QAInspection,
     QAInspectionResponse, QAFinding, CorrectiveAction,
     DailyDutyPay, DailyPayRateSource, DailyPayCalculationStatus
@@ -646,8 +646,20 @@ class DailyActivityReportSerializer(BaseModelValidatorMixin, serializers.ModelSe
     def get_prepared_by_name(self, obj):
         return _get_employee_display_name(obj.prepared_by)
 
+class TemporaryServiceAssignmentSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
+    employee_code = serializers.CharField(source='employee.employee_code', read_only=True)
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    designation_name = serializers.CharField(source='designation.name', read_only=True)
+
+    class Meta:
+        model = TemporaryServiceAssignment
+        fields = '__all__'
+        read_only_fields = ('id', 'company', 'created_at', 'updated_at', 'is_deleted')
+
 class TemporaryServiceLineSerializer(BaseModelValidatorMixin, serializers.ModelSerializer):
     designation_name = serializers.CharField(source='designation.name', read_only=True)
+    daily_rate = serializers.DecimalField(source='billing_rate', max_digits=12, decimal_places=2, read_only=True)
+
     class Meta:
         model = TemporaryServiceLine
         fields = '__all__'
@@ -659,6 +671,7 @@ class TemporaryServiceRequestSerializer(BaseModelValidatorMixin, serializers.Mod
     requested_by_name = serializers.CharField(source='requested_by.get_full_name', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
     lines = TemporaryServiceLineSerializer(many=True, read_only=True)
+    assigned_guards = TemporaryServiceAssignmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = TemporaryServiceRequest

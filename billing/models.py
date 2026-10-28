@@ -164,6 +164,7 @@ class ServiceInvoiceLine(BaseModel):
     designation = models.ForeignKey(
         'hrm.Designation',
         on_delete=models.RESTRICT,
+        null=True, blank=True,
         related_name='invoice_lines'
     )
     operational_site = models.ForeignKey(
@@ -196,7 +197,8 @@ class ServiceInvoiceLine(BaseModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.service_invoice.invoice_number} - {self.designation.name} - {self.operational_site.name if self.operational_site else 'All'}"
+        desig_str = self.designation.name if self.designation else self.description
+        return f"{self.service_invoice.invoice_number} - {desig_str} - {self.operational_site.name if self.operational_site else 'All'}"
 
 
 # ============================================================================
