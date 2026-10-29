@@ -943,12 +943,10 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         </div>
                         <div>
                             <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-text, #0f172a)' }}>
-                                {musterMode === 'REGULAR' ? 'Monthly Duty Muster Register' : 'Temporary Services Duty Muster'}
+                                Monthly Duty Muster Register
                             </h2>
                             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>
-                                {musterMode === 'REGULAR' 
-                                    ? 'Full-screen operational attendance sheet & overtime matrix' 
-                                    : 'Active-date constrained event attendance & dual-wing equipment billing'}
+                                Full-screen operational attendance sheet & overtime matrix
                             </span>
                         </div>
                     </div>
@@ -957,17 +955,16 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     <div style={{ display: 'flex', backgroundColor: 'var(--color-bg, #f1f5f9)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border, #cbd5e1)' }}>
                         <button
                             type="button"
-                            onClick={() => setMusterMode('REGULAR')}
                             style={{
                                 padding: '6px 14px',
                                 borderRadius: '6px',
                                 border: 'none',
                                 fontWeight: 700,
                                 fontSize: '0.84rem',
-                                cursor: 'pointer',
-                                backgroundColor: musterMode === 'REGULAR' ? 'var(--color-surface, #ffffff)' : 'transparent',
-                                color: musterMode === 'REGULAR' ? '#059669' : 'var(--color-text-muted, #64748b)',
-                                boxShadow: musterMode === 'REGULAR' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                cursor: 'default',
+                                backgroundColor: 'var(--color-surface, #ffffff)',
+                                color: '#059669',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                                 transition: 'all 0.15s ease'
                             }}
                         >
@@ -984,9 +981,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                 fontWeight: 700,
                                 fontSize: '0.84rem',
                                 cursor: 'pointer',
-                                backgroundColor: musterMode === 'TEMPORARY' ? 'var(--color-primary, #2563eb)' : 'transparent',
-                                color: musterMode === 'TEMPORARY' ? '#ffffff' : 'var(--color-text-muted, #64748b)',
-                                boxShadow: musterMode === 'TEMPORARY' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                backgroundColor: 'transparent',
+                                color: 'var(--color-text-muted, #64748b)',
                                 transition: 'all 0.15s ease'
                             }}
                         >
