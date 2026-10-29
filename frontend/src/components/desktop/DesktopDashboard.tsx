@@ -162,6 +162,9 @@ export const DesktopDashboard: React.FC = () => {
             'store_equipment': 'store_equipment',
             'crm': isSecurityIndustry ? 'clients_contracts' : 'crm',
             'clients_contracts': 'clients_contracts',
+            'fast_costing': 'fast_costing',
+            'monthly_muster': 'monthly_muster',
+            'attendance_register': 'attendance_register',
             'reports': 'reports',
             'settings': 'settings'
         };

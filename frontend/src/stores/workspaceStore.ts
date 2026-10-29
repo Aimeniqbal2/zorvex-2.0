@@ -106,7 +106,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
     pruneStaleIndustryTabs: (isSecurity: boolean) => {
         const { tabs, activeTabId } = get();
-        const securityOnlyCodes = ['security_ops', 'store_equipment', 'clients_contracts', 'security_finance', 'vendors_purchasing'];
+        const securityOnlyCodes = ['security_ops', 'store_equipment', 'clients_contracts', 'security_finance', 'vendors_purchasing', 'fast_costing', 'monthly_muster', 'attendance_register'];
         let updatedTabs = [...tabs];
         
         if (!isSecurity) {

@@ -18,6 +18,11 @@ interface TemporaryServiceModalProps {
     onClose: () => void;
     onSaved: () => void;
     service?: TemporaryServiceRequest | null;
+    preselectedCrmEntityId?: string;
+    preselectedCrmEntityName?: string;
+    preselectedSiteId?: string;
+    preselectedSiteName?: string;
+    initialScenario?: 'existing_site' | 'new_venue' | 'new_client';
 }
 
 type ModalTab = 'event' | 'manpower' | 'guards' | 'equipment' | 'summary';
@@ -36,21 +41,72 @@ const EQUIPMENT_PRESETS = [
     { type: 'PROTOCOL' as TemporaryServiceLineType, name: 'VIP Entry Lane Barriers & Stanchions', category: 'Crowd Control', rate: 15000, tax: 13 },
 ];
 
+// Module-level caches for instant modal dropdown performance
+let cachedEntities: any[] | null = null;
+let cachedSites: any[] | null = null;
+let cachedDesignations: any[] | null = null;
+let cachedEmployees: any[] | null = null;
+
 export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({ 
     isOpen, 
     onClose, 
     onSaved, 
-    service 
+    service,
+    preselectedCrmEntityId,
+    preselectedCrmEntityName,
+    preselectedSiteId,
+    preselectedSiteName,
+    initialScenario
 }) => {
     const [activeTab, setActiveTab] = useState<ModalTab>('event');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     
-    // Dependencies
-    const [entities, setEntities] = useState<any[]>([]);
-    const [sites, setSites] = useState<any[]>([]);
-    const [designations, setDesignations] = useState<any[]>([]);
-    const [employees, setEmployees] = useState<any[]>([]);
+    // Dependencies (fast cached)
+    const [entities, setEntities] = useState<any[]>(cachedEntities || []);
+    const [sites, setSites] = useState<any[]>(cachedSites || []);
+    const [designations, setDesignations] = useState<any[]>(cachedDesignations || []);
+    const [employees, setEmployees] = useState<any[]>(cachedEmployees || []);
+
+    // Wing B Custom Item Manual Entry State
+    const [showCustomItemForm, setShowCustomItemForm] = useState(true);
+    const [customItemName, setCustomItemName] = useState('');
+    const [customItemType, setCustomItemType] = useState<TemporaryServiceLineType>('EQUIPMENT');
+    const [customItemCategory, setCustomItemCategory] = useState('');
+    const [customItemQty, setCustomItemQty] = useState(1);
+    const [customItemDays, setCustomItemDays] = useState(1);
+    const [customItemRate, setCustomItemRate] = useState(0);
+    const [customItemTax, setCustomItemTax] = useState(13);
+    const [customItemNotes, setCustomItemNotes] = useState('');
+
+    const handleAddCustomItem = () => {
+        if (!customItemName.trim()) {
+            useToastStore.getState().error('Please enter an item or service name.');
+            return;
+        }
+        setLines(prev => [
+            ...prev,
+            {
+                line_type: customItemType,
+                item_name: customItemName.trim(),
+                category: customItemCategory.trim() || customItemType,
+                required_headcount: Number(customItemQty) || 1,
+                days_count: Number(customItemDays) || daysSpan,
+                daily_rate: Number(customItemRate) || 0,
+                tax_percent: Number(customItemTax) || 0,
+                notes: customItemNotes.trim()
+            }
+        ]);
+        setCustomItemName('');
+        setCustomItemCategory('');
+        setCustomItemQty(1);
+        setCustomItemDays(daysSpan);
+        setCustomItemRate(0);
+        setCustomItemTax(13);
+        setCustomItemNotes('');
+        setShowCustomItemForm(false);
+        useToastStore.getState().success('Custom item added to bill.');
+    };
 
     // Scenario 3: Quick create client
     const [isNewClientMode, setIsNewClientMode] = useState(false);
@@ -74,22 +130,36 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
     const [lines, setLines] = useState<Partial<TemporaryServiceLine>[]>([]);
     const [assignedGuards, setAssignedGuards] = useState<Partial<TemporaryServiceAssignment>[]>([]);
 
-    // Fetch dependencies
+    // Fast cached dependency loader (instantly serves cached entities/sites/designations)
     useEffect(() => {
         if (!isOpen) return;
 
         const loadDependencies = async () => {
             try {
-                const [entitiesRes, sitesRes, desigRes, empRes] = await Promise.all([
-                    apiClient.get('/api/crm/entities/?active=true&limit=200'),
-                    apiClient.get('/api/operations/sites/?is_active=true&limit=200'),
-                    apiClient.get('/api/hrm/designations/?is_active=true&page_size=200').catch(() => ({ data: [] })),
-                    apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=500').catch(() => ({ data: [] }))
+                if (cachedEntities && cachedSites && cachedDesignations) {
+                    setEntities(cachedEntities);
+                    setSites(cachedSites);
+                    setDesignations(cachedDesignations);
+                    return;
+                }
+
+                const [entitiesRes, sitesRes, desigRes] = await Promise.all([
+                    cachedEntities ? Promise.resolve({ data: cachedEntities }) : apiClient.get('/api/crm/entities/?active=true&page_size=250'),
+                    cachedSites ? Promise.resolve({ data: cachedSites }) : apiClient.get('/api/operations/sites/?is_active=true&limit=200'),
+                    cachedDesignations ? Promise.resolve({ data: cachedDesignations }) : apiClient.get('/api/hrm/designations/?is_active=true&page_size=200').catch(() => ({ data: [] }))
                 ]);
-                setEntities(entitiesRes.data.results || entitiesRes.data || []);
-                setSites(sitesRes.data.results || sitesRes.data || []);
-                setDesignations(desigRes.data.results || desigRes.data || []);
-                setEmployees(empRes.data.results || empRes.data || []);
+
+                const loadedEntities = entitiesRes.data.results || entitiesRes.data || [];
+                const loadedSites = sitesRes.data.results || sitesRes.data || [];
+                const loadedDesig = desigRes.data.results || desigRes.data || [];
+
+                cachedEntities = loadedEntities;
+                cachedSites = loadedSites;
+                cachedDesignations = loadedDesig;
+
+                setEntities(loadedEntities);
+                setSites(loadedSites);
+                setDesignations(loadedDesig);
             } catch (err) {
                 console.error('Failed to load dependencies', err);
             }
@@ -97,6 +167,25 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
 
         loadDependencies();
     }, [isOpen]);
+
+    // Lazy load employees roster ONLY when user opens Guards tab
+    useEffect(() => {
+        if (!isOpen || activeTab !== 'guards') return;
+        if (employees.length > 0) return;
+
+        if (cachedEmployees && cachedEmployees.length > 0) {
+            setEmployees(cachedEmployees);
+            return;
+        }
+
+        apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=500')
+            .then(res => {
+                const emps = res.data.results || res.data || [];
+                cachedEmployees = emps;
+                setEmployees(emps);
+            })
+            .catch(err => console.error('Failed to load employees', err));
+    }, [isOpen, activeTab, employees.length]);
 
     // Populate on open / change
     useEffect(() => {
@@ -146,12 +235,27 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                 return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`;
             };
 
-            setCrmEntity('');
+            const targetClient = preselectedCrmEntityId ? String(preselectedCrmEntityId) : '';
+            const targetSiteName = preselectedSiteName || '';
+            let targetSiteId = preselectedSiteId ? String(preselectedSiteId) : '';
+
+            // If targetSiteName exists and sites are loaded, match operational site
+            if (targetSiteName && sites.length > 0) {
+                const match = sites.find(s => 
+                    s.name?.trim().toLowerCase() === targetSiteName.trim().toLowerCase() &&
+                    (!targetClient || String(s.crm_entity) === String(targetClient) || String(s.customer) === String(targetClient))
+                );
+                if (match) {
+                    targetSiteId = String(match.id);
+                }
+            }
+
+            setCrmEntity(targetClient);
             setTitle('');
             setReferenceNumber(`TSR-${Math.floor(1000 + Math.random() * 9000)}`);
-            setIsTemporarySite(false);
-            setOperationalSite('');
-            setSiteName('');
+            setIsTemporarySite(initialScenario === 'new_venue');
+            setOperationalSite(targetSiteId);
+            setSiteName(targetSiteName);
             setBillingType('STANDALONE');
             setStartDatetime(formatDt(now));
             setEndDatetime(formatDt(tomorrow));
@@ -171,7 +275,43 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             ]);
             setAssignedGuards([]);
         }
-    }, [isOpen, service]);
+    }, [isOpen, service, preselectedCrmEntityId, preselectedCrmEntityName, preselectedSiteId, preselectedSiteName, initialScenario]);
+
+    // Keep crmEntity in sync with preselectedCrmEntityId whenever modal opens or prop changes
+    useEffect(() => {
+        if (!isOpen || service) return;
+        if (preselectedCrmEntityId && crmEntity !== String(preselectedCrmEntityId)) {
+            setCrmEntity(String(preselectedCrmEntityId));
+        }
+    }, [isOpen, preselectedCrmEntityId, crmEntity, service]);
+
+    // Keep operationalSite in sync if sites list finishes loading after modal opens
+    useEffect(() => {
+        if (!isOpen || service) return;
+        if (preselectedSiteId && !operationalSite) {
+            setOperationalSite(String(preselectedSiteId));
+        }
+        if (preselectedSiteName && sites.length > 0) {
+            const match = sites.find(s => 
+                s.name?.trim().toLowerCase() === preselectedSiteName.trim().toLowerCase() &&
+                (!crmEntity || String(s.crm_entity) === String(crmEntity) || String(s.customer) === String(crmEntity))
+            );
+            if (match) {
+                if (operationalSite !== String(match.id)) {
+                    setOperationalSite(String(match.id));
+                }
+                if (!crmEntity && (match.crm_entity || match.customer)) {
+                    setCrmEntity(String(match.crm_entity || match.customer));
+                }
+            }
+        }
+        if (operationalSite && !crmEntity) {
+            const matchedSite = sites.find(s => String(s.id) === String(operationalSite));
+            if (matchedSite && (matchedSite.crm_entity || matchedSite.customer)) {
+                setCrmEntity(String(matchedSite.crm_entity || matchedSite.customer));
+            }
+        }
+    }, [isOpen, sites, preselectedSiteId, preselectedSiteName, crmEntity, operationalSite, service]);
 
     // Computed days duration
     const daysSpan = useMemo(() => {
@@ -183,11 +323,36 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
         return diffDays > 0 ? diffDays : 1;
     }, [startDatetime, endDatetime]);
 
-    // Available sites filtered for selected CRM entity
+    // Available sites filtered for selected CRM entity + ensure preselected site is selectable
     const clientSites = useMemo(() => {
         if (!crmEntity) return sites;
-        return sites.filter(s => String(s.crm_entity) === String(crmEntity) || String(s.customer) === String(crmEntity));
-    }, [sites, crmEntity]);
+        const filtered = sites.filter(s => String(s.crm_entity) === String(crmEntity) || String(s.customer) === String(crmEntity));
+        
+        const currentId = operationalSite || preselectedSiteId;
+        const currentName = preselectedSiteName || siteName;
+        if (currentId && !filtered.some(s => String(s.id) === String(currentId))) {
+            const matchByName = filtered.find(s => currentName && s.name?.trim().toLowerCase() === currentName.trim().toLowerCase());
+            if (!matchByName && currentName) {
+                filtered.unshift({
+                    id: currentId,
+                    name: currentName,
+                    address: 'Registered Location',
+                    crm_entity: crmEntity
+                });
+            }
+        }
+        return filtered;
+    }, [sites, crmEntity, operationalSite, preselectedSiteId, preselectedSiteName, siteName]);
+
+    // If client has only 1 location, auto-select it by default
+    useEffect(() => {
+        if (!isOpen || service) return;
+        if (!operationalSite && clientSites.length === 1 && !isTemporarySite) {
+            setOperationalSite(String(clientSites[0].id));
+        }
+    }, [isOpen, clientSites, operationalSite, isTemporarySite, service]);
+
+
 
     // Quick client creation for Scenario 3
     const handleCreateNewClient = async () => {
@@ -367,16 +532,20 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             return;
         }
 
+        const effectiveClient = crmEntity || (preselectedCrmEntityId ? String(preselectedCrmEntityId) : '');
+        const matchedOpSite = sites.find(s => String(s.id) === String(operationalSite));
+        const effectiveSiteName = siteName.trim() || (matchedOpSite ? matchedOpSite.name : (preselectedSiteName || undefined));
+
         const payload: any = {
-            crm_entity: crmEntity,
-            title: title || (isTemporarySite ? `Event: ${siteName}` : `Temporary Service`),
+            crm_entity: effectiveClient,
+            title: title || (isTemporarySite ? `Event: ${effectiveSiteName || 'Site'}` : `Temporary Service`),
             reference_number: referenceNumber,
             is_temporary_site: isTemporarySite,
             operational_site: isTemporarySite ? null : (operationalSite || null),
-            site_name: siteName.trim() || undefined,
-            billing_type: billingType,
+            site_name: effectiveSiteName,
+            billing_type: 'STANDALONE',
             start_datetime: startDatetime,
-            end_datetime: endDatetime,
+            end_datetime: endDatetime ? endDatetime : null,
             status,
             notes,
             lines: lines.map(l => ({
@@ -656,7 +825,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                             ) : (
                                 <select
                                     className="input-base"
-                                    value={crmEntity}
+                                    value={crmEntity || (preselectedCrmEntityId ? String(preselectedCrmEntityId) : '')}
                                     onChange={e => {
                                         setCrmEntity(e.target.value);
                                         setOperationalSite('');
@@ -664,6 +833,9 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                                     required
                                 >
                                     <option value="">Select Existing Client...</option>
+                                    {(crmEntity || preselectedCrmEntityId) && !entities.some(ent => String(ent.id) === String(crmEntity || preselectedCrmEntityId)) && (
+                                        <option value={crmEntity || String(preselectedCrmEntityId)}>{preselectedCrmEntityName || 'Selected Client'}</option>
+                                    )}
                                     {entities.map(ent => (
                                         <option key={ent.id} value={ent.id}>{ent.name}</option>
                                     ))}
@@ -716,7 +888,17 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                                     <select
                                         className="input-base"
                                         value={operationalSite}
-                                        onChange={e => setOperationalSite(e.target.value)}
+                                        onChange={e => {
+                                            const newSiteId = e.target.value;
+                                            setOperationalSite(newSiteId);
+                                            const sObj = sites.find(s => String(s.id) === String(newSiteId));
+                                            if (sObj) {
+                                                setSiteName(sObj.name);
+                                                if (!crmEntity && (sObj.crm_entity || sObj.customer)) {
+                                                    setCrmEntity(String(sObj.crm_entity || sObj.customer));
+                                                }
+                                            }
+                                        }}
                                         required={!isTemporarySite}
                                     >
                                         <option value="">Select Site...</option>
@@ -728,7 +910,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                             )}
                         </div>
 
-                        {/* Dates & Billing Type */}
+                        {/* Dates & Standalone Billing Mode */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                             <div className="form-field">
                                 <label className="form-label" style={{ fontWeight: 600 }}>
@@ -744,32 +926,39 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                             </div>
                             <div className="form-field">
                                 <label className="form-label" style={{ fontWeight: 600 }}>
-                                    End Date & Time <span style={{ color: '#ef4444' }}>*</span>
+                                    End Date & Time <span style={{ color: 'var(--color-text-muted, #64748b)', fontSize: '11px', fontWeight: 'normal' }}>(Optional)</span>
                                 </label>
                                 <input
                                     type="datetime-local"
                                     className="input-base"
                                     value={endDatetime}
                                     onChange={e => setEndDatetime(e.target.value)}
-                                    required
                                 />
                                 <span style={{ fontSize: '11px', color: 'var(--color-primary, #2563eb)', marginTop: '4px', display: 'block' }}>
-                                    Duration: <strong>{daysSpan} {daysSpan === 1 ? 'Day' : 'Days'}</strong>
+                                    Duration: <strong>{endDatetime ? `${daysSpan} ${daysSpan === 1 ? 'Day' : 'Days'}` : 'Ongoing / Flexible'}</strong>
                                 </span>
                             </div>
                             <div className="form-field">
                                 <label className="form-label" style={{ fontWeight: 600 }}>
-                                    Billing Mode <span style={{ color: '#ef4444' }}>*</span>
+                                    Billing Mode
                                 </label>
-                                <select
-                                    className="input-base"
-                                    value={billingType}
-                                    onChange={e => setBillingType(e.target.value as any)}
-                                    required
-                                >
-                                    <option value="STANDALONE">Standalone Event Invoice</option>
-                                    <option value="MONTHLY_CONSOLIDATED">Monthly Consolidated Invoice</option>
-                                </select>
+                                <div style={{
+                                    padding: '8px 12px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'var(--color-surface-subtle, #f8fafc)',
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    fontSize: '12.5px',
+                                    fontWeight: 600,
+                                    color: '#0369a1',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px'
+                                }}>
+                                    <i className="bx bx-receipt" /> Standalone Bill (Default)
+                                </div>
+                                <span style={{ fontSize: '11px', color: 'var(--color-text-muted, #64748b)', marginTop: '4px', display: 'block' }}>
+                                    Direct event bill (separated from monthly retainer)
+                                </span>
                             </div>
                         </div>
 
@@ -1094,11 +1283,128 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                             </span>
                         </div>
 
-                        {/* Quick Presets */}
-                        <div>
-                            <span style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
-                                Quick Add Standard Assets:
-                            </span>
+                        {/* Quick Presets & Manual Custom Item */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                                <span style={{ fontSize: '12px', fontWeight: 600 }}>
+                                    Quick Add Standard Assets:
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setShowCustomItemForm(prev => !prev)}
+                                    style={{ fontSize: '12px' }}
+                                >
+                                    <i className={`bx ${showCustomItemForm ? 'bx-chevron-up' : 'bx-plus-circle'}`} style={{ marginRight: '4px' }} />
+                                    {showCustomItemForm ? 'Close Manual Entry' : 'Manual Entry (Custom Item/Service)'}
+                                </Button>
+                            </div>
+
+                            {/* Manual Custom Item Entry Form */}
+                            {showCustomItemForm && (
+                                <div style={{
+                                    padding: '14px',
+                                    borderRadius: '8px',
+                                    backgroundColor: 'var(--color-surface-subtle, #f8fafc)',
+                                    border: '1px solid var(--color-border, #cbd5e1)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '10px'
+                                }}>
+                                    <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--color-primary, #2563eb)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <i className="bx bx-edit-alt" /> Add Custom Equipment, Vehicle or Protocol Service
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+                                        <div>
+                                            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>Category</label>
+                                            <select
+                                                className="input-base"
+                                                style={{ fontSize: '12px', padding: '6px' }}
+                                                value={customItemType}
+                                                onChange={e => setCustomItemType(e.target.value as any)}
+                                            >
+                                                <option value="EQUIPMENT">Equipment / Asset</option>
+                                                <option value="VEHICLE">Vehicle / Escort Fleet</option>
+                                                <option value="PROTOCOL">Protocol / VIP Service</option>
+                                            </select>
+                                        </div>
+                                        <div style={{ gridColumn: 'span 2' }}>
+                                            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>Item / Service Name *</label>
+                                            <input
+                                                type="text"
+                                                className="input-base"
+                                                style={{ fontSize: '12px', padding: '6px' }}
+                                                placeholder="e.g. Body Worn Cameras, K9 Dog Unit, Barriers"
+                                                value={customItemName}
+                                                onChange={e => setCustomItemName(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>Quantity</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                className="input-base"
+                                                style={{ fontSize: '12px', padding: '6px' }}
+                                                value={customItemQty}
+                                                onChange={e => setCustomItemQty(parseInt(e.target.value) || 1)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>Days</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                className="input-base"
+                                                style={{ fontSize: '12px', padding: '6px' }}
+                                                value={customItemDays}
+                                                onChange={e => setCustomItemDays(parseInt(e.target.value) || 1)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>Daily Rate (₨) *</label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                className="input-base"
+                                                style={{ fontSize: '12px', padding: '6px' }}
+                                                value={customItemRate}
+                                                onChange={e => setCustomItemRate(parseFloat(e.target.value) || 0)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px' }}>Tax %</label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                className="input-base"
+                                                style={{ fontSize: '12px', padding: '6px' }}
+                                                value={customItemTax}
+                                                onChange={e => setCustomItemTax(parseFloat(e.target.value) || 0)}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setShowCustomItemForm(false)}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={handleAddCustomItem}
+                                        >
+                                            <i className="bx bx-plus" style={{ marginRight: '4px' }} /> Add Custom Item to Bill
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                                 {EQUIPMENT_PRESETS.map((p, pIdx) => (
                                     <button

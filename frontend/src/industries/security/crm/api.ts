@@ -117,6 +117,15 @@ export interface ProposalVersion {
     withholding_tax_override?: string | number | null;
     total_sessi?: string | number;
     total_eobi?: string | number;
+    eobi_enabled?: boolean;
+    eobi_rate?: string | number;
+    sessi_enabled?: boolean;
+    sessi_minimum_wage?: string | number;
+    sessi_percentage?: string | number;
+    admin_charges_enabled?: boolean;
+    admin_charges_percentage?: string | number;
+    insurance_enabled?: boolean;
+    insurance_percentage?: string | number;
     sent_at?: string | null;
     sent_by?: string | null;
     monthly_services_total?: string | number;
@@ -196,6 +205,9 @@ export interface SecurityProposal {
     guard_headcount?: number;
     guard_breakdown?: string;
     requirement_scope_display?: string;
+    total_monthly_amount?: number;
+    monthly_rate?: number;
+    location_rates?: Record<string, number>;
 
     // Approval Fields
     approved_version?: string | null;
@@ -1104,6 +1116,15 @@ export interface CostingGridRow {
     withholding_tax_override?: number | string | null;
     sessi?: number | string | null;
     eobi?: number | string | null;
+    eobi_enabled?: boolean;
+    eobi_rate?: number | string | null;
+    sessi_enabled?: boolean;
+    sessi_minimum_wage?: number | string | null;
+    sessi_percentage?: number | string | null;
+    admin_charges_enabled?: boolean;
+    admin_charges_percentage?: number | string | null;
+    insurance_enabled?: boolean;
+    insurance_percentage?: number | string | null;
     ot_rate?: number | string | null;
     sales_tax_basis?: string;
     withholding_tax_basis?: string;
@@ -1213,6 +1234,32 @@ export const importCostingExcel = async (file: File) => {
     });
     return response.data as { success: boolean; imported_clients: number; imported_lines: number; message: string };
 };
+
+export interface CostingSettings {
+    id?: string;
+    eobi_rate: number;
+    sessi_minimum_wage: number;
+    sessi_percentage: number;
+    admin_charges_percentage: number;
+    insurance_percentage: number;
+    eobi_default_enabled: boolean;
+    sessi_default_enabled: boolean;
+    admin_charges_default_enabled: boolean;
+    insurance_default_enabled: boolean;
+}
+
+export const fetchCostingSettings = async (): Promise<CostingSettings> => {
+    const response = await apiClient.get('/api/security/crm/costing-settings/');
+    return response.data;
+};
+
+export const updateCostingSettings = async (
+    payload: Partial<CostingSettings> & { apply_to_all_locations?: boolean; apply_toggles?: boolean }
+): Promise<{ success: boolean; settings: CostingSettings; message: string }> => {
+    const response = await apiClient.post('/api/security/crm/costing-settings/', payload);
+    return response.data;
+};
+
 
 
 

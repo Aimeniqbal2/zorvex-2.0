@@ -2507,15 +2507,55 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         crm_entity_id = self.request.query_params.get('crm_entity')
         if crm_entity_id:
             qs = qs.filter(crm_entity_id=crm_entity_id)
+        site_id = self.request.query_params.get('operational_site') or self.request.query_params.get('site')
+        site_name_param = self.request.query_params.get('site_name') or self.request.query_params.get('location_name')
+
+        if site_id:
+            from security_crm.models import ClientLocation
+            from operations.models import OperationalSite
+            from django.db.models import Q
+            cl = ClientLocation.objects.filter(id=site_id).first()
+            if cl:
+                matching_sites = OperationalSite.objects.filter(
+                    Q(id=site_id) | Q(crm_entity_id=cl.customer_id, name__iexact=cl.name) | Q(name__iexact=cl.name)
+                )
+                matching_site_ids = list(matching_sites.values_list('id', flat=True))
+                qs = qs.filter(
+                    Q(operational_site_id__in=matching_site_ids) |
+                    Q(site_name__iexact=cl.name)
+                )
+            else:
+                op_site = OperationalSite.objects.filter(id=site_id).first()
+                if op_site:
+                    qs = qs.filter(
+                        Q(operational_site_id=op_site.id) |
+                        Q(site_name__iexact=op_site.name)
+                    )
+                else:
+                    qs = qs.filter(operational_site_id=site_id)
+        elif site_name_param:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(operational_site__name__iexact=site_name_param) |
+                Q(site_name__iexact=site_name_param)
+            )
+
         year_str = self.request.query_params.get('year')
         month_str = self.request.query_params.get('month')
         if year_str and month_str:
             try:
                 import calendar
                 from datetime import date
+                from django.db.models import Q
                 y, m = int(year_str), int(month_str)
                 d_in_m = calendar.monthrange(y, m)[1]
-                qs = qs.filter(start_datetime__date__lte=date(y, m, d_in_m), end_datetime__date__gte=date(y, m, 1))
+                m_start = date(y, m, 1)
+                m_end = date(y, m, d_in_m)
+                qs = qs.filter(
+                    start_datetime__date__lte=m_end
+                ).filter(
+                    Q(end_datetime__isnull=True) | Q(end_datetime__date__gte=m_start)
+                )
             except ValueError:
                 pass
         return qs
@@ -2602,7 +2642,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
             equip_cost = Decimal('0.00')
             tax_total = Decimal('0.00')
 
-            days_span = (ts.end_datetime.date() - ts.start_datetime.date()).days + 1
+            days_span = (ts.end_datetime.date() - ts.start_datetime.date()).days + 1 if ts.end_datetime else 1
             if days_span < 1:
                 days_span = 1
 
@@ -2740,6 +2780,10 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                 desig = Designation.objects.filter(id=desig_id, company=ts.company).first()
                 daily_pay = Decimal(str(g.get('daily_pay_rate', 0)))
                 daily_bill = Decimal(str(g.get('daily_billing_rate', 0)))
+                if daily_bill == Decimal('0'):
+                    matching_line = ts.lines.filter(line_type='MANPOWER', designation=desig).first() or ts.lines.filter(line_type='MANPOWER').first()
+                    if matching_line and matching_line.billing_rate:
+                        daily_bill = matching_line.billing_rate
 
                 TemporaryServiceAssignment.objects.update_or_create(
                     company=ts.company,
@@ -2782,6 +2826,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         
         import calendar
         from datetime import date
+        from django.db.models import Q
         days_in_month = calendar.monthrange(year, month)[1]
         m_start = date(year, month, 1)
         m_end = date(year, month, days_in_month)
@@ -2789,9 +2834,11 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         services_qs = TemporaryServiceRequest.objects.filter(
             company_id=company_id,
             start_datetime__date__lte=m_end,
-            end_datetime__date__gte=m_start,
+            lines__line_type='MANPOWER',
             is_deleted=False
-        ).exclude(status='CANCELLED').select_related(
+        ).filter(
+            Q(end_datetime__isnull=True) | Q(end_datetime__date__gte=m_start)
+        ).exclude(status='CANCELLED').distinct().select_related(
             'crm_entity', 'operational_site'
         ).prefetch_related(
             'lines', 'assigned_guards', 'assigned_guards__employee', 'assigned_guards__designation'
@@ -2832,7 +2879,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         services_data = []
         for ts in services_qs:
             ts_start = ts.start_datetime.date()
-            ts_end = ts.end_datetime.date()
+            ts_end = ts.end_datetime.date() if ts.end_datetime else m_end
 
             active_days = []
             for d in range(1, days_in_month + 1):
@@ -2923,6 +2970,24 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
 
             grand_total = total_guards_billed + total_equipment_billed
 
+            manpower_requirements = []
+            total_req_headcount = 0
+            for l in ts.lines.all():
+                if l.line_type == 'MANPOWER':
+                    hc = l.required_headcount or 1
+                    total_req_headcount += hc
+                    manpower_requirements.append({
+                        'id': str(l.id),
+                        'designation_id': str(l.designation_id) if l.designation_id else None,
+                        'designation_name': l.designation.name if l.designation else 'Security Guard',
+                        'required_headcount': hc,
+                        'shift_start': str(l.shift_start) if l.shift_start else None,
+                        'shift_end': str(l.shift_end) if l.shift_end else None,
+                        'daily_pay_rate': float(l.pay_rate or 0),
+                        'daily_billing_rate': float(l.billing_rate or 0),
+                        'notes': l.notes or ''
+                    })
+
             services_data.append({
                 'id': str(ts.id),
                 'reference_number': ts.reference_number,
@@ -2934,12 +2999,15 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                 'is_temporary_site': ts.is_temporary_site,
                 'billing_type': ts.billing_type,
                 'start_date': ts_start.isoformat(),
-                'end_date': ts_end.isoformat(),
+                'end_date': ts.end_datetime.date().isoformat() if ts.end_datetime else None,
                 'active_days': active_days,
                 'status': ts.status,
                 'notes': ts.notes or '',
                 'guards': guards_data,
                 'equipment_lines': equipment_lines,
+                'manpower_requirements': manpower_requirements,
+                'total_required_headcount': total_req_headcount,
+                'total_assigned_guards': len(guards_data),
                 'totals': {
                     'manpower_billed': float(total_guards_billed),
                     'manpower_guard_pay': float(total_guards_pay),
@@ -2979,7 +3047,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                     continue
 
                 ts_start = ts.start_datetime.date()
-                ts_end = ts.end_datetime.date()
+                ts_end = ts.end_datetime.date() if ts.end_datetime else date(year, month, calendar.monthrange(year, month)[1])
                 duty_date = date(year, month, day)
 
                 if not (ts_start <= duty_date <= ts_end):
@@ -3075,7 +3143,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
             }, status=status.HTTP_200_OK)
 
         ts_start = ts.start_datetime.date()
-        ts_end = ts.end_datetime.date()
+        ts_end = ts.end_datetime.date() if ts.end_datetime else ts_start
         days_span = (ts_end - ts_start).days + 1
         if days_span < 1:
             days_span = 1

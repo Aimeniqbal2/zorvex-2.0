@@ -5,6 +5,7 @@ import type { ERPModule } from '../../config/modules';
 export const SECURITY_NAVIGATION: ERPModule[] = [
     { code: 'dashboard', name: 'Dashboard', icon: 'bxs-dashboard', route: '/', minRole: 'staff', engine: 'core' },
     { code: 'clients_contracts', name: 'Clients & Contracts', icon: 'bx-user-circle', route: '/crm', minRole: 'manager', category: 'Sales', engine: 'crm' },
+    { code: 'fast_costing', name: 'Fast Costing Grid', icon: 'bx-table', route: '/fast-costing', minRole: 'manager', category: 'Sales', engine: 'crm' },
     { code: 'guards_staff', name: 'Guards & Staff', icon: 'bx-group', route: '/team', minRole: 'admin', category: 'Human Resources', engine: 'hr' },
     { code: 'finance', name: 'Finance', icon: 'bx-calculator', route: '/accounting', minRole: 'manager', category: 'Finance', engine: 'finance' },
     { code: 'vendors_purchasing', name: 'Purchasing & Vendors', icon: 'bx-buildings', route: '/purchasing', minRole: 'manager', category: 'Operations', engine: 'purchasing' },

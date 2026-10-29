@@ -19,6 +19,7 @@ export const MODULE_REGISTRY: ERPModule[] = [
     { code: 'finance', name: 'Accounting', icon: 'bx-calculator', route: '/accounting', minRole: 'manager', category: 'Finance' },
     { code: 'hr', name: 'Human Resources', icon: 'bx-group', route: '/team', minRole: 'admin', category: 'Human Resources' },
     { code: 'crm', name: 'CRM', icon: 'bx-user-circle', route: '/crm', minRole: 'manager', category: 'Sales' },
+    { code: 'fast_costing', name: 'Fast Costing Grid', icon: 'bx-table', route: '/fast-costing', minRole: 'manager', category: 'Sales', engine: 'crm' },
     { code: 'security_ops', name: 'Security Operations', icon: 'bx-shield', route: '/security-ops', minRole: 'manager', category: 'Operations' },
     { code: 'monthly_muster', name: 'Monthly Duty Muster', icon: 'bx-spreadsheet', route: '/monthly-muster', minRole: 'manager', category: 'Operations' },
     { code: 'attendance_register', name: 'Attendance Register & Ledger', icon: 'bx-history', route: '/attendance-register', minRole: 'manager', category: 'Operations' },

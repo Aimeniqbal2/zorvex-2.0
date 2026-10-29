@@ -11,7 +11,7 @@ from .views import (
     AssessmentAttachmentViewSet, ContractEquipmentRequirementViewSet,
     ProposalAdditionalChargeViewSet, ProposalSignedDocumentViewSet,
     CostingGridView, CostingGridBatchSyncView, CostingGridImportExcelView,
-    CostingGridDeleteRowView
+    CostingGridDeleteRowView, SecurityCostingSettingsView
 )
 
 router = DefaultRouter()
@@ -42,6 +42,7 @@ router.register(r'followups', ProposalFollowUpViewSet, basename='security-propos
 app_name = 'security_crm'
 
 urlpatterns = [
+    path('costing-settings/', SecurityCostingSettingsView.as_view(), name='costing-settings'),
     path('costing-grid/', CostingGridView.as_view(), name='costing-grid'),
     path('costing-grid/batch-sync/', CostingGridBatchSyncView.as_view(), name='costing-grid-batch-sync'),
     path('costing-grid/delete-row/', CostingGridDeleteRowView.as_view(), name='costing-grid-delete-row'),

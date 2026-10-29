@@ -44,6 +44,16 @@ class ServiceInvoiceViewSet(TenantModelViewSet):
     required_read_permissions = ['billing.read']
     required_write_permissions = ['billing.write']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        crm_entity_id = self.request.query_params.get('crm_entity')
+        if crm_entity_id:
+            qs = qs.filter(crm_entity_id=crm_entity_id)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
     @action(detail=False, methods=['post'], url_path='generate')
     def generate(self, request):
         """

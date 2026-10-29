@@ -2,12 +2,14 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { useToastStore } from '../../../../stores/toastStore';
-import { fetchCostingGrid, syncCostingGrid, deleteCostingGridRow, importCostingExcel, getClientLocations } from '../api';
-import type { CostingGridRow } from '../api';
+import { fetchCostingGrid, syncCostingGrid, deleteCostingGridRow, importCostingExcel, getClientLocations, fetchCostingSettings } from '../api';
+import type { CostingGridRow, CostingSettings } from '../api';
 import { getEntities } from '../../../../modules/crm/api';
 import type { CRMEntity } from '../../../../modules/crm/types';
 import { useAuthStore } from '../../../../auth/authStore';
 import { FastCostingPrintModal } from './FastCostingPrintModal';
+import { CostingRulesConfigModal } from './CostingRulesConfigModal';
+import { ToggleSwitch } from './ToggleSwitch';
 
 interface RoleColDef {
     key: string;
@@ -119,7 +121,11 @@ const ROLE_COLUMNS: RoleColDef[] = [
     }
 ];
 
-export const FastCostingGridTab: React.FC = () => {
+interface FastCostingGridTabProps {
+    onBack?: () => void;
+}
+
+export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }) => {
     const { user } = useAuthStore();
     const companyName = user?.company_name || 'ZORVEX SECURITY SERVICES';
     const [rows, setRows] = useState<CostingGridRow[]>([]);
@@ -130,6 +136,8 @@ export const FastCostingGridTab: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+    const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
+    const [costingConfig, setCostingConfig] = useState<CostingSettings | null>(null);
     const [search, setSearch] = useState('');
     const [selectedClientFilter, setSelectedClientFilter] = useState<string>('ALL');
     const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('ALL');
@@ -146,11 +154,13 @@ export const FastCostingGridTab: React.FC = () => {
     const loadGrid = async () => {
         setIsLoading(true);
         try {
-            const [gridData, customersRes, locationsRes] = await Promise.all([
+            const [gridData, customersRes, locationsRes, settingsRes] = await Promise.all([
                 fetchCostingGrid(),
                 getEntities({ entity_type: 'CUSTOMER' }).catch(() => ({ results: [] })),
-                getClientLocations().catch(() => ({ results: [] }))
+                getClientLocations().catch(() => ({ results: [] })),
+                fetchCostingSettings().catch(() => null)
             ]);
+            if (settingsRes) setCostingConfig(settingsRes);
             const prepared = (gridData || []).map((r: any, idx: number) => ({
                 ...r,
                 id: r.id || (r.proposal_version_id ? `ver-${r.proposal_version_id}` : `loc-${r.location_id || idx}`)
@@ -189,8 +199,27 @@ export const FastCostingGridTab: React.FC = () => {
         const serviceCharges = (r.service_charges_per_guard !== undefined && r.service_charges_per_guard !== null && r.service_charges_per_guard !== '') ? Number(r.service_charges_per_guard) : 3000; // Col AG (Flat monthly)
         const taxWhtRate = (r.tax_wht_rate !== undefined && r.tax_wht_rate !== null && r.tax_wht_rate !== '') ? Number(r.tax_wht_rate) : 7;
         const salesTaxRate = (r.sales_tax_rate !== undefined && r.sales_tax_rate !== null && r.sales_tax_rate !== '') ? Number(r.sales_tax_rate) : 8;
-        const sessi = Number(r.sessi) || 0;
-        const eobi = Number(r.eobi) || 0;
+
+        // Statutory & Charges Formulas & Toggles
+        const eobiEnabled = r.eobi_enabled !== undefined ? !!r.eobi_enabled : (costingConfig?.eobi_default_enabled ?? false);
+        const sessiEnabled = r.sessi_enabled !== undefined ? !!r.sessi_enabled : (costingConfig?.sessi_default_enabled ?? false);
+        const adminEnabled = r.admin_charges_enabled !== undefined ? !!r.admin_charges_enabled : (costingConfig?.admin_charges_default_enabled ?? false);
+        const insuranceEnabled = r.insurance_enabled !== undefined ? !!r.insurance_enabled : (costingConfig?.insurance_default_enabled ?? false);
+
+        const eobiRate = (r.eobi_rate !== undefined && r.eobi_rate !== null && r.eobi_rate !== '') ? Number(r.eobi_rate) : (costingConfig?.eobi_rate ?? 1500);
+        const sessiMinWage = (r.sessi_minimum_wage !== undefined && r.sessi_minimum_wage !== null && r.sessi_minimum_wage !== '') ? Number(r.sessi_minimum_wage) : (costingConfig?.sessi_minimum_wage ?? 37000);
+        const sessiPercentage = (r.sessi_percentage !== undefined && r.sessi_percentage !== null && r.sessi_percentage !== '') ? Number(r.sessi_percentage) : (costingConfig?.sessi_percentage ?? 6.0);
+        const adminChargesRate = (r.admin_charges_percentage !== undefined && r.admin_charges_percentage !== null && r.admin_charges_percentage !== '') ? Number(r.admin_charges_percentage) : (costingConfig?.admin_charges_percentage ?? 5.0);
+        const insuranceRate = (r.insurance_percentage !== undefined && r.insurance_percentage !== null && r.insurance_percentage !== '') ? Number(r.insurance_percentage) : (costingConfig?.insurance_percentage ?? 2.0);
+
+        // EOBI Formula: Eobi manual * total strength
+        const eobi = eobiEnabled ? Math.round(eobiRate * totalStrength) : 0;
+        // SESSI Formula: minimum wage * percentage * total strength
+        const sessi = sessiEnabled ? Math.round((sessiMinWage * (sessiPercentage / 100)) * totalStrength) : 0;
+        // Admin Charges Formula: monthly sale * percentage
+        const adminCharges = adminEnabled ? Math.round(monthlySale * (adminChargesRate / 100)) : 0;
+        // Insurance Formula: monthly sale * percentage
+        const insurance = insuranceEnabled ? Math.round(monthlySale * (insuranceRate / 100)) : 0;
 
         const expense = totalStrength * overheadPerGuard; // Col AB
 
@@ -221,9 +250,9 @@ export const FastCostingGridTab: React.FC = () => {
             wht = invoiceAmount * (taxWhtRate / 100);
         }
 
-        const difference = monthlySale - monthlySalary - wht - sessi - eobi; // Col AJ
+        const difference = monthlySale - monthlySalary - wht - sessi - eobi - insurance; // Col AJ
         const diffPerHead = totalStrength > 0 ? (difference / totalStrength) : 0; // Col AK
-        const profitLoss = monthlySale - monthlySalary - expense - wht; // Col AD
+        const profitLoss = monthlySale - monthlySalary - expense - wht - sessi - eobi - insurance; // Col AD
 
         return {
             totalStrength,
@@ -236,6 +265,21 @@ export const FastCostingGridTab: React.FC = () => {
             invoiceAmount,
             sessi,
             eobi,
+            adminCharges,
+            insurance,
+            eobiEnabled,
+            sessiEnabled,
+            adminEnabled,
+            insuranceEnabled,
+            eobiRate,
+            sessiMinWage,
+            sessiPercentage,
+            sessiRate: Math.round(sessiMinWage * (sessiPercentage / 100)),
+            sessiPct: sessiPercentage,
+            adminChargesRate,
+            adminChargesPct: adminChargesRate,
+            insuranceRate,
+            insurancePct: insuranceRate,
             difference,
             diffPerHead,
             profitLoss
@@ -380,20 +424,32 @@ export const FastCostingGridTab: React.FC = () => {
 
         setIsSaving(true);
         try {
-            const preparedRows = targetRows.map(r => ({
-                ...r,
-                overhead_per_guard: (r.overhead_per_guard !== '' && r.overhead_per_guard !== null && r.overhead_per_guard !== undefined) ? Number(r.overhead_per_guard) : 6000,
-                service_charges_per_guard: (r.service_charges_per_guard !== '' && r.service_charges_per_guard !== null && r.service_charges_per_guard !== undefined) ? Number(r.service_charges_per_guard) : 3000,
-                sales_tax_override: (r.sales_tax_override !== '' && r.sales_tax_override !== null && r.sales_tax_override !== undefined) ? Number(r.sales_tax_override) : null,
-                withholding_tax_override: (r.withholding_tax_override !== '' && r.withholding_tax_override !== null && r.withholding_tax_override !== undefined) ? Number(r.withholding_tax_override) : null,
-                sessi: (r.sessi !== '' && r.sessi !== null && r.sessi !== undefined) ? Number(r.sessi) : 0,
-                eobi: (r.eobi !== '' && r.eobi !== null && r.eobi !== undefined) ? Number(r.eobi) : 0,
-                ot_rate: (r.ot_rate !== '' && r.ot_rate !== null && r.ot_rate !== undefined && Number(r.ot_rate) > 0) 
-                    ? Number(r.ot_rate) 
-                    : (computeRowTotals(r).totalStrength > 0 
-                        ? Math.round((computeRowTotals(r).monthlySalary / computeRowTotals(r).totalStrength) / 30) 
-                        : Math.round(Number(r.guard_civ_sal || 35000) / 30)),
-            }));
+            const preparedRows = targetRows.map(r => {
+                const rowCalc = computeRowTotals(r);
+                return {
+                    ...r,
+                    overhead_per_guard: (r.overhead_per_guard !== '' && r.overhead_per_guard !== null && r.overhead_per_guard !== undefined) ? Number(r.overhead_per_guard) : 6000,
+                    service_charges_per_guard: (r.service_charges_per_guard !== '' && r.service_charges_per_guard !== null && r.service_charges_per_guard !== undefined) ? Number(r.service_charges_per_guard) : 3000,
+                    sales_tax_override: (r.sales_tax_override !== '' && r.sales_tax_override !== null && r.sales_tax_override !== undefined) ? Number(r.sales_tax_override) : null,
+                    withholding_tax_override: (r.withholding_tax_override !== '' && r.withholding_tax_override !== null && r.withholding_tax_override !== undefined) ? Number(r.withholding_tax_override) : null,
+                    eobi_enabled: !!r.eobi_enabled,
+                    eobi_rate: (r.eobi_rate !== '' && r.eobi_rate !== null && r.eobi_rate !== undefined) ? Number(r.eobi_rate) : (costingConfig?.eobi_rate ?? 1500),
+                    sessi_enabled: !!r.sessi_enabled,
+                    sessi_minimum_wage: (r.sessi_minimum_wage !== '' && r.sessi_minimum_wage !== null && r.sessi_minimum_wage !== undefined) ? Number(r.sessi_minimum_wage) : (costingConfig?.sessi_minimum_wage ?? 37000),
+                    sessi_percentage: (r.sessi_percentage !== '' && r.sessi_percentage !== null && r.sessi_percentage !== undefined) ? Number(r.sessi_percentage) : (costingConfig?.sessi_percentage ?? 6),
+                    admin_charges_enabled: !!r.admin_charges_enabled,
+                    admin_charges_percentage: (r.admin_charges_percentage !== '' && r.admin_charges_percentage !== null && r.admin_charges_percentage !== undefined) ? Number(r.admin_charges_percentage) : (costingConfig?.admin_charges_percentage ?? 5),
+                    insurance_enabled: !!r.insurance_enabled,
+                    insurance_percentage: (r.insurance_percentage !== '' && r.insurance_percentage !== null && r.insurance_percentage !== undefined) ? Number(r.insurance_percentage) : (costingConfig?.insurance_percentage ?? 2),
+                    sessi: rowCalc.sessi,
+                    eobi: rowCalc.eobi,
+                    ot_rate: (r.ot_rate !== '' && r.ot_rate !== null && r.ot_rate !== undefined && Number(r.ot_rate) > 0) 
+                        ? Number(r.ot_rate) 
+                        : (rowCalc.totalStrength > 0 
+                            ? Math.round((rowCalc.monthlySalary / rowCalc.totalStrength) / 30) 
+                            : Math.round(Number(r.guard_civ_sal || 35000) / 30)),
+                };
+            });
             const res = await syncCostingGrid(preparedRows as any);
             useToastStore.getState().success(res.message || `Successfully synced ${targetRows.length} location(s) into Operations & CRM!`);
             setDirtyRowKeys(new Set());
@@ -485,6 +541,8 @@ export const FastCostingGridTab: React.FC = () => {
         let totalWht = 0;
         let totalSessi = 0;
         let totalEobi = 0;
+        let totalAdminCharges = 0;
+        let totalInsurance = 0;
         let totalDifference = 0;
         let totalProfit = 0;
         const clientsSet = new Set<string>();
@@ -501,6 +559,8 @@ export const FastCostingGridTab: React.FC = () => {
             totalWht += calc.wht;
             totalSessi += calc.sessi;
             totalEobi += calc.eobi;
+            totalAdminCharges += calc.adminCharges;
+            totalInsurance += calc.insurance;
             totalDifference += calc.difference;
             totalProfit += calc.profitLoss;
 
@@ -523,6 +583,8 @@ export const FastCostingGridTab: React.FC = () => {
             totalWht,
             totalSessi,
             totalEobi,
+            totalAdminCharges,
+            totalInsurance,
             totalDifference,
             totalProfit
         };
@@ -830,6 +892,17 @@ export const FastCostingGridTab: React.FC = () => {
                 padding: '8px 14px'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {onBack && (
+                        <Button 
+                            variant="ghost" 
+                            onClick={onBack}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '6px 12px' }}
+                            title="Return to Clients & Contracts (CRM)"
+                        >
+                            <i className='bx bx-arrow-back' style={{ fontSize: '18px' }}></i> Back to CRM
+                        </Button>
+                    )}
+
                     <Button variant="primary" onClick={handleAddBlankRow} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                         <i className='bx bx-plus' style={{ fontSize: '18px' }}></i> Add Client / Location Row
                     </Button>
@@ -870,6 +943,15 @@ export const FastCostingGridTab: React.FC = () => {
                         title="Print or Save PDF of the full costing grid for this company or all clients"
                     >
                         <i className='bx bx-printer' style={{ fontSize: '18px' }}></i> Print / PDF
+                    </Button>
+
+                    <Button 
+                        variant="secondary" 
+                        onClick={() => setIsRulesModalOpen(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', borderColor: '#3b82f6', color: '#2563eb' }}
+                        title="Configure Master Costing Rules & Formulas (EOBI, SESSI, Admin Charges, Insurance)"
+                    >
+                        <i className='bx bx-slider-alt' style={{ fontSize: '18px' }}></i> Costing Rules & Formulas
                     </Button>
 
                     <Button 
@@ -1071,7 +1153,7 @@ export const FastCostingGridTab: React.FC = () => {
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={15} style={{ 
+                            <th colSpan={17} style={{ 
                                 padding: '10px 16px', 
                                 textAlign: 'center', 
                                 backgroundColor: 'var(--color-surface)',
@@ -1079,7 +1161,7 @@ export const FastCostingGridTab: React.FC = () => {
                                 color: 'var(--color-text)',
                                 borderBottom: '1px solid var(--color-border)', 
                                 fontWeight: 700, 
-                                minWidth: '1550px', 
+                                minWidth: '1760px', 
                                 position: 'sticky', 
                                 top: 0, 
                                 zIndex: 35, 
@@ -1114,8 +1196,10 @@ export const FastCostingGridTab: React.FC = () => {
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overtime Dozing OD</th>
                             <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Service Charges</th>
                             {/* Statutory Taxes moved next to Service Charges */}
-                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>SESSI</th>
-                            <th style={{ padding: '9px 6px', width: '85px', minWidth: '85px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>EOBI</th>
+                            <th style={{ padding: '9px 6px', width: '115px', minWidth: '115px', textAlign: 'center', color: 'var(--color-text)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>SESSI/PESSI</th>
+                            <th style={{ padding: '9px 6px', width: '115px', minWidth: '115px', textAlign: 'center', color: 'var(--color-text)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>EOBI</th>
+                            <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', color: '#3b82f6', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Admin Chg</th>
+                            <th style={{ padding: '9px 6px', width: '105px', minWidth: '105px', textAlign: 'center', color: '#10b981', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Insurance</th>
                             {/* WHT 3-Element Control Set */}
                             <th style={{ padding: '9px 6px', width: '150px', minWidth: '150px', textAlign: 'center', color: '#a855f7', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT Formula</th>
                             <th style={{ padding: '9px 6px', width: '65px', minWidth: '65px', textAlign: 'center', color: '#a855f7', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>WHT %</th>
@@ -1413,48 +1497,68 @@ export const FastCostingGridTab: React.FC = () => {
                                             />
                                         </td>
 
-                                        {/* Col AE: SESSI (Editable inline cell) */}
-                                        <td style={{ padding: '6px 4px', width: '85px', minWidth: '85px' }}>
-                                            <input 
-                                                type="number"
-                                                step="any"
-                                                value={row.sessi !== undefined && row.sessi !== null ? row.sessi : ''}
-                                                onChange={(e) => handleUpdateRow(row, 'sessi', e.target.value)}
-                                                placeholder="0"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 8px',
-                                                    fontSize: '12px',
-                                                    textAlign: 'right',
-                                                    borderRadius: '6px',
-                                                    border: '1px solid var(--color-border)',
-                                                    background: 'var(--color-surface)',
-                                                    color: 'var(--color-text)'
-                                                }}
-                                            />
+                                        {/* Col AE: SESSI (Switchable Formula Toggle) */}
+                                        <td style={{ padding: '6px 4px', width: '115px', minWidth: '115px', textAlign: 'center' }}>
+                                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                                                <ToggleSwitch
+                                                    checked={!!row.sessi_enabled}
+                                                    onChange={(val) => handleUpdateRow(row, 'sessi_enabled', val)}
+                                                    title={row.sessi_enabled ? 'SESSI Enabled - Click to Disable' : 'SESSI Disabled - Click to Enable'}
+                                                />
+                                                {row.sessi_enabled && (
+                                                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--color-text)', fontFamily: 'monospace' }} title={`SESSI: ₨ ${calc.sessiRate}/guard × ${calc.totalStrength} guards (Min Wage: ₨ ${calc.sessiMinWage} × ${calc.sessiPct}%)`}>
+                                                        ₨ {Math.round(calc.sessi).toLocaleString()}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
 
-                                        {/* Col AF: EOBI (Editable inline cell) */}
-                                        <td style={{ padding: '6px 4px', width: '85px', minWidth: '85px' }}>
-                                            <input 
-                                                type="number"
-                                                step="any"
-                                                value={row.eobi !== undefined && row.eobi !== null ? row.eobi : ''}
-                                                onChange={(e) => handleUpdateRow(row, 'eobi', e.target.value)}
-                                                placeholder="0"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '34px',
-                                                    padding: '0 8px',
-                                                    fontSize: '12px',
-                                                    textAlign: 'right',
-                                                    borderRadius: '6px',
-                                                    border: '1px solid var(--color-border)',
-                                                    background: 'var(--color-surface)',
-                                                    color: 'var(--color-text)'
-                                                }}
-                                            />
+                                        {/* Col AF: EOBI (Switchable Formula Toggle) */}
+                                        <td style={{ padding: '6px 4px', width: '115px', minWidth: '115px', textAlign: 'center' }}>
+                                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                                                <ToggleSwitch
+                                                    checked={!!row.eobi_enabled}
+                                                    onChange={(val) => handleUpdateRow(row, 'eobi_enabled', val)}
+                                                    title={row.eobi_enabled ? 'EOBI Enabled - Click to Disable' : 'EOBI Disabled - Click to Enable'}
+                                                />
+                                                {row.eobi_enabled && (
+                                                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--color-text)', fontFamily: 'monospace' }} title={`EOBI: ₨ ${calc.eobiRate}/guard × ${calc.totalStrength} guards`}>
+                                                        ₨ {Math.round(calc.eobi).toLocaleString()}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+
+                                        {/* Col Admin Charges (Switchable % Toggle) */}
+                                        <td style={{ padding: '6px 4px', width: '105px', minWidth: '105px', textAlign: 'center' }}>
+                                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                                                <ToggleSwitch
+                                                    checked={!!row.admin_charges_enabled}
+                                                    onChange={(val) => handleUpdateRow(row, 'admin_charges_enabled', val)}
+                                                    title={row.admin_charges_enabled ? 'Admin Charges Enabled - Click to Disable' : 'Admin Charges Disabled - Click to Enable'}
+                                                />
+                                                {row.admin_charges_enabled && (
+                                                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#3b82f6', fontFamily: 'monospace' }} title={`Admin Charges: ${calc.adminChargesPct}% of Monthly Sale = ₨ ${Math.round(calc.adminCharges).toLocaleString()}`}>
+                                                        {calc.adminChargesPct}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+
+                                        {/* Col Insurance (Switchable % Toggle) */}
+                                        <td style={{ padding: '6px 4px', width: '105px', minWidth: '105px', textAlign: 'center' }}>
+                                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                                                <ToggleSwitch
+                                                    checked={!!row.insurance_enabled}
+                                                    onChange={(val) => handleUpdateRow(row, 'insurance_enabled', val)}
+                                                    title={row.insurance_enabled ? 'Insurance Enabled - Click to Disable' : 'Insurance Disabled - Click to Enable'}
+                                                />
+                                                {row.insurance_enabled && (
+                                                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#10b981', fontFamily: 'monospace' }} title={`Insurance: ${calc.insurancePct}% of Monthly Sale = ₨ ${Math.round(calc.insurance).toLocaleString()}`}>
+                                                        {calc.insurancePct}%
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
 
                                         {/* Col WHT Formula: Dropdown (Invoice Amount %, Service Charges %, Manual) */}
@@ -1785,11 +1889,17 @@ export const FastCostingGridTab: React.FC = () => {
                                 <td style={{ padding: '14px 10px', textAlign: 'right', color: '#60a5fa', fontWeight: 800 }}>
                                     PKR {Math.round(summary.totalServiceCharges).toLocaleString()}
                                 </td>
-                                <td style={{ padding: '14px 8px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
-                                    PKR {Math.round(summary.totalSessi).toLocaleString()}
+                                <td style={{ padding: '14px 8px', textAlign: 'center', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                                    ₨ {Math.round(summary.totalSessi).toLocaleString()}
                                 </td>
-                                <td style={{ padding: '14px 8px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
-                                    PKR {Math.round(summary.totalEobi).toLocaleString()}
+                                <td style={{ padding: '14px 8px', textAlign: 'center', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                                    ₨ {Math.round(summary.totalEobi).toLocaleString()}
+                                </td>
+                                <td style={{ padding: '14px 8px', textAlign: 'center', color: '#3b82f6', fontWeight: 700 }}>
+                                    ₨ {Math.round(summary.totalAdminCharges).toLocaleString()}
+                                </td>
+                                <td style={{ padding: '14px 8px', textAlign: 'center', color: '#10b981', fontWeight: 700 }}>
+                                    ₨ {Math.round(summary.totalInsurance).toLocaleString()}
                                 </td>
                                 <td style={{ padding: '14px 6px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                                     -
@@ -1837,6 +1947,32 @@ export const FastCostingGridTab: React.FC = () => {
                 roleColumns={ROLE_COLUMNS}
                 computeRowTotals={computeRowTotals}
                 onExportCSV={(rowsToExport, clientName) => handleExportCSV(rowsToExport, clientName)}
+            />
+
+            {/* Costing Rules & Formulas Master Modal */}
+            <CostingRulesConfigModal
+                isOpen={isRulesModalOpen}
+                onClose={() => setIsRulesModalOpen(false)}
+                onApplied={(settings, applyToGrid, applyToggles) => {
+                    setCostingConfig(settings);
+                    if (applyToGrid) {
+                        setRows(prevRows => prevRows.map(r => ({
+                            ...r,
+                            eobi_rate: settings.eobi_rate,
+                            sessi_minimum_wage: settings.sessi_minimum_wage,
+                            sessi_percentage: settings.sessi_percentage,
+                            admin_charges_percentage: settings.admin_charges_percentage,
+                            insurance_percentage: settings.insurance_percentage,
+                            ...(applyToggles ? {
+                                eobi_enabled: settings.eobi_default_enabled,
+                                sessi_enabled: settings.sessi_default_enabled,
+                                admin_charges_enabled: settings.admin_charges_default_enabled,
+                                insurance_enabled: settings.insurance_default_enabled
+                            } : {})
+                        })));
+                        setDirtyRowKeys(new Set(rows.map(r => getRowKey(r))));
+                    }
+                }}
             />
         </div>
     );

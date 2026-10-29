@@ -703,6 +703,18 @@ export interface TemporaryMusterEquipmentLine {
     notes: string;
 }
 
+export interface TemporaryManpowerRequirementItem {
+    id: string;
+    designation_id?: string | null;
+    designation_name: string;
+    required_headcount: number;
+    shift_start?: string | null;
+    shift_end?: string | null;
+    daily_pay_rate: number;
+    daily_billing_rate: number;
+    notes?: string;
+}
+
 export interface TemporaryMusterServiceBlock {
     id: string;
     reference_number: string;
@@ -720,6 +732,9 @@ export interface TemporaryMusterServiceBlock {
     notes: string;
     guards: TemporaryMusterGuard[];
     equipment_lines: TemporaryMusterEquipmentLine[];
+    manpower_requirements?: TemporaryManpowerRequirementItem[];
+    total_required_headcount?: number;
+    total_assigned_guards?: number;
     totals: {
         manpower_billed: number;
         manpower_guard_pay: number;

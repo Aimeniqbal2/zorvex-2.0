@@ -12,12 +12,27 @@ import { SecurityCustomerDetail } from './components/SecurityCustomerDetail';
 import { SecurityProposalsList } from './components/SecurityProposalsList';
 import { SecurityProposalDetail } from './components/SecurityProposalDetail';
 import { FastCostingGridTab } from './components/FastCostingGridTab';
+import { TemporaryServicesView } from '../../../modules/security-operations/components/TemporaryServicesView';
 import { useToastStore } from '../../../stores/toastStore';
+import { useWorkspaceStore } from '../../../stores/workspaceStore';
 import '../../../modules/crm/styles/crm.css';
 
 export const SecurityCRMModule: React.FC = () => {
+    const { openTab } = useWorkspaceStore();
+
+    const handleOpenFastCosting = () => {
+        openTab({
+            code: 'fast_costing',
+            name: 'Fast Costing Grid',
+            icon: 'bx-table',
+            route: '/fast-costing',
+            category: 'Sales',
+            minRole: 'manager',
+            engine: 'crm'
+        });
+    };
     // Persistent state
-    const [activeTab, setActiveTab] = useState<'customers' | 'requirements' | 'costing_grid'>('customers');
+    const [activeTab, setActiveTab] = useState<'customers' | 'requirements' | 'costing_grid' | 'temp_services'>('customers');
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(1);
     
@@ -233,59 +248,43 @@ export const SecurityCRMModule: React.FC = () => {
                 <button
                     style={{
                         padding: '8px 16px',
-                        background: activeTab === 'customers' ? 'var(--color-primary)' : 'var(--color-background)',
-                        border: `1px solid ${activeTab === 'customers' ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                        background: 'var(--color-background)',
+                        border: '1px solid var(--color-border)',
                         borderRadius: '20px',
-                        color: activeTab === 'customers' ? 'white' : 'var(--color-text-muted)',
-                        fontWeight: 500,
-                        fontSize: '13.5px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                        boxShadow: activeTab === 'customers' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none'
-                    }}
-                    onClick={() => setActiveTab('customers')}
-                >
-                    Clients
-                </button>
-                <button
-                    style={{
-                        padding: '8px 16px',
-                        background: activeTab === 'requirements' ? 'var(--color-primary)' : 'var(--color-background)',
-                        border: `1px solid ${activeTab === 'requirements' ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                        borderRadius: '20px',
-                        color: activeTab === 'requirements' ? 'white' : 'var(--color-text-muted)',
-                        fontWeight: 500,
-                        fontSize: '13.5px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                        boxShadow: activeTab === 'requirements' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                    }}
-                    onClick={() => setActiveTab('requirements')}
-                >
-                    <i className='bx bx-list-check'></i> Final Requirements
-                </button>
-                <button
-                    style={{
-                        padding: '8px 16px',
-                        background: activeTab === 'costing_grid' ? 'var(--color-primary)' : 'var(--color-background)',
-                        border: `1px solid ${activeTab === 'costing_grid' ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                        borderRadius: '20px',
-                        color: activeTab === 'costing_grid' ? 'white' : 'var(--color-text-muted)',
+                        color: 'var(--color-text-muted)',
                         fontWeight: 600,
                         fontSize: '13.5px',
                         cursor: 'pointer',
                         transition: 'all 0.2s ease',
-                        boxShadow: activeTab === 'costing_grid' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px'
                     }}
-                    onClick={() => setActiveTab('costing_grid')}
+                    onClick={handleOpenFastCosting}
+                    title="Open Fast Costing Grid in a dedicated workspace tab"
                 >
                     <i className='bx bx-table'></i> Fast Costing Grid
+                    <i className='bx bx-link-external' style={{ fontSize: '12px', opacity: 0.75 }}></i>
+                </button>
+                <button
+                    style={{
+                        padding: '8px 16px',
+                        background: activeTab === 'temp_services' ? 'var(--color-primary)' : 'var(--color-background)',
+                        border: `1px solid ${activeTab === 'temp_services' ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                        borderRadius: '20px',
+                        color: activeTab === 'temp_services' ? 'white' : 'var(--color-text-muted)',
+                        fontWeight: 600,
+                        fontSize: '13.5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: activeTab === 'temp_services' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                    }}
+                    onClick={() => setActiveTab('temp_services')}
+                >
+                    <i className='bx bx-bolt-circle'></i> Temporary Services
                 </button>
             </div>
 
@@ -325,6 +324,10 @@ export const SecurityCRMModule: React.FC = () => {
 
             {activeTab === 'costing_grid' && (
                 <FastCostingGridTab />
+            )}
+
+            {activeTab === 'temp_services' && (
+                <TemporaryServicesView onNavigateToMuster={() => {}} />
             )}
 
             <SecurityClientModal

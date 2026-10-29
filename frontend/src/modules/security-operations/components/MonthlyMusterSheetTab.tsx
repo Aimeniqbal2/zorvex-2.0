@@ -885,12 +885,23 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             fontFamily: 'inherit'
         }}>
             
-            {/* Full-Screen Top Header Bar */}
-            <div style={{ 
-                display: 'flex', 
-                flexWrap: 'wrap', 
-                alignItems: 'center', 
-                justifyContent: 'space-between', 
+            {musterMode === 'TEMPORARY' ? (
+                <TemporaryServicesMusterSection 
+                    year={year} 
+                    month={month} 
+                    onMonthChange={(m) => setMonth(m)}
+                    onYearChange={(y) => setYear(y)}
+                    onBack={onBack}
+                    onSwitchToRegular={() => setMusterMode('REGULAR')}
+                />
+            ) : (
+                <>
+                    {/* Full-Screen Top Header Bar (Regular Monthly Muster) */}
+                    <div style={{ 
+                        display: 'flex', 
+                        flexWrap: 'wrap', 
+                        alignItems: 'center', 
+                        justifyContent: 'space-between', 
                 gap: '16px', 
                 background: 'var(--color-surface, #ffffff)', 
                 padding: '16px 24px', 
@@ -1265,15 +1276,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 </div>
             </div>
 
-            {musterMode === 'TEMPORARY' ? (
-                <TemporaryServicesMusterSection 
-                    year={year} 
-                    month={month} 
-                    onBack={onBack}
-                    onSwitchToRegular={() => setMusterMode('REGULAR')}
-                />
-            ) : (
-                <>
+
             {/* Frozen Month Notification Banner */}
             {isFrozen && (
                 <div style={{

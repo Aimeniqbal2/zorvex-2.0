@@ -64,6 +64,8 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
         let totalWht = 0;
         let totalSessi = 0;
         let totalEobi = 0;
+        let totalAdminCharges = 0;
+        let totalInsurance = 0;
         let totalDifference = 0;
         let totalProfit = 0;
         const clientsSet = new Set<string>();
@@ -80,6 +82,8 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
             totalWht += calc.wht;
             totalSessi += calc.sessi;
             totalEobi += calc.eobi;
+            totalAdminCharges += calc.adminCharges;
+            totalInsurance += calc.insurance;
             totalDifference += calc.difference;
             totalProfit += calc.profitLoss;
 
@@ -100,6 +104,8 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
             totalWht,
             totalSessi,
             totalEobi,
+            totalAdminCharges,
+            totalInsurance,
             totalDifference,
             totalProfit
         };
@@ -507,6 +513,8 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
                                         <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '55px' }}>Srv Chg</th>
                                         <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '45px' }}>SESSI</th>
                                         <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '45px' }}>EOBI</th>
+                                        <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '50px', color: '#0284c7' }}>Admin Chg</th>
+                                        <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '50px', color: '#16a34a' }}>Insurance</th>
                                         <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '50px', color: '#7e22ce', fontWeight: 700 }}>WHT Tax</th>
                                         <th style={{ padding: '5px 4px', border: '1px solid #cbd5e1', textAlign: 'right', minWidth: '55px', color: '#a16207', fontWeight: 700 }}>Sales Tax</th>
                                         <th style={{ padding: '5px 6px', border: '1px solid #c084fc', textAlign: 'right', minWidth: '75px', backgroundColor: '#faf5ff', color: '#6b21a8', fontWeight: 800 }}>Total Invoice</th>
@@ -517,7 +525,7 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
                                 <tbody>
                                     {displayRows.length === 0 ? (
                                         <tr>
-                                            <td colSpan={3 + (visibleRoles.length * 3) + 13} style={{ padding: '30px', textAlign: 'center', color: '#64748b' }}>
+                                            <td colSpan={3 + (visibleRoles.length * 3) + 15} style={{ padding: '30px', textAlign: 'center', color: '#64748b' }}>
                                                 No costing data found for the selected company/client.
                                             </td>
                                         </tr>
@@ -577,10 +585,16 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
                                                         {Math.round(calc.totalStrength * calc.serviceCharges).toLocaleString()}
                                                     </td>
                                                     <td style={{ padding: '4px 4px', border: '1px solid #e2e8f0', textAlign: 'right', color: '#475569' }}>
-                                                        {Math.round(calc.sessi).toLocaleString()}
+                                                        {calc.sessi > 0 ? Math.round(calc.sessi).toLocaleString() : '-'}
                                                     </td>
                                                     <td style={{ padding: '4px 4px', border: '1px solid #e2e8f0', textAlign: 'right', color: '#475569' }}>
-                                                        {Math.round(calc.eobi).toLocaleString()}
+                                                        {calc.eobi > 0 ? Math.round(calc.eobi).toLocaleString() : '-'}
+                                                    </td>
+                                                    <td style={{ padding: '4px 4px', border: '1px solid #e2e8f0', textAlign: 'right', color: '#0284c7' }}>
+                                                        {calc.adminCharges > 0 ? `${calc.adminChargesPct}%` : '-'}
+                                                    </td>
+                                                    <td style={{ padding: '4px 4px', border: '1px solid #e2e8f0', textAlign: 'right', color: '#16a34a' }}>
+                                                        {calc.insurance > 0 ? `${calc.insurancePct}%` : '-'}
                                                     </td>
                                                     <td style={{ padding: '4px 4px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 600, color: '#7e22ce' }}>
                                                         {Math.round(calc.wht).toLocaleString()}
@@ -651,6 +665,12 @@ export const FastCostingPrintModal: React.FC<FastCostingPrintModalProps> = ({
                                             </td>
                                             <td style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textAlign: 'right', color: '#475569' }}>
                                                 {Math.round(summary.totalEobi).toLocaleString()}
+                                            </td>
+                                            <td style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textAlign: 'right', color: '#0284c7', fontWeight: 700 }}>
+                                                {Math.round(summary.totalAdminCharges).toLocaleString()}
+                                            </td>
+                                            <td style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textAlign: 'right', color: '#16a34a', fontWeight: 700 }}>
+                                                {Math.round(summary.totalInsurance).toLocaleString()}
                                             </td>
                                             <td style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textAlign: 'right', color: '#7e22ce', fontWeight: 800 }}>
                                                 {Math.round(summary.totalWht).toLocaleString()}

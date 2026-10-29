@@ -46,7 +46,6 @@ const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'incidents', label: 'Incidents', icon: 'bx-error' },
     { id: 'daily_activity', label: 'Daily Activity', icon: 'bx-book-open' },
     { id: 'billing', label: 'Billing', icon: 'bx-receipt' },
-    { id: 'temporary_services', label: 'Temporary Services', icon: 'bx-time' },
     { id: 'qa_inspections', label: 'QA Inspections', icon: 'bx-check-shield' },
     { id: 'qa_actions', label: 'Corrective Actions', icon: 'bx-wrench' },
     { id: 'reports', label: 'Reports & Analytics', icon: 'bx-bar-chart-alt-2' },

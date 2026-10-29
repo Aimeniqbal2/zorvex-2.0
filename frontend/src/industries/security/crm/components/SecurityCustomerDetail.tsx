@@ -22,6 +22,8 @@ import {
     getServiceLines
 } from '../api';
 import type { SecurityProposal, ClientLocation, ProposalVersion, ProposalServiceLine } from '../api';
+import { ClientTemporaryServicesTab } from './ClientTemporaryServicesTab';
+import { LocationMonthlyBillingTab } from './LocationMonthlyBillingTab';
 
 interface Props {
     customerId: string;
@@ -41,7 +43,8 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     const [activeVersion, setActiveVersion] = useState<ProposalVersion | null>(null);
     const [allProposalVersions, setAllProposalVersions] = useState<ProposalVersion[]>([]);
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'locations' | 'requirements'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'locations' | 'requirements' | 'temp_services' | 'billing'>('overview');
+    const [locationTempFilter, setLocationTempFilter] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showEmailComposer, setShowEmailComposer] = useState(false);
 
@@ -516,6 +519,18 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         <Button 
                             variant="ghost" 
                             size="sm" 
+                            title="Temporary Services for this location"
+                            style={{ color: '#d97706', fontWeight: 600 }}
+                            onClick={() => {
+                                setLocationTempFilter(loc.id);
+                                setActiveTab('temp_services');
+                            }}
+                        >
+                            <i className='bx bx-bolt-circle'></i> Temp Services
+                        </Button>
+                        <Button 
+                            variant="ghost" 
+                            size="sm" 
                             title="Edit Location"
                             onClick={() => handleOpenEditLocation(loc)}
                         >
@@ -687,7 +702,9 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                     { id: 'overview', label: 'Overview', icon: 'bx-tachometer' },
                     { id: 'contacts', label: `Contacts (${contacts.length})`, icon: 'bx-user-pin' },
                     { id: 'locations', label: `Locations (${locations.length})`, icon: 'bx-map-pin' },
-                    { id: 'requirements', label: `Final Requirements (${proposals.length})`, icon: 'bx-list-check' }
+                    { id: 'requirements', label: `Final Requirements (${proposals.length})`, icon: 'bx-list-check' },
+                    { id: 'temp_services', label: '⚡ Temporary Services', icon: 'bx-bolt-circle' },
+                    { id: 'billing', label: '📑 Monthly Invoicing', icon: 'bx-receipt' }
                 ].map(tab => (
                     <button
                         key={tab.id}
@@ -1388,6 +1405,24 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                         emptyMessage="No requirement sheets found. Click 'Add Requirements' to set guard staffing and rates."
                     />
                 </div>
+            )}
+
+            {activeTab === 'temp_services' && (
+                <ClientTemporaryServicesTab
+                    customerId={customerId}
+                    customerName={customer?.name || 'Client'}
+                    locations={locations}
+                    initialLocationFilter={locationTempFilter}
+                />
+            )}
+
+            {activeTab === 'billing' && (
+                <LocationMonthlyBillingTab
+                    customerId={customerId}
+                    customerName={customer?.name || 'Client'}
+                    locations={locations}
+                    proposals={proposals}
+                />
             )}
 
             {/* Direct Client Email Composer Modal */}

@@ -19,7 +19,7 @@ from .models import (
     AssessmentRiskFinding, AssessmentStaffingRecommendation,
     AssessmentEquipmentRecommendation, AssessmentAttachment, RiskLevel,
     ContractEquipmentRequirement, ProposalAdditionalCharge,
-    ProposalSignedDocument
+    ProposalSignedDocument, SecurityCostingSetting
 )
 from .serializers import (
     SecurityProposalSerializer, SecurityServiceTypeSerializer, 
@@ -31,7 +31,8 @@ from .serializers import (
     AssessmentStaffingRecommendationSerializer,
     AssessmentEquipmentRecommendationSerializer,
     AssessmentAttachmentSerializer, ContractEquipmentRequirementSerializer,
-    ProposalAdditionalChargeSerializer, ProposalSignedDocumentSerializer
+    ProposalAdditionalChargeSerializer, ProposalSignedDocumentSerializer,
+    SecurityCostingSettingSerializer
 )
 from .services.workflow import SecurityProposalWorkflowService
 
@@ -1514,6 +1515,95 @@ from crm.models import CRMEntity
 import openpyxl
 
 
+class SecurityCostingSettingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from erp_core.middleware import get_current_company
+        from companies.models import Company
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        company = Company.objects.filter(id=company_id).first() if company_id else getattr(request.user, 'company', None)
+        if not company and request.user.is_superuser:
+            company = Company.objects.first()
+        if not company:
+            return Response({"error": "No company found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        setting = SecurityCostingSetting.objects.filter(company=company).first()
+        if not setting:
+            setting = SecurityCostingSetting.objects.create(
+                company=company,
+                eobi_rate=Decimal('1500.00'),
+                sessi_minimum_wage=Decimal('37000.00'),
+                sessi_percentage=Decimal('6.00'),
+                admin_charges_percentage=Decimal('5.00'),
+                insurance_percentage=Decimal('2.00'),
+                eobi_default_enabled=False,
+                sessi_default_enabled=False,
+                admin_charges_default_enabled=False,
+                insurance_default_enabled=False
+            )
+        return Response(SecurityCostingSettingSerializer(setting).data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        from erp_core.middleware import get_current_company
+        from companies.models import Company
+        company_id = get_current_company() or request.META.get('HTTP_X_COMPANY_ID') or getattr(request.user, 'company_id', None)
+        company = Company.objects.filter(id=company_id).first() if company_id else getattr(request.user, 'company', None)
+        if not company and request.user.is_superuser:
+            company = Company.objects.first()
+        if not company:
+            return Response({"error": "No company found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        setting = SecurityCostingSetting.objects.filter(company=company).first()
+        if not setting:
+            setting = SecurityCostingSetting(company=company)
+
+        data = request.data
+        if 'eobi_rate' in data and data['eobi_rate'] is not None:
+            setting.eobi_rate = Decimal(str(data['eobi_rate']))
+        if 'sessi_minimum_wage' in data and data['sessi_minimum_wage'] is not None:
+            setting.sessi_minimum_wage = Decimal(str(data['sessi_minimum_wage']))
+        if 'sessi_percentage' in data and data['sessi_percentage'] is not None:
+            setting.sessi_percentage = Decimal(str(data['sessi_percentage']))
+        if 'admin_charges_percentage' in data and data['admin_charges_percentage'] is not None:
+            setting.admin_charges_percentage = Decimal(str(data['admin_charges_percentage']))
+        if 'insurance_percentage' in data and data['insurance_percentage'] is not None:
+            setting.insurance_percentage = Decimal(str(data['insurance_percentage']))
+        if 'eobi_default_enabled' in data:
+            setting.eobi_default_enabled = bool(data['eobi_default_enabled'])
+        if 'sessi_default_enabled' in data:
+            setting.sessi_default_enabled = bool(data['sessi_default_enabled'])
+        if 'admin_charges_default_enabled' in data:
+            setting.admin_charges_default_enabled = bool(data['admin_charges_default_enabled'])
+        if 'insurance_default_enabled' in data:
+            setting.insurance_default_enabled = bool(data['insurance_default_enabled'])
+        setting.save()
+
+        apply_all = data.get('apply_to_all_locations', False)
+        if apply_all:
+            update_data = {
+                'eobi_rate': setting.eobi_rate,
+                'sessi_minimum_wage': setting.sessi_minimum_wage,
+                'sessi_percentage': setting.sessi_percentage,
+                'admin_charges_percentage': setting.admin_charges_percentage,
+                'insurance_percentage': setting.insurance_percentage,
+            }
+            if data.get('apply_toggles', False):
+                update_data['eobi_enabled'] = setting.eobi_default_enabled
+                update_data['sessi_enabled'] = setting.sessi_default_enabled
+                update_data['admin_charges_enabled'] = setting.admin_charges_default_enabled
+                update_data['insurance_enabled'] = setting.insurance_default_enabled
+
+            ClientLocation.objects.filter(company=company, is_deleted=False).update(**update_data)
+            ProposalVersion.objects.filter(company=company, is_deleted=False).update(**update_data)
+
+        return Response({
+            'success': True,
+            'settings': SecurityCostingSettingSerializer(setting).data,
+            'message': 'Costing rules configuration saved and applied successfully!'
+        }, status=status.HTTP_200_OK)
+
+
 class CostingGridView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -1527,6 +1617,43 @@ class CostingGridView(APIView):
             company = Company.objects.first()
         if not company:
             return Response([], status=status.HTTP_200_OK)
+
+        costing_setting = SecurityCostingSetting.objects.filter(company=company).first()
+        default_eobi_rate = float(costing_setting.eobi_rate) if costing_setting else 1500.0
+        default_sessi_mw = float(costing_setting.sessi_minimum_wage) if costing_setting else 37000.0
+        default_sessi_pct = float(costing_setting.sessi_percentage) if costing_setting else 6.0
+        default_admin_pct = float(costing_setting.admin_charges_percentage) if costing_setting else 5.0
+        default_ins_pct = float(costing_setting.insurance_percentage) if costing_setting else 2.0
+        default_eobi_en = costing_setting.eobi_default_enabled if costing_setting else False
+        default_sessi_en = costing_setting.sessi_default_enabled if costing_setting else False
+        default_admin_en = costing_setting.admin_charges_default_enabled if costing_setting else False
+        default_ins_en = costing_setting.insurance_default_enabled if costing_setting else False
+
+        def get_costing_rules_dict(cloc, ver):
+            eobi_en = cloc.eobi_enabled if (cloc and hasattr(cloc, 'eobi_enabled')) else getattr(ver, 'eobi_enabled', default_eobi_en)
+            eobi_rt = float(cloc.eobi_rate if (cloc and cloc.eobi_rate is not None) else (ver.eobi_rate if (ver and ver.eobi_rate is not None) else default_eobi_rate))
+
+            sessi_en = cloc.sessi_enabled if (cloc and hasattr(cloc, 'sessi_enabled')) else getattr(ver, 'sessi_enabled', default_sessi_en)
+            sessi_mw = float(cloc.sessi_minimum_wage if (cloc and cloc.sessi_minimum_wage is not None) else (ver.sessi_minimum_wage if (ver and ver.sessi_minimum_wage is not None) else default_sessi_mw))
+            sessi_pct = float(cloc.sessi_percentage if (cloc and cloc.sessi_percentage is not None) else (ver.sessi_percentage if (ver and ver.sessi_percentage is not None) else default_sessi_pct))
+
+            admin_en = cloc.admin_charges_enabled if (cloc and hasattr(cloc, 'admin_charges_enabled')) else getattr(ver, 'admin_charges_enabled', default_admin_en)
+            admin_pct = float(cloc.admin_charges_percentage if (cloc and cloc.admin_charges_percentage is not None) else (ver.admin_charges_percentage if (ver and ver.admin_charges_percentage is not None) else default_admin_pct))
+
+            ins_en = cloc.insurance_enabled if (cloc and hasattr(cloc, 'insurance_enabled')) else getattr(ver, 'insurance_enabled', default_ins_en)
+            ins_pct = float(cloc.insurance_percentage if (cloc and cloc.insurance_percentage is not None) else (ver.insurance_percentage if (ver and ver.insurance_percentage is not None) else default_ins_pct))
+
+            return {
+                "eobi_enabled": bool(eobi_en),
+                "eobi_rate": eobi_rt,
+                "sessi_enabled": bool(sessi_en),
+                "sessi_minimum_wage": sessi_mw,
+                "sessi_percentage": sessi_pct,
+                "admin_charges_enabled": bool(admin_en),
+                "admin_charges_percentage": admin_pct,
+                "insurance_enabled": bool(ins_en),
+                "insurance_percentage": ins_pct,
+            }
 
         versions = ProposalVersion.objects.filter(
             company=company,
@@ -1576,6 +1703,9 @@ class CostingGridView(APIView):
                 if loc_key_id:
                     seen_customer_locations.add(loc_key_id)
 
+                cloc = next((l.location for l in loc_info["lines"] if l.location), None)
+                costing_rules = get_costing_rules_dict(cloc, ver)
+
                 row = {
                     "proposal_version_id": str(ver.id),
                     "proposal_id": str(prop.id),
@@ -1613,6 +1743,7 @@ class CostingGridView(APIView):
                     # Legacy fallback
                     "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
                 }
+                row.update(costing_rules)
 
                 for l in loc_info["lines"]:
                     st_name = (l.service_type.name if l.service_type else "").lower()
@@ -1716,6 +1847,7 @@ class CostingGridView(APIView):
                 "deo_qty": 0, "deo_rate": 0, "deo_sal": 0,
                 "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
             }
+            row.update(get_costing_rules_dict(cloc, ver))
             data.append(row)
 
         # Also ensure active customers without any locations yet appear with default location row
@@ -1769,6 +1901,7 @@ class CostingGridView(APIView):
                     "deo_qty": 0, "deo_rate": 0, "deo_sal": 0,
                     "lady_cctv_qty": 0, "lady_cctv_rate": 0, "lady_cctv_sal": 0,
                 }
+                row.update(get_costing_rules_dict(None, ver))
                 data.append(row)
 
         return Response(data, status=status.HTTP_200_OK)
@@ -1925,9 +2058,52 @@ class CostingGridBatchSyncView(APIView):
                     st_rate = _parse_dec(row.get('sales_tax_rate'), 8)
                     sales_tax_override = _parse_opt_dec(row.get('sales_tax_override'))
                     withholding_tax_override = _parse_opt_dec(row.get('withholding_tax_override'))
-                    sessi = _parse_dec(row.get('sessi'), 0)
-                    eobi = _parse_dec(row.get('eobi'), 0)
                     ot_rate_val = _parse_dec(row.get('ot_rate'), 0)
+
+                    eobi_en = bool(row.get('eobi_enabled', False))
+                    eobi_rt = _parse_dec(row.get('eobi_rate'), 1500)
+                    sessi_en = bool(row.get('sessi_enabled', False))
+                    sessi_mw = _parse_dec(row.get('sessi_minimum_wage'), 37000)
+                    sessi_pct = _parse_dec(row.get('sessi_percentage'), 6)
+                    admin_en = bool(row.get('admin_charges_enabled', False))
+                    admin_pct = _parse_dec(row.get('admin_charges_percentage'), 5)
+                    ins_en = bool(row.get('insurance_enabled', False))
+                    ins_pct = _parse_dec(row.get('insurance_percentage'), 2)
+
+                    loc_strength = 0
+                    for prefix, role_name, role_code, default_weapon in role_definitions:
+                        raw_qty = row.get(f"{prefix}_qty")
+                        if prefix == "lady_searcher" and (raw_qty is None or float(raw_qty or 0) == 0):
+                            if row.get("lady_cctv_qty"):
+                                raw_qty = row.get("lady_cctv_qty")
+                        loc_strength += int(float(raw_qty or 0))
+
+                    if eobi_en:
+                        calculated_eobi = (eobi_rt * Decimal(str(loc_strength))).quantize(Decimal('0.01'))
+                    else:
+                        calculated_eobi = Decimal('0.00')
+
+                    if sessi_en:
+                        sessi_per_head = (sessi_mw * (sessi_pct / Decimal('100.00'))).quantize(Decimal('0.01'))
+                        calculated_sessi = (sessi_per_head * Decimal(str(loc_strength))).quantize(Decimal('0.01'))
+                    else:
+                        calculated_sessi = Decimal('0.00')
+
+                    if location:
+                        location.eobi_enabled = eobi_en
+                        location.eobi_rate = eobi_rt
+                        location.sessi_enabled = sessi_en
+                        location.sessi_minimum_wage = sessi_mw
+                        location.sessi_percentage = sessi_pct
+                        location.admin_charges_enabled = admin_en
+                        location.admin_charges_percentage = admin_pct
+                        location.insurance_enabled = ins_en
+                        location.insurance_percentage = ins_pct
+                        location.save(update_fields=[
+                            'eobi_enabled', 'eobi_rate', 'sessi_enabled', 'sessi_minimum_wage',
+                            'sessi_percentage', 'admin_charges_enabled', 'admin_charges_percentage',
+                            'insurance_enabled', 'insurance_percentage'
+                        ])
 
                     st_basis = 'MANUAL' if sales_tax_override is not None else row.get('sales_tax_basis', 'TOTAL_SALE')
                     if st_basis == 'INVOICE_AMOUNT':
@@ -1953,8 +2129,17 @@ class CostingGridBatchSyncView(APIView):
                             sales_tax_basis=st_basis,
                             sales_tax_override=sales_tax_override,
                             withholding_tax_override=withholding_tax_override,
-                            total_sessi=sessi,
-                            total_eobi=eobi
+                            total_sessi=calculated_sessi,
+                            total_eobi=calculated_eobi,
+                            eobi_enabled=eobi_en,
+                            eobi_rate=eobi_rt,
+                            sessi_enabled=sessi_en,
+                            sessi_minimum_wage=sessi_mw,
+                            sessi_percentage=sessi_pct,
+                            admin_charges_enabled=admin_en,
+                            admin_charges_percentage=admin_pct,
+                            insurance_enabled=ins_en,
+                            insurance_percentage=ins_pct
                         )
                     else:
                         version.overhead_per_guard = overhead
@@ -1972,8 +2157,17 @@ class CostingGridBatchSyncView(APIView):
                             version.withholding_tax_basis = 'MANUAL'
                         elif row.get('withholding_tax_basis'):
                             version.withholding_tax_basis = row.get('withholding_tax_basis')
-                        version.total_sessi = sessi
-                        version.total_eobi = eobi
+                        version.total_sessi = calculated_sessi
+                        version.total_eobi = calculated_eobi
+                        version.eobi_enabled = eobi_en
+                        version.eobi_rate = eobi_rt
+                        version.sessi_enabled = sessi_en
+                        version.sessi_minimum_wage = sessi_mw
+                        version.sessi_percentage = sessi_pct
+                        version.admin_charges_enabled = admin_en
+                        version.admin_charges_percentage = admin_pct
+                        version.insurance_enabled = ins_en
+                        version.insurance_percentage = ins_pct
                         version.save()
 
                     loc_q = Q(location=location)

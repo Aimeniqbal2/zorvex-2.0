@@ -239,6 +239,17 @@ class ProposalVersion(BaseModel):
         help_text="Total monthly EOBI contribution for institutional contracts"
     )
 
+    # Statutory & Costing Rules (Formula & Enablement)
+    eobi_enabled = models.BooleanField(default=False)
+    eobi_rate = models.DecimalField(max_digits=12, decimal_places=2, default=1500, null=True, blank=True, help_text="Manual EOBI rate in PKR per guard")
+    sessi_enabled = models.BooleanField(default=False)
+    sessi_minimum_wage = models.DecimalField(max_digits=12, decimal_places=2, default=37000, null=True, blank=True, help_text="Minimum wage for SESSI calculation in PKR")
+    sessi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=6.00, null=True, blank=True, help_text="SESSI percentage")
+    admin_charges_enabled = models.BooleanField(default=False)
+    admin_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=5.00, null=True, blank=True, help_text="Admin charges percentage")
+    insurance_enabled = models.BooleanField(default=False)
+    insurance_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=2.00, null=True, blank=True, help_text="Insurance percentage")
+
     # Sent traceability
     sent_at = models.DateTimeField(null=True, blank=True)
     sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_security_proposal_versions')
@@ -502,6 +513,17 @@ class ClientLocation(BaseModel):
     primary_contact = models.ForeignKey('crm.CRMContact', on_delete=models.SET_NULL, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, default='')
+
+    # Location-specific Statutory & Costing Rules (Formula & Enablement)
+    eobi_enabled = models.BooleanField(default=False)
+    eobi_rate = models.DecimalField(max_digits=12, decimal_places=2, default=1500, null=True, blank=True, help_text="Manual EOBI rate in PKR per guard")
+    sessi_enabled = models.BooleanField(default=False)
+    sessi_minimum_wage = models.DecimalField(max_digits=12, decimal_places=2, default=37000, null=True, blank=True, help_text="Minimum wage for SESSI calculation in PKR")
+    sessi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=6.00, null=True, blank=True, help_text="SESSI percentage")
+    admin_charges_enabled = models.BooleanField(default=False)
+    admin_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=5.00, null=True, blank=True, help_text="Admin charges percentage")
+    insurance_enabled = models.BooleanField(default=False)
+    insurance_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=2.00, null=True, blank=True, help_text="Insurance percentage")
 
     def clean(self):
         super().clean()
@@ -1109,5 +1131,30 @@ class ProposalSignedDocument(BaseModel):
 
     def __str__(self):
         return f"{self.title} ({self.get_document_type_display()})"
+
+
+class SecurityCostingSetting(BaseModel):
+    """
+    Company-wide default costing & statutory configuration parameters.
+    Allows configuring master EOBI rate, SESSI minimum wage & percentage,
+    Admin charges percentage, and Insurance percentage.
+    """
+    company = models.ForeignKey('companies.Company', on_delete=models.CASCADE, related_name='security_costing_settings')
+    eobi_rate = models.DecimalField(max_digits=12, decimal_places=2, default=1500, help_text="Manual EOBI rate in PKR per guard")
+    sessi_minimum_wage = models.DecimalField(max_digits=12, decimal_places=2, default=37000, help_text="Minimum wage for SESSI calculation in PKR")
+    sessi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=6.00, help_text="SESSI contribution percentage")
+    admin_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=5.00, help_text="Admin charges percentage")
+    insurance_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=2.00, help_text="Insurance percentage")
+    eobi_default_enabled = models.BooleanField(default=False)
+    sessi_default_enabled = models.BooleanField(default=False)
+    admin_charges_default_enabled = models.BooleanField(default=False)
+    insurance_default_enabled = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Costing Settings ({self.company.name if self.company else 'Global'})"
+
 
 

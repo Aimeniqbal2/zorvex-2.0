@@ -7,7 +7,8 @@ from .models import (
     FollowUpStatus, SecurityAssessmentStatus, AssessmentRiskFinding,
     AssessmentStaffingRecommendation, AssessmentEquipmentRecommendation,
     AssessmentAttachment, RiskLevel, ProposalAdditionalCharge,
-    ProposalSignedDocument, ApprovalMethod, SignedDocumentCategory
+    ProposalSignedDocument, ApprovalMethod, SignedDocumentCategory,
+    SecurityCostingSetting
 )
 from crm.models import CRMEntity, CRMContact, CRMAddress
 from django.utils import timezone
@@ -273,6 +274,9 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
     guard_headcount = serializers.SerializerMethodField()
     guard_breakdown = serializers.SerializerMethodField()
     requirement_scope_display = serializers.SerializerMethodField()
+    total_monthly_amount = serializers.SerializerMethodField()
+    monthly_rate = serializers.SerializerMethodField()
+    location_rates = serializers.SerializerMethodField()
     
     class Meta:
         model = SecurityProposal
@@ -345,6 +349,34 @@ class SecurityProposalSerializer(serializers.ModelSerializer):
             guard_parts = [f"{l.quantity} {l.service_type.name}" for l in lines]
             return f"{', '.join(guard_parts)} (Total: {headcount})"
         return obj.title
+
+    def get_total_monthly_amount(self, obj):
+        ver = self._get_target_version(obj)
+        if not ver:
+            return 0.0
+        qs = ver.service_lines.filter(is_deleted=False)
+        if obj.location_id:
+            qs = qs.filter(location_id=obj.location_id)
+        else:
+            qs = qs.exclude(location__is_deleted=True).exclude(location__is_active=False)
+        total = sum(((sl.client_rate or 0) * (sl.quantity or 0)) for sl in qs)
+        total += getattr(ver, 'recurring_equipment_total', 0) or 0
+        total += getattr(ver, 'recurring_charges_total', 0) or 0
+        return float(total)
+
+    def get_monthly_rate(self, obj):
+        return self.get_total_monthly_amount(obj)
+
+    def get_location_rates(self, obj):
+        ver = self._get_target_version(obj)
+        if not ver:
+            return {}
+        res = {}
+        for sl in ver.service_lines.filter(is_deleted=False):
+            loc_id = str(sl.location_id) if sl.location_id else (str(obj.location_id) if obj.location_id else 'default')
+            line_cost = float((sl.client_rate or 0) * (sl.quantity or 0))
+            res[loc_id] = res.get(loc_id, 0.0) + line_cost
+        return res
 
     def get_handoff_prepared_by_name(self, obj):
         if obj.handoff_prepared_by:
@@ -602,5 +634,13 @@ class SecurityAssessmentDetailSerializer(SecurityAssessmentSerializer):
     staffing_recommendations = AssessmentStaffingRecommendationSerializer(many=True, read_only=True)
     equipment_recommendations = AssessmentEquipmentRecommendationSerializer(many=True, read_only=True)
     attachments = AssessmentAttachmentSerializer(many=True, read_only=True)
+
+
+class SecurityCostingSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SecurityCostingSetting
+        fields = '__all__'
+        read_only_fields = ['company', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
 
 
