@@ -279,6 +279,41 @@ export const transferSecurityStoreStock = async (data: {
     return response.data;
 };
 
+export const directStockInward = async (data: {
+    store_id: string;
+    item_id?: string;
+    item_name?: string;
+    item_code?: string;
+    security_category?: string;
+    is_controlled?: boolean;
+    track_serial_number?: boolean;
+    unit_of_measure?: string;
+    movement_type?: 'OPENING_BALANCE' | 'IN' | 'ADJUSTMENT_IN';
+    quantity: number;
+    unit_cost?: number;
+    reference?: string;
+    notes?: string;
+    serial_numbers?: string[] | string;
+}): Promise<any> => {
+    const response = await apiClient.post('/api/operations/security-inventory/direct-stock-inward/', data);
+    return response.data;
+};
+
+export const getActivePersonnel = async (): Promise<Array<{ id: string; full_name: string; employee_id: string; designation_name?: string }>> => {
+    try {
+        const response = await apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=500');
+        const list = response.data.results || response.data || [];
+        return list.map((e: any) => ({
+            id: e.id,
+            full_name: e.full_name || `${e.first_name || ''} ${e.last_name || ''}`.trim() || 'Unnamed',
+            employee_id: e.employee_id || e.code || '',
+            designation_name: e.designation_name || ''
+        }));
+    } catch {
+        return [];
+    }
+};
+
 export const reportEquipmentIncident = async (data: {
     incident_type: 'LOST' | 'DAMAGED' | 'UNUSABLE';
     issue_id?: string | null;

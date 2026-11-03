@@ -124,7 +124,16 @@ class Employee(BaseModel):
     )
     employment_status = models.CharField(
         max_length=20,
-        choices=[('ACTIVE', 'Active'), ('INACTIVE', 'Inactive'), ('SUSPENDED', 'Suspended'), ('RESIGNED', 'Resigned'), ('TERMINATED', 'Terminated'), ('JUMP', 'Jump')],
+        choices=[
+            ('ACTIVE', 'Active'),
+            ('INACTIVE', 'Inactive'),
+            ('SUSPENDED', 'Suspended'),
+            ('RESIGNED', 'Resigned'),
+            ('TERMINATED', 'Terminated'),
+            ('JUMP', 'Jump'),
+            ('OSL', 'OSL (Pending Confirmation)'),
+            ('OSL_CONFIRMED', 'OSL (Confirmed / Inactive)'),
+        ],
         default='ACTIVE'
     )
     
@@ -258,6 +267,32 @@ class Employee(BaseModel):
         super().clean()
         if self.user_id and hasattr(self.user, 'company_id') and str(self.user.company_id) != str(self.company_id):
             raise ValidationError({'user': 'User must belong to the same company.'})
+
+        # Check active blacklist for CNIC and Phone
+        if self.company_id and (self.cnic_number or self.phone):
+            from django.db.models import Q
+            clean_cnic = ''.join(c for c in (self.cnic_number or '') if c.isdigit())
+            clean_phone = ''.join(c for c in (self.phone or '') if c.isdigit())[-10:] if self.phone else ''
+            
+            cond = Q()
+            if clean_cnic and len(clean_cnic) >= 8:
+                cond |= Q(cnic_number__icontains=clean_cnic) | Q(cnic_number=self.cnic_number)
+            if clean_phone and len(clean_phone) >= 7:
+                cond |= Q(phone_number__icontains=clean_phone)
+
+            if cond:
+                try:
+                    bl = BlacklistedIndividual.objects.filter(
+                        company_id=self.company_id,
+                        is_active_blacklist=True
+                    ).filter(cond).first()
+                    if bl and (not self.pk or self.employment_status == 'ACTIVE'):
+                        raise ValidationError({
+                            'cnic_number': f"Individual '{bl.full_name}' (CNIC: {bl.cnic_number}) is BLACKLISTED. Reason: {bl.reason}. Cannot be hired or set to Active unless formally removed from Blacklist by Company Admin."
+                        })
+                except Exception as e:
+                    if isinstance(e, ValidationError):
+                        raise e
         if self.crm_entity_id and str(self.crm_entity.company_id) != str(self.company_id):
             raise ValidationError({'crm_entity': 'CRM Entity must belong to the same company.'})
         if self.department_id and str(self.department.company_id) != str(self.company_id):
@@ -735,11 +770,12 @@ class EmployeeAttendanceState(BaseModel):
 
 
 class JumpRecordStatus(models.TextChoices):
-    ACTIVE_JUMP = 'ACTIVE_JUMP', 'Active JUMP'
-    RESTORED = 'RESTORED', 'Restored'
+    ACTIVE_JUMP = 'ACTIVE_JUMP', 'Active JUMP / OSL'
+    OSL_PENDING = 'OSL_PENDING', 'OSL Pending Confirmation'
+    RESTORED = 'RESTORED', 'Restored / Cancelled'
     ACKNOWLEDGED = 'ACKNOWLEDGED', 'Acknowledged'
     RESIGNED = 'RESIGNED', 'Resigned'
-    TERMINATED = 'TERMINATED', 'Terminated'
+    TERMINATED = 'TERMINATED', 'Terminated / Confirmed'
     OTHER = 'OTHER', 'Other'
 
 
@@ -781,8 +817,77 @@ class JumpRecord(BaseModel):
         self.clean()
         super().save(*args, **kwargs)
 
+    # Phase S-5H Department Reporting
+    reported_by_department = models.CharField(
+        max_length=30,
+        choices=[('HR', 'Human Resources'), ('OPERATIONS', 'Operations')],
+        default='HR'
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reported_jumps'
+    )
+
     def __str__(self):
-        return f"JUMP: {self.employee} (Since {self.absent_since}, Status: {self.status})"
+        return f"OSL/JUMP: {self.employee} (Since {self.absent_since}, Status: {self.status}, Dept: {self.reported_by_department})"
+
+
+class BlacklistedIndividual(BaseModel):
+    """
+    Tracks blacklisted individuals (e.g. terminated employees).
+    Enforces strict rehire prevention across the enterprise.
+    Can only be delisted by privileged roles (Company Admin, CEO, COO, GM, HR Manager).
+    """
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='blacklist_records'
+    )
+    full_name = models.CharField(max_length=200)
+    cnic_number = models.CharField(max_length=50, db_index=True)
+    phone_number = models.CharField(max_length=50, blank=True, default='', db_index=True)
+    previous_employee_code = models.CharField(max_length=50, blank=True, default='')
+
+    reason = models.TextField(help_text="Reason for blacklisting / termination")
+    category = models.CharField(max_length=50, blank=True, default='TERMINATION')
+    blacklisted_at = models.DateTimeField(default=timezone.now)
+    blacklisted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='blacklisted_entries'
+    )
+    is_active_blacklist = models.BooleanField(
+        default=True,
+        help_text="True if currently blacklisted; False if whitelisted/removed"
+    )
+
+    # Delisting / Whitelisting (Privileged Authorization)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='removed_blacklist_entries'
+    )
+    removal_reason = models.TextField(blank=True, default='')
+
+    class Meta(BaseModel.Meta):
+        verbose_name = 'Blacklisted Individual'
+        verbose_name_plural = 'Blacklisted Individuals'
+        ordering = ['-blacklisted_at']
+
+    def __str__(self):
+        status = "ACTIVE BLACKLIST" if self.is_active_blacklist else "DELISTED"
+        return f"{self.full_name} ({self.cnic_number}) - {status}"
+
 
 class Shift(BaseModel):
     name = models.CharField(max_length=100)

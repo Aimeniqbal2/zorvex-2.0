@@ -107,6 +107,8 @@ class SecurityInventoryService:
         comp_id = company.id if hasattr(company, 'id') else company
 
         # Resolve warehouse/store
+        if not warehouse and kwargs.get('store'):
+            warehouse = kwargs.get('store')
         if not warehouse and store_id:
             warehouse = Warehouse.objects.get(id=store_id, company_id=comp_id)
         elif isinstance(warehouse, (str, int)) or hasattr(warehouse, 'hex'):
@@ -156,6 +158,8 @@ class SecurityInventoryService:
         if custody_type == EquipmentCustodyType.EMPLOYEE:
             if not employee:
                 raise ValidationError({'employee': 'Employee is required for employee equipment issue.'})
+            if not getattr(employee, 'is_active', True) or getattr(employee, 'employment_status', 'ACTIVE') != 'ACTIVE':
+                raise ValidationError({'employee': f"Cannot issue equipment to inactive/separated employee {employee.full_name} ({employee.employment_status}). Only ACTIVE personnel are eligible for equipment custody."})
             if str(employee.company_id) != str(comp_id):
                 raise ValidationError({'employee': 'Employee does not belong to this company.'})
         elif custody_type == EquipmentCustodyType.SITE:
@@ -569,6 +573,173 @@ class SecurityInventoryService:
             eq.save(update_fields=['status', 'resolution_status', 'resolution_notes', 'resolved_by', 'resolved_at', 'updated_at'])
 
         return incident
+
+    @classmethod
+    @transaction.atomic
+    def direct_stock_inward(
+        cls,
+        company,
+        warehouse,
+        item=None,
+        quantity=1,
+        movement_type='OPENING_BALANCE',
+        unit_cost=0,
+        reference='',
+        notes='',
+        serial_numbers=None,
+        user=None,
+        item_data=None,
+        security_category=None,
+        is_controlled=False,
+    ):
+        """
+        Direct stock intake / opening balance / historical entry without requiring a PO.
+        Supports both selecting an existing item or creating and registering a new item on the fly.
+        """
+        if isinstance(company, str):
+            company = Company.objects.get(id=company)
+
+        # Resolve warehouse
+        if isinstance(warehouse, (str, Warehouse)):
+            if isinstance(warehouse, str):
+                warehouse = Warehouse.objects.get(id=warehouse, company=company)
+        else:
+            raise ValidationError({'warehouse': 'Invalid warehouse / store.'})
+
+        # Resolve or create item
+        if not item and item_data:
+            item_name = item_data.get('name') or item_data.get('item_name')
+            if not item_name:
+                raise ValidationError({'item_name': 'Item name is required for new item.'})
+            sku = item_data.get('sku') or item_data.get('item_code')
+            if not sku:
+                import uuid
+                sku = f"ITM-{uuid.uuid4().hex[:6].upper()}"
+            track_serial = bool(
+                item_data.get('track_serial_number') or 
+                (serial_numbers and len(serial_numbers) > 0)
+            )
+            uom = item_data.get('unit_of_measure') or 'pcs'
+            cost = Decimal(str(unit_cost or item_data.get('cost_price') or 0))
+
+            item, created = Item.objects.get_or_create(
+                company=company,
+                name=item_name,
+                defaults={
+                    'sku': sku,
+                    'item_code': sku,
+                    'cost_price': cost,
+                    'selling_price': cost,
+                    'track_inventory': True,
+                    'track_serial_number': track_serial,
+                    'unit_of_measure': uom,
+                    'item_type': 'PRODUCT'
+                }
+            )
+            sec_cat = security_category or item_data.get('security_category') or 'OTHER'
+            controlled = is_controlled or item_data.get('is_controlled', False)
+            SecurityItemProfile.objects.update_or_create(
+                company=company,
+                item=item,
+                defaults={
+                    'security_category': sec_cat,
+                    'is_controlled': controlled
+                }
+            )
+        elif item:
+            if isinstance(item, str):
+                item = Item.objects.get(id=item, company=company)
+        else:
+            raise ValidationError({'item': 'Either an existing item or new item data must be provided.'})
+
+        # Update unit cost on item if specified and item cost is 0
+        if unit_cost and Decimal(str(unit_cost)) > 0:
+            if item.cost_price == 0:
+                item.cost_price = Decimal(str(unit_cost))
+                item.save(update_fields=['cost_price'])
+
+        # Security Profile update if provided
+        if security_category or is_controlled:
+            current_sec = getattr(getattr(item, 'security_profile', None), 'security_category', 'OTHER')
+            SecurityItemProfile.objects.update_or_create(
+                company=company,
+                item=item,
+                defaults={
+                    'security_category': security_category or current_sec,
+                    'is_controlled': is_controlled
+                }
+            )
+
+        qty = Decimal(str(quantity or 1))
+        if qty <= 0:
+            raise ValidationError({'quantity': 'Quantity must be greater than zero.'})
+
+        # Validate serial numbers if serialized
+        clean_serials = None
+        if item.track_serial_number:
+            if serial_numbers:
+                if isinstance(serial_numbers, str):
+                    clean_serials = [s.strip() for s in serial_numbers.replace('\n', ',').split(',') if s.strip()]
+                else:
+                    clean_serials = [str(s).strip() for s in serial_numbers if str(s).strip()]
+                
+                if len(clean_serials) != int(qty):
+                    raise ValidationError({
+                        'serial_numbers': f"Serialized item requires exactly {int(qty)} serial number(s). Got {len(clean_serials)}."
+                    })
+                if len(set(clean_serials)) != len(clean_serials):
+                    raise ValidationError({'serial_numbers': "Duplicate serial numbers provided in the list."})
+
+                existing = ItemSerial.objects.filter(
+                    company=company,
+                    serial_number__in=clean_serials
+                ).values_list('serial_number', flat=True)
+                if existing:
+                    raise ValidationError({
+                        'serial_numbers': f"Serial number(s) already exist: {', '.join(existing)}"
+                    })
+            else:
+                import uuid
+                clean_serials = [f"{item.sku or 'SN'}-{uuid.uuid4().hex[:6].upper()}" for _ in range(int(qty))]
+
+        m_type = movement_type if movement_type in ['OPENING_BALANCE', 'IN', 'ADJUSTMENT_IN'] else 'OPENING_BALANCE'
+        # If OPENING_BALANCE is selected but balance already exists and is non-zero, safely fallback to 'IN'
+        existing_bal = InventoryBalance.objects.filter(company=company, warehouse=warehouse, item=item).first()
+        if m_type == 'OPENING_BALANCE' and existing_bal and existing_bal.quantity != 0:
+            m_type = 'IN'
+
+        ref = reference.strip() if reference else (f"OB-{timezone.now().strftime('%Y%m%d%H%M')}" if m_type == 'OPENING_BALANCE' else f"REC-{timezone.now().strftime('%Y%m%d%H%M')}")
+        note_text = notes.strip() or f"Direct stock intake ({m_type}) into {warehouse.name}"
+
+        tx = process_transaction(
+            company=company,
+            item=item,
+            warehouse=warehouse,
+            movement_type=m_type,
+            quantity=qty,
+            reference=ref,
+            user=user,
+            notes=note_text,
+            serial_numbers=clean_serials
+        )
+
+        bal = InventoryBalance.objects.filter(company=company, warehouse=warehouse, item=item).first()
+        current_stock = bal.quantity if bal else qty
+
+        return {
+            'success': True,
+            'message': f"Successfully received {qty} {item.unit_of_measure} of '{item.name}' into store '{warehouse.name}'.",
+            'transaction_id': str(tx.pk) if hasattr(tx, 'pk') else None,
+            'movement_type': m_type,
+            'reference': ref,
+            'item_id': str(item.pk),
+            'item_name': item.name,
+            'warehouse_id': str(warehouse.pk),
+            'warehouse_name': warehouse.name,
+            'quantity_added': float(qty),
+            'current_stock': float(current_stock),
+            'serial_numbers': clean_serials or []
+        }
 
     @classmethod
     def get_stock_availability(

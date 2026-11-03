@@ -8,6 +8,7 @@ import { ErrorState } from '../../../components/ui/ErrorState';
 import { Modal } from '../../../components/ui/Modal';
 import { EmployeeModal } from './EmployeeModal';
 import { useIndustry, useAppStore } from '../../../stores/appStore';
+import { useToastStore } from '../../../stores/toastStore';
 
 interface EmployeeListProps {
     isSecurity?: boolean;
@@ -120,6 +121,21 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
     const [importSuccess, setImportSuccess] = useState<any | null>(null);
     const [updateExisting, setUpdateExisting] = useState(false);
 
+    // OSL Reporting & Actions State
+    const [isOslReportModalOpen, setIsOslReportModalOpen] = useState(false);
+    const [oslTargetEmployee, setOslTargetEmployee] = useState<Employee | null>(null);
+    const [oslModalDate, setOslModalDate] = useState('');
+    const [oslModalReason, setOslModalReason] = useState('');
+    const [oslSubmitting, setOslSubmitting] = useState(false);
+
+    // Blacklist Modal State
+    const [isBlacklistModalOpen, setIsBlacklistModalOpen] = useState(false);
+    const [blacklistRecords, setBlacklistRecords] = useState<any[]>([]);
+    const [loadingBlacklist, setLoadingBlacklist] = useState(false);
+    const [delistTargetId, setDelistTargetId] = useState<string | null>(null);
+    const [delistReason, setDelistReason] = useState('');
+    const [delisting, setDelisting] = useState(false);
+
     const fetchEmployees = async (page = currentPage, size = pageSize) => {
         setLoading(true);
         try {
@@ -128,7 +144,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
             if (filterTab === 'UNDEPLOYED') params.append('deployment_status', 'UNDEPLOYED');
             if (filterTab === 'DIRECT') params.append('classification', 'DIRECT');
             if (filterTab === 'INDIRECT') params.append('classification', 'INDIRECT');
-            if (filterTab === 'JUMP') params.append('employment_status', 'JUMP');
+            if (filterTab === 'OSL' || filterTab === 'JUMP') params.append('employment_status', 'OSL');
             if (filterTab === 'ACTIVE') params.append('is_active', 'true');
             if (filterTab === 'INACTIVE') params.append('is_active', 'false');
             if (filterTab === 'CNIC_ALERTS') params.append('cnic_expiring', 'true');
@@ -235,7 +251,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
         if (filterTab === 'UNDEPLOYED') params.append('deployment_status', 'UNDEPLOYED');
         if (filterTab === 'DIRECT') params.append('classification', 'DIRECT');
         if (filterTab === 'INDIRECT') params.append('classification', 'INDIRECT');
-        if (filterTab === 'JUMP') params.append('employment_status', 'JUMP');
+        if (filterTab === 'OSL' || filterTab === 'JUMP') params.append('employment_status', 'OSL');
         if (filterTab === 'ACTIVE') params.append('is_active', 'true');
         if (filterTab === 'INACTIVE') params.append('is_active', 'false');
         if (filterTab === 'CNIC_ALERTS') params.append('cnic_expiring', 'true');
@@ -253,6 +269,89 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
     };
 
     // Import Handlers
+
+    const handleCancelOsl = async (emp: Employee) => {
+        if (!window.confirm(`Are you sure you want to cancel OSL for ${emp.full_name || emp.first_name}? They will be restored to ACTIVE status with no penalty.`)) return;
+        try {
+            await apiClient.post(`/api/hrm/employees/${emp.id}/cancel-osl/`, {
+                reason: 'Guard returned to duty / reported in error'
+            });
+            useToastStore.getState().addToast('success', `OSL cancelled for ${emp.full_name || emp.first_name}. Guard restored to ACTIVE.`);
+            fetchEmployees(currentPage, pageSize);
+        } catch (err: any) {
+            useToastStore.getState().addToast('error', err.response?.data?.error || 'Failed to cancel OSL');
+        }
+    };
+
+    const handleConfirmOsl = async (emp: Employee) => {
+        const reason = window.prompt(`Confirm OSL for ${emp.full_name || emp.first_name} (bhag gaya / absconded):\nEnter reason (or leave default):`, 'Absent without notice / bhag gaya');
+        if (reason === null) return;
+        try {
+            await apiClient.post(`/api/hrm/employees/${emp.id}/confirm-osl/`, {
+                reason: reason || 'Absent without notice / bhag gaya'
+            });
+            useToastStore.getState().addToast('success', `OSL confirmed for ${emp.full_name || emp.first_name}. Guard marked INACTIVE.`);
+            fetchEmployees(currentPage, pageSize);
+        } catch (err: any) {
+            useToastStore.getState().addToast('error', err.response?.data?.error || 'Failed to confirm OSL');
+        }
+    };
+
+    const handleReportOslSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!oslTargetEmployee) return;
+        setOslSubmitting(true);
+        try {
+            await apiClient.post(`/api/hrm/employees/${oslTargetEmployee.id}/report-osl/`, {
+                reported_by_department: isReadOnly ? 'OPERATIONS' : 'HR',
+                effective_date: oslModalDate || new Date().toISOString().split('T')[0],
+                reason: oslModalReason || 'Absent from assigned post without notice / uncontactable'
+            });
+            useToastStore.getState().addToast('success', `Guard ${oslTargetEmployee.full_name || oslTargetEmployee.first_name} reported as OSL. Placed under review.`);
+            setIsOslReportModalOpen(false);
+            setOslTargetEmployee(null);
+            fetchEmployees(currentPage, pageSize);
+        } catch (err: any) {
+            useToastStore.getState().addToast('error', err.response?.data?.error || 'Failed to report OSL');
+        } finally {
+            setOslSubmitting(false);
+        }
+    };
+
+    const fetchBlacklistRecords = async () => {
+        setLoadingBlacklist(true);
+        try {
+            const res = await apiClient.get('/api/hrm/blacklist/?page_size=200');
+            setBlacklistRecords(res.data?.results || res.data || []);
+        } catch (err) {
+            console.error('Failed to fetch blacklist records', err);
+        } finally {
+            setLoadingBlacklist(false);
+        }
+    };
+
+    const handleDelistSubmit = async (entryId: string) => {
+        if (!delistReason.trim()) {
+            alert('A detailed removal reason is required to delist this individual.');
+            return;
+        }
+        setDelisting(true);
+        try {
+            await apiClient.post(`/api/hrm/blacklist/${entryId}/delist/`, {
+                removal_reason: delistReason.trim()
+            });
+            useToastStore.getState().addToast('success', 'Individual has been delisted from the Blacklist and is now eligible for rehire.');
+            setDelistTargetId(null);
+            setDelistReason('');
+            fetchBlacklistRecords();
+            fetchEmployees(currentPage, pageSize);
+        } catch (err: any) {
+            useToastStore.getState().addToast('error', err.response?.data?.error || err.response?.data?.detail || 'Failed to delist record');
+        } finally {
+            setDelisting(false);
+        }
+    };
+
     const handleDownloadTemplate = () => {
         window.open('/api/hrm/employees/import-template/', '_blank');
     };
@@ -579,24 +678,138 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
         columns.push({
             key: 'actions', 
             header: 'Action',
-            width: '115px',
+            width: filterTab === 'OSL' ? '280px' : '115px',
             align: 'center',
             sticky: 'right',
-            render: (e: Employee) => (
-                <button 
-                    type="button"
-                    className="btn-action-edit"
-                    onClick={(evt) => { 
-                        evt.stopPropagation(); 
-                        setSelectedEmployee(e); 
-                        setIsModalOpen(true); 
-                    }}
-                    title="View & Edit Employee Profile"
-                >
-                    <i className="bx bx-edit-alt" style={{ fontSize: '13.5px' }}></i>
-                    <span>View / Edit</span>
-                </button>
-            )
+            render: (e: Employee) => {
+                const isGuardOsl = e.employment_status === 'OSL';
+                return (
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                        {isGuardOsl && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={(evt) => {
+                                        evt.stopPropagation();
+                                        handleCancelOsl(e);
+                                    }}
+                                    style={{
+                                        background: '#059669',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px'
+                                    }}
+                                    title="Cancel OSL (Guard Returned / Reported in Error)"
+                                >
+                                    <i className="bx bx-check"></i> Cancel OSL
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={(evt) => {
+                                        evt.stopPropagation();
+                                        handleConfirmOsl(e);
+                                    }}
+                                    style={{
+                                        background: '#b91c1c',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px'
+                                    }}
+                                    title="Confirm OSL (Guard Absconded / Bhag gaya)"
+                                >
+                                    <i className="bx bx-x"></i> Confirm OSL
+                                </button>
+                            </>
+                        )}
+                        <button 
+                            type="button"
+                            className="btn-action-edit"
+                            onClick={(evt) => { 
+                                evt.stopPropagation(); 
+                                setSelectedEmployee(e); 
+                                setIsModalOpen(true); 
+                            }}
+                            title="View & Edit Employee Profile"
+                        >
+                            <i className="bx bx-edit-alt" style={{ fontSize: '13.5px' }}></i>
+                            <span>View / Edit</span>
+                        </button>
+                    </div>
+                );
+            }
+        });
+    } else {
+        // Operations View: Action Column with OSL Reporting
+        columns.push({
+            key: 'actions', 
+            header: 'Action',
+            width: '130px',
+            align: 'center',
+            sticky: 'right',
+            render: (e: Employee) => {
+                if (e.employment_status === 'ACTIVE' && e.is_active) {
+                    return (
+                        <button
+                            type="button"
+                            onClick={(evt) => {
+                                evt.stopPropagation();
+                                setOslTargetEmployee(e);
+                                setOslModalDate(new Date().toISOString().split('T')[0]);
+                                setOslModalReason('Absent from assigned post without notice / uncontactable');
+                                setIsOslReportModalOpen(true);
+                            }}
+                            style={{
+                                background: 'rgba(217, 119, 6, 0.1)',
+                                color: '#d97706',
+                                border: '1px solid #d97706',
+                                borderRadius: '4px',
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                            }}
+                            title="Report guard as OSL (Bhag gaya / Absent)"
+                        >
+                            <i className="bx bx-run"></i> Report OSL
+                        </button>
+                    );
+                } else if (e.employment_status === 'OSL') {
+                    return (
+                        <span className="badge" style={{ fontSize: '11px', background: 'rgba(217, 119, 6, 0.15)', color: '#d97706', padding: '3px 8px' }}>
+                            OSL Reported
+                        </span>
+                    );
+                } else if (e.employment_status === 'OSL_CONFIRMED') {
+                    return (
+                        <span className="badge" style={{ fontSize: '11px', background: 'rgba(185, 28, 28, 0.15)', color: '#b91c1c', padding: '3px 8px' }}>
+                            OSL Confirmed
+                        </span>
+                    );
+                } else {
+                    return (
+                        <span className="badge badge-secondary" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                            Inactive
+                        </span>
+                    );
+                }
+            }
         });
     }
 
@@ -625,6 +838,9 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                     </Button>
                     {!isReadOnly && (
                         <>
+                            <Button variant="secondary" size="sm" onClick={() => { setIsBlacklistModalOpen(true); fetchBlacklistRecords(); }}>
+                                <i className="bx bx-shield-x"></i> Blacklist Register
+                            </Button>
                             <Button variant="secondary" size="sm" onClick={() => setIsImportModalOpen(true)}>
                                 <i className="bx bx-import"></i> Import Legacy Data
                             </Button>
@@ -668,7 +884,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                         borderRadius: '6px',
                         border: '1px solid var(--color-border)'
                     }}>
-                        {['ALL', ...(isSecurity ? ['DEPLOYED', 'UNDEPLOYED'] : []), 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['JUMP'] : []), 'CNIC_ALERTS'].map(t => {
+                        {['ALL', ...(isSecurity ? ['DEPLOYED', 'UNDEPLOYED'] : []), 'DIRECT', 'INDIRECT', 'ACTIVE', 'INACTIVE', ...(isSecurity ? ['OSL'] : []), 'CNIC_ALERTS'].map(t => {
                             const isAlertsTab = t === 'CNIC_ALERTS';
                             const isSelected = filterTab === t;
                             let tabLabel = t;
@@ -677,7 +893,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                             else if (t === 'UNDEPLOYED') tabLabel = 'Undeployed';
                             else if (t === 'DIRECT') tabLabel = 'Direct (Guard)';
                             else if (t === 'INDIRECT') tabLabel = 'Indirect (Staff)';
-                            else if (t === 'JUMP') tabLabel = 'Jump / AWOL';
+                            else if (t === 'OSL' || t === 'JUMP') tabLabel = 'OSL (Absentee / Bhag gaya)';
                             else if (t === 'ACTIVE') tabLabel = 'Active';
                             else if (t === 'INACTIVE') tabLabel = 'Inactive';
                             else if (t === 'ALL') tabLabel = 'All Workforce';
@@ -1096,6 +1312,200 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                     </div>
                 </>
             )}
+
+            
+            {/* Operations OSL Report Dialog */}
+            <Modal
+                isOpen={isOslReportModalOpen}
+                onClose={() => { setIsOslReportModalOpen(false); setOslTargetEmployee(null); }}
+                width="520px"
+                title="Report Guard as OSL (Bhag gaya / Absent)"
+            >
+                {oslTargetEmployee && (
+                    <form onSubmit={handleReportOslSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'rgba(217, 119, 6, 0.1)', border: '1px solid rgba(217, 119, 6, 0.25)', fontSize: '12.5px', color: '#d97706' }}>
+                            <i className="bx bx-run"></i> <strong>Operations OSL Notification:</strong> This reports the guard to the HR department as an absentee (bhag gaya). The guard will be placed in the OSL review queue. Operations will not mark them inactive directly; HR will confirm or cancel.
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px' }}>
+                            <div>
+                                <span style={{ color: 'var(--color-text-muted)', fontSize: '11px', display: 'block' }}>GUARD NAME</span>
+                                <strong>{oslTargetEmployee.full_name || oslTargetEmployee.first_name}</strong>
+                            </div>
+                            <div>
+                                <span style={{ color: 'var(--color-text-muted)', fontSize: '11px', display: 'block' }}>EMPLOYEE CODE</span>
+                                <strong>{oslTargetEmployee.display_code || oslTargetEmployee.employee_code}</strong>
+                            </div>
+                            <div>
+                                <span style={{ color: 'var(--color-text-muted)', fontSize: '11px', display: 'block' }}>DESIGNATION</span>
+                                <span>{oslTargetEmployee.designation_name || 'Guard'}</span>
+                            </div>
+                            <div>
+                                <span style={{ color: 'var(--color-text-muted)', fontSize: '11px', display: 'block' }}>CURRENT SITE</span>
+                                <span>{oslTargetEmployee.deployed_site_name || 'Undeployed'}</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Date of Absence *</label>
+                            <input
+                                type="date"
+                                required
+                                value={oslModalDate}
+                                onChange={e => setOslModalDate(e.target.value)}
+                                style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                            />
+                        </div>
+
+                        <div>
+                            <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Absence Grounds / Incident Reason *</label>
+                            <textarea
+                                required
+                                rows={3}
+                                value={oslModalReason}
+                                onChange={e => setOslModalReason(e.target.value)}
+                                placeholder="Describe why this guard is reported as OSL (e.g. left post during night shift, phone unreachable)"
+                                style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', resize: 'vertical' }}
+                            />
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+                            <Button type="button" variant="secondary" size="sm" onClick={() => { setIsOslReportModalOpen(false); setOslTargetEmployee(null); }}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" variant="primary" size="sm" loading={oslSubmitting} style={{ background: '#d97706', borderColor: '#d97706' }}>
+                                <i className="bx bx-paper-plane"></i> Submit OSL to HR
+                            </Button>
+                        </div>
+                    </form>
+                )}
+            </Modal>
+
+            {/* HR Blacklist Register & Delist Modal */}
+            <Modal
+                isOpen={isBlacklistModalOpen}
+                onClose={() => { setIsBlacklistModalOpen(false); setDelistTargetId(null); setDelistReason(''); }}
+                width="950px"
+                title="Enterprise Blacklist Register — Rehire Prevention & Governance"
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                            Active blacklisted individuals are strictly blocked from being hired or assigned anywhere in the software.
+                        </div>
+                        <Button variant="secondary" size="sm" onClick={fetchBlacklistRecords} loading={loadingBlacklist}>
+                            <i className="bx bx-refresh"></i> Refresh
+                        </Button>
+                    </div>
+
+                    {loadingBlacklist ? (
+                        <div style={{ padding: '24px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                            Loading blacklist records...
+                        </div>
+                    ) : blacklistRecords.length === 0 ? (
+                        <div style={{ padding: '24px', textAlign: 'center', background: 'var(--color-surface)', borderRadius: '6px', border: '1px dashed var(--color-border)', color: 'var(--color-text-muted)' }}>
+                            No individuals are currently on the Blacklist.
+                        </div>
+                    ) : (
+                        <div style={{ maxHeight: '420px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                                <thead>
+                                    <tr style={{ background: 'var(--color-surface-hover, #f8fafc)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
+                                        <th style={{ padding: '8px 10px' }}>Individual</th>
+                                        <th style={{ padding: '8px 10px' }}>CNIC & Phone</th>
+                                        <th style={{ padding: '8px 10px' }}>Previous Code</th>
+                                        <th style={{ padding: '8px 10px' }}>Reason & Category</th>
+                                        <th style={{ padding: '8px 10px' }}>Status</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'center' }}>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {blacklistRecords.map((item) => (
+                                        <tr key={item.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                                            <td style={{ padding: '8px 10px', fontWeight: 600 }}>
+                                                {item.full_name}
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                <div>{item.cnic_number || '—'}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{item.phone_number || '—'}</div>
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                <code>{item.previous_employee_code || '—'}</code>
+                                            </td>
+                                            <td style={{ padding: '8px 10px', maxWidth: '240px' }}>
+                                                <div style={{ fontWeight: 500 }}>{item.category}</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{item.reason}</div>
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                {item.is_active_blacklist ? (
+                                                    <span className="badge badge-danger" style={{ fontSize: '11px', background: '#991b1b', color: '#fff' }}>
+                                                        BLACKLISTED
+                                                    </span>
+                                                ) : (
+                                                    <span className="badge badge-success" style={{ fontSize: '11px' }}>
+                                                        DELISTED
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                                {item.is_active_blacklist ? (
+                                                    delistTargetId === item.id ? (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px' }}>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Reason for delisting..."
+                                                                value={delistReason}
+                                                                onChange={e => setDelistReason(e.target.value)}
+                                                                style={{ padding: '3px 6px', fontSize: '11px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
+                                                            />
+                                                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                                                <Button size="sm" variant="primary" loading={delisting} onClick={() => handleDelistSubmit(item.id)} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                                                    Confirm Delist
+                                                                </Button>
+                                                                <Button size="sm" variant="secondary" onClick={() => { setDelistTargetId(null); setDelistReason(''); }} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                                                    Cancel
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setDelistTargetId(item.id); setDelistReason(''); }}
+                                                            style={{
+                                                                background: 'none',
+                                                                border: '1px solid #059669',
+                                                                color: '#059669',
+                                                                padding: '3px 8px',
+                                                                borderRadius: '4px',
+                                                                fontSize: '11px',
+                                                                fontWeight: 600,
+                                                                cursor: 'pointer'
+                                                            }}
+                                                            title="Delist from Blacklist (Executive Authorization)"
+                                                        >
+                                                            Delist / Whitelist
+                                                        </button>
+                                                    )
+                                                ) : (
+                                                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                                        Delisted by {item.removed_by_name || 'Admin'}
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                        <Button type="button" variant="secondary" size="sm" onClick={() => { setIsBlacklistModalOpen(false); setDelistTargetId(null); setDelistReason(''); }}>
+                            Close
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
 
             {/* Modals are only active when not read-only */}
             {!isReadOnly && (

@@ -1408,20 +1408,40 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                     <Input label="Enrollment / Joining Date" type="date" name="joining_date" value={formData.joining_date || ''} onChange={handleChange} required />
                                     <Input label="Confirmation Date" type="date" name="confirmation_date" value={formData.confirmation_date || ''} onChange={handleChange} />
                                     <div className="form-field">
-                                        <label className="form-label">Employment Status</label>
-                                        <select 
-                                            className="modal-select"
-                                            name="employment_status" 
-                                            value={formData.employment_status || 'ACTIVE'} 
-                                            onChange={handleChange}
-                                        >
-                                            <option value="ACTIVE">ACTIVE</option>
-                                            <option value="INACTIVE">INACTIVE</option>
-                                            <option value="SUSPENDED">SUSPENDED</option>
-                                            <option value="RESIGNED">RESIGNED</option>
-                                            <option value="TERMINATED">TERMINATED</option>
-                                            {isSecurity && <option value="JUMP">JUMP / MISSING</option>}
-                                        </select>
+                                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <span>Employment Status</span>
+                                            <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 'normal' }}>
+                                                Governed via Tab 8
+                                            </span>
+                                        </label>
+                                        <div style={{
+                                            padding: '8px 12px',
+                                            borderRadius: '6px',
+                                            background: 'var(--color-surface)',
+                                            border: '1px solid var(--color-border)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            minHeight: '38px'
+                                        }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span className={`badge ${
+                                                    formData.employment_status === 'ACTIVE' ? 'badge-success' :
+                                                    ['RESIGNED', 'TERMINATED', 'OSL_CONFIRMED'].includes(formData.employment_status || '') ? 'badge-danger' :
+                                                    ['OSL', 'JUMP', 'SUSPENDED'].includes(formData.employment_status || '') ? 'badge-warning' : 'badge-secondary'
+                                                }`} style={{ fontSize: '12px', fontWeight: 600, padding: '3px 8px' }}>
+                                                    {formData.employment_status || (formData.is_active ? 'ACTIVE' : 'INACTIVE')}
+                                                </span>
+                                                {(employee as any)?.is_blacklisted && (
+                                                    <span className="badge badge-danger" style={{ fontSize: '11px', background: '#991b1b', color: '#fff' }}>
+                                                        <i className="bx bx-shield-x"></i> BLACKLISTED
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span style={{ fontSize: '11.5px', color: 'var(--color-text-muted)' }}>
+                                                Read-only
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2280,8 +2300,28 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                 designations={designations}
                                 departments={departments}
                                 isSecurity={isSecurity}
-                                onRefresh={() => {
-                                    if (employee?.id) fetchChildData(employee.id);
+                                onRefresh={async () => {
+                                    if (employee?.id) {
+                                        fetchChildData(employee.id);
+                                        try {
+                                            const res = await apiClient.get(`/api/hrm/employees/${employee.id}/`);
+                                            if (res.data) {
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    ...res.data,
+                                                    employment_status: res.data.employment_status,
+                                                    is_active: res.data.is_active,
+                                                    rehire_date: res.data.rehire_date,
+                                                    termination_date: res.data.termination_date,
+                                                    resignation_date: res.data.resignation_date,
+                                                    employee_code: res.data.employee_code,
+                                                    previous_employee_code: res.data.previous_employee_code,
+                                                }));
+                                            }
+                                        } catch (e) {
+                                            console.error('Failed to reload employee on refresh', e);
+                                        }
+                                    }
                                     onSave();
                                 }}
                             />

@@ -469,6 +469,29 @@ class WarehouseListCreateView(APIView):
             return err
 
         warehouses = Warehouse.objects.select_related('branch').filter(company=company)
+        if not warehouses.exists() and company:
+            wh = Warehouse.objects.create(
+                company=company,
+                name='Main Armory & Equipment Store',
+                code='MAIN-ARMORY',
+                address='Headquarters Central Store & Armory',
+                is_active=True
+            )
+            try:
+                from operations.models import SecurityStoreProfile, SecurityStoreType
+                SecurityStoreProfile.objects.get_or_create(
+                    company=company,
+                    warehouse=wh,
+                    defaults={
+                        'store_type': SecurityStoreType.ARMORY,
+                        'is_armory': True,
+                        'requires_strong_auth': True,
+                        'notes': 'Auto-provisioned central armory and equipment depot'
+                    }
+                )
+            except Exception:
+                pass
+            warehouses = Warehouse.objects.select_related('branch').filter(company=company)
         serializer = WarehouseSerializer(warehouses, many=True)
         return Response(serializer.data)
 

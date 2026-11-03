@@ -278,26 +278,11 @@ class MonthlyMusterService:
         is_current_month = (today.year == year and today.month == month)
         current_day = today.day if is_current_month else (32 if today > end_date else 0)
 
-        # Check and run tenant Auto Attendance if active and requested month is current
-        config = AutoAttendanceConfig.get_for_company(company)
-        if config and config.is_enabled and is_current_month:
-            delay = config.delay_days if config.delay_days is not None else 2
-            calc_target_date = today - timedelta(days=delay)
-            if calc_target_date >= start_date:
-                needs_run = True
-                if config.last_run_date and config.last_run_date >= calc_target_date:
-                    if config.last_run_at and config.last_run_at.date() == today:
-                        needs_run = False
-                if needs_run:
-                    try:
-                        MonthlyMusterService.run_auto_attendance_for_company(
-                            company=company,
-                            target_date=calc_target_date,
-                            fill_month_up_to_target=True,
-                            overwrite_existing=False
-                        )
-                    except Exception:
-                        pass
+        # Self-healing daily automated attendance trigger
+        try:
+            MonthlyMusterService.check_and_trigger_daily_auto_attendance(company)
+        except Exception:
+            pass
 
         # 1. Fetch active operational sites strictly mirroring active CRM entities and active locations
         from security_crm.models import ClientLocation, ProposalServiceLine
@@ -1847,17 +1832,59 @@ class MonthlyMusterService:
         return ''
 
     @staticmethod
+    def check_and_trigger_daily_auto_attendance(company):
+        """
+        Lightweight, self-healing check to run automatic daily attendance for a company
+        if today's target date has not been processed yet.
+        Safe to call frequently (e.g. on muster view requests, Celery beat, or startup).
+        """
+        from operations.models import AutoAttendanceConfig
+        from django.utils import timezone
+        from datetime import timedelta
+
+        if not company:
+            return False
+
+        config = AutoAttendanceConfig.get_for_company(company)
+        if not config or not config.is_enabled:
+            return False
+
+        today = timezone.now().date()
+        delay = config.delay_days if config.delay_days is not None else 2
+        target_date = today - timedelta(days=delay)
+
+        # Check if already completed today
+        if config.last_run_date and config.last_run_date >= target_date:
+            if config.last_run_at and config.last_run_at.date() == today:
+                return False
+
+        # Execute auto attendance
+        try:
+            res = MonthlyMusterService.run_auto_attendance_for_company(
+                company=company,
+                target_date=target_date,
+                fill_month_up_to_target=True,
+                overwrite_existing=False
+            )
+            return res.get('status') == 'success'
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning('Failed auto attendance self-healing run for company %s: %s', company, e)
+            return False
+
+    @staticmethod
     def run_auto_attendance_for_company(
         company,
         user=None,
         target_date=None,
+        start_date=None,
         fill_month_up_to_target=True,
         overwrite_existing=False
     ):
         """
         Executes automatic attendance generation for a tenant company based on AutoAttendanceConfig.
         If target_date is None, target_date = today - timedelta(days=config.delay_days).
-        Sequentially processes dates so dependencies (D-1 -> D) are satisfied.
+        Sequentially processes dates so dependencies (D-1 -> D) are satisfied across month boundaries.
         """
         from operations.models import AutoAttendanceConfig, OperationalSite, Deployment, DeploymentStatus, DailyDutyPay
         import calendar
@@ -1865,13 +1892,14 @@ class MonthlyMusterService:
         from django.utils import timezone
 
         if not company:
-            return {'status': 'error', 'message': 'Company context required.', 'records_created': 0}
+            return {'status': 'error', 'message': 'Company context required.', 'records_created': 0, 'new_records_created': 0, 'existing_records_skipped': 0}
 
         config = AutoAttendanceConfig.get_for_company(company)
         if not config.is_enabled and target_date is None:
-            return {'status': 'disabled', 'message': 'Auto-attendance is disabled for this company.', 'records_created': 0}
+            return {'status': 'disabled', 'message': 'Auto-attendance is disabled for this company.', 'records_created': 0, 'new_records_created': 0, 'existing_records_skipped': 0}
 
         today = timezone.now().date()
+        is_manual = (target_date is not None)
         if target_date is None:
             delay = config.delay_days if config.delay_days is not None else 2
             target_date = today - timedelta(days=delay)
@@ -1879,23 +1907,42 @@ class MonthlyMusterService:
             from datetime import datetime
             target_date = datetime.strptime(target_date.strip(), '%Y-%m-%d').date()
 
-        if fill_month_up_to_target:
-            month_start = date(target_date.year, target_date.month, 1)
-            begin_date = month_start
-            total_days = (target_date - begin_date).days + 1
-            if total_days > 0:
-                dates_to_process = [begin_date + timedelta(days=i) for i in range(total_days)]
+        if start_date:
+            if isinstance(start_date, str):
+                from datetime import datetime
+                start_date = datetime.strptime(start_date.strip(), '%Y-%m-%d').date()
+            begin_date = start_date
+            if begin_date <= target_date:
+                dates_to_process = [begin_date + timedelta(days=i) for i in range((target_date - begin_date).days + 1)]
+            else:
+                dates_to_process = [target_date]
+        elif fill_month_up_to_target:
+            if is_manual:
+                begin_date = date(target_date.year, target_date.month, 1)
+            else:
+                if config.last_run_date and config.last_run_date < target_date:
+                    max_lookback = target_date - timedelta(days=31)
+                    begin_date = max(config.last_run_date + timedelta(days=1), max_lookback)
+                else:
+                    if target_date.day <= 2:
+                        begin_date = target_date - timedelta(days=1)
+                    else:
+                        begin_date = date(target_date.year, target_date.month, 1)
+
+            if begin_date <= target_date:
+                dates_to_process = [begin_date + timedelta(days=i) for i in range((target_date - begin_date).days + 1)]
             else:
                 dates_to_process = [target_date]
         else:
             dates_to_process = [target_date]
 
         total_created = 0
+        total_skipped = 0
         days_processed = []
 
         sites = list(OperationalSite.objects.filter(company=company, is_active=True, is_deleted=False))
         if not sites:
-            return {'status': 'success', 'message': 'No active operational sites found for this company.', 'records_created': 0}
+            return {'status': 'success', 'message': 'No active operational sites found for this company.', 'records_created': 0, 'new_records_created': 0, 'existing_records_skipped': 0}
 
         for d in dates_to_process:
             days_in_m = calendar.monthrange(d.year, d.month)[1]
@@ -1922,29 +1969,99 @@ class MonthlyMusterService:
                 Q(end_date__isnull=True) | Q(end_date__gte=d)
             ).select_related('site', 'employee'))
 
+            # Pre-fetch existing duties for date d to avoid N+1 and prevent multi-site collisions
+            existing_duties = list(DailyDutyPay.objects.filter(
+                company=company,
+                duty_date=d,
+                is_deleted=False
+            ).values('employee_id', 'site_id', 'attendance_status', 'duty_type'))
+
+            emp_day_status = defaultdict(dict)
+            for ed in existing_duties:
+                e_id = str(ed['employee_id'])
+                s_id = str(ed['site_id'])
+                st = str(ed.get('attendance_status') or '').strip().upper()
+                dt = str(ed.get('duty_type') or '').strip().upper()
+
+                prev_c = emp_day_status[e_id].get(s_id)
+                if prev_c:
+                    if (prev_c == 'P' and st in ['OVERTIME_DOZING', 'OD']) or (prev_c == 'OD' and dt == 'PRIMARY'):
+                        code = 'POD'
+                    elif (prev_c == 'P' and (dt == 'OVERTIME' or st in ['OVERTIME', 'O'])) or (prev_c == 'O' and dt == 'PRIMARY'):
+                        code = 'PO'
+                    else:
+                        code = prev_c
+                else:
+                    if st in ['OVERTIME_DOZING', 'OD']:
+                        code = 'OD'
+                    elif dt == 'OVERTIME' or st in ['OVERTIME', 'O']:
+                        code = 'O'
+                    elif st in ['WORKED_WEEKLY_OFF', 'WP']:
+                        code = 'WP'
+                    elif st in ['WEEKLY_OFF', 'W', 'OFF_DAY']:
+                        code = 'W'
+                    elif st in ['ABSENT', 'A']:
+                        code = 'A'
+                    elif st in ['LEAVE', 'L', 'PL', 'PAID_LEAVE', 'UNPAID_LEAVE']:
+                        code = 'L'
+                    else:
+                        code = 'P'
+                emp_day_status[e_id][s_id] = code
+
             day_updates = []
             for dep in active_deps:
-                has_existing = DailyDutyPay.objects.filter(
-                    company=company,
-                    site=dep.site,
-                    employee=dep.employee,
-                    duty_date=d,
-                    is_deleted=False
-                ).exists()
+                emp_id_str = str(dep.employee.id)
+                site_id_str = str(dep.site.id)
 
+                has_existing = site_id_str in emp_day_status[emp_id_str]
                 if has_existing and not overwrite_existing:
+                    total_skipped += 1
                     continue
 
                 prev_code = MonthlyMusterService.get_guard_previous_day_code(company, dep.site, dep.employee, prev_d)
                 target_code = MonthlyMusterService.resolve_auto_attendance_code(prev_code)
 
-                if target_code in ['P', 'A', 'L']:
-                    day_updates.append({
-                        'site_id': str(dep.site.id),
-                        'employee_id': str(dep.employee.id),
-                        'day': d.day,
-                        'code': target_code
-                    })
+                if not target_code or target_code not in ['P', 'A', 'L']:
+                    continue
+
+                # Anti-collision and capacity adjustment
+                assigned_duties = emp_day_status[emp_id_str]
+                assigned_codes = [c for s, c in assigned_duties.items() if s != site_id_str]
+
+                # Rule A: PO, POD, WP consume full 2-shift daily capacity; no other site duty can be added
+                if any(c in ['PO', 'POD', 'WP'] for c in assigned_codes):
+                    continue
+
+                # Rule B: Leave, Absent, or Scheduled Week Off at another location precludes active duties
+                if any(c in ['L', 'A', 'W'] for c in assigned_codes):
+                    continue
+
+                if target_code == 'P':
+                    # If already marked P elsewhere, can only be Overtime (O) here
+                    if any(c in ['P'] for c in assigned_codes):
+                        # Can take overtime only if not already having an overtime shift
+                        if not any(c in ['O', 'OD'] for c in assigned_codes):
+                            target_code = 'O'
+                        else:
+                            # Already has primary + overtime (2 shifts max), cannot assign 3rd shift
+                            continue
+                elif target_code in ['O', 'OD']:
+                    # Overtime requires a P elsewhere, and max 1 overtime total
+                    if any(c in ['O', 'OD'] for c in assigned_codes) or not any(c in ['P'] for c in assigned_codes):
+                        continue
+                elif target_code in ['A', 'L']:
+                    # Absent or Leave can only be recorded at one location
+                    if any(c in ['A', 'L', 'W', 'P', 'O', 'OD'] for c in assigned_codes):
+                        continue
+
+                day_updates.append({
+                    'site_id': site_id_str,
+                    'employee_id': emp_id_str,
+                    'day': d.day,
+                    'code': target_code
+                })
+                # Register in local tracking map for subsequent sites in this date's loop
+                emp_day_status[emp_id_str][site_id_str] = target_code
 
             if day_updates:
                 MonthlyMusterService.save_monthly_muster_updates(
@@ -1959,13 +2076,16 @@ class MonthlyMusterService:
 
         config.last_run_at = timezone.now()
         config.last_run_date = target_date
-        config.notes = f"Auto attendance executed. Processed {len(days_processed)} day(s), generated {total_created} duties up to {target_date}."
+        config.notes = f"Auto attendance executed. Processed {len(days_processed)} day(s), generated {total_created} duties up to {target_date} ({total_skipped} existing preserved)."
         config.save(update_fields=['last_run_at', 'last_run_date', 'notes', 'updated_at'])
 
         return {
             'status': 'success',
             'target_date': target_date.isoformat(),
             'records_created': total_created,
+            'new_records_created': total_created,
+            'existing_records_skipped': total_skipped,
+            'total_records_processed': total_created + total_skipped,
             'days_processed': days_processed,
             'message': config.notes
         }

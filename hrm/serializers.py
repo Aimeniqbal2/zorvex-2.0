@@ -141,6 +141,7 @@ class EmployeeSerializer(BaseTenantSerializer):
     wallet_provider = serializers.CharField(write_only=True, required=False, allow_blank=True)
     system_id = serializers.CharField(read_only=True)
     display_code = serializers.CharField(read_only=True)
+    is_blacklisted = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
@@ -279,7 +280,42 @@ class EmployeeSerializer(BaseTenantSerializer):
                     })
             attrs['previous_employee_code'] = code_str
 
+        # 4. Active Blacklist Check
+        if company_id:
+            from hrm.models import BlacklistedIndividual
+            bl_q = models.Q()
+            if attrs.get('cnic_number'):
+                bl_q |= models.Q(cnic_number=attrs['cnic_number'])
+            if attrs.get('phone'):
+                bl_q |= models.Q(phone_number=attrs['phone'])
+            if bl_q:
+                bl_rec = BlacklistedIndividual.objects.filter(
+                    company_id=company_id,
+                    is_active_blacklist=True
+                ).filter(bl_q).first()
+                if bl_rec and (not self.instance or attrs.get('employment_status') == 'ACTIVE'):
+                    raise serializers.ValidationError({
+                        'cnic_number': f"This individual '{bl_rec.full_name}' (CNIC: {bl_rec.cnic_number}) is BLACKLISTED. Reason: {bl_rec.reason}. Cannot register or activate without formal executive delisting."
+                    })
+
         return attrs
+
+    def get_is_blacklisted(self, obj):
+        try:
+            from hrm.models import BlacklistedIndividual
+            from django.db.models import Q
+            q = Q(employee=obj)
+            if obj.cnic_number:
+                q |= Q(cnic_number=obj.cnic_number)
+            obj_phone = getattr(obj, 'phone', None) or getattr(obj, 'telephone_number', None)
+            if obj_phone:
+                q |= Q(phone_number__icontains=str(obj_phone)[-10:])
+            return BlacklistedIndividual.objects.filter(
+                company_id=obj.company_id,
+                is_active_blacklist=True
+            ).filter(q).exists()
+        except Exception:
+            return False
 
     def get_architecture_state(self, obj):
         from hrm.services.compatibility import get_hr_architecture_state
@@ -810,6 +846,7 @@ class ResolveJumpActionSerializer(serializers.Serializer):
 
 
 class RehireEmployeeActionSerializer(serializers.Serializer):
+    new_employee_code = serializers.CharField(required=True)
     rehire_date = serializers.DateField(required=False, default=date.today)
     designation = serializers.UUIDField(required=False, allow_null=True)
     department = serializers.UUIDField(required=False, allow_null=True)
@@ -830,4 +867,60 @@ class CreateLifecycleEventActionSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     metadata = serializers.JSONField(required=False, default=dict)
 
+class ReportOSLActionSerializer(serializers.Serializer):
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    reported_by_department = serializers.ChoiceField(choices=['HR', 'OPERATIONS'], default='HR')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
 
+
+class CancelOSLActionSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ConfirmOSLActionSerializer(serializers.Serializer):
+    effective_date = serializers.DateField(required=False, default=date.today)
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class BlacklistedIndividualSerializer(serializers.ModelSerializer):
+    blacklisted_by_name = serializers.SerializerMethodField()
+    removed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        from hrm.models import BlacklistedIndividual
+        model = BlacklistedIndividual
+        fields = [
+            'id',
+            'company',
+            'employee',
+            'full_name',
+            'cnic_number',
+            'phone_number',
+            'previous_employee_code',
+            'reason',
+            'category',
+            'blacklisted_at',
+            'blacklisted_by',
+            'blacklisted_by_name',
+            'is_active_blacklist',
+            'removed_at',
+            'removed_by',
+            'removed_by_name',
+            'removal_reason',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'blacklisted_at', 'blacklisted_by', 'removed_at', 'removed_by', 'created_at', 'updated_at']
+
+    def get_blacklisted_by_name(self, obj):
+        return obj.blacklisted_by.get_full_name() if obj.blacklisted_by else None
+
+    def get_removed_by_name(self, obj):
+        return obj.removed_by.get_full_name() if obj.removed_by else None
+
+
+class DelistBlacklistActionSerializer(serializers.Serializer):
+    removal_reason = serializers.CharField(required=True)

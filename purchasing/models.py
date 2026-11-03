@@ -98,6 +98,7 @@ class ProcurementDocument(BaseModel):
 
 
     def generate_document_number(self):
+        import re
         prefix_map = {
             'PURCHASE_ORDER': 'PO',
             'RFQ': 'RFQ',
@@ -109,23 +110,29 @@ class ProcurementDocument(BaseModel):
             'DEBIT_NOTE': 'DN',
         }
         prefix = prefix_map.get(self.document_type, 'DOC')
-        last_doc = ProcurementDocument.objects.filter(
+        existing_numbers = list(ProcurementDocument.objects.filter(
             company_id=self.company_id,
-            document_type=self.document_type,
             number__startswith=f"{prefix}-"
-        ).order_by('-id').first()
+        ).values_list('number', flat=True))
 
-        next_num = 1
-        if last_doc and last_doc.number:
-            try:
-                suffix = last_doc.number.split('-')[-1]
-                next_num = int(suffix) + 1
-            except (ValueError, IndexError):
-                next_num = ProcurementDocument.objects.filter(
-                    company_id=self.company_id,
-                    document_type=self.document_type
-                ).count() + 1
-        return f"{prefix}-{next_num:04d}"
+        pattern = re.compile(rf"^{prefix}-(\d+)$")
+        max_num = 0
+        for num_str in existing_numbers:
+            m = pattern.match(num_str)
+            if m:
+                try:
+                    val = int(m.group(1))
+                    if val > max_num:
+                        max_num = val
+                except ValueError:
+                    pass
+
+        next_num = max_num + 1
+        candidate = f"{prefix}-{next_num:04d}"
+        while ProcurementDocument.objects.filter(company_id=self.company_id, number=candidate).exists():
+            next_num += 1
+            candidate = f"{prefix}-{next_num:04d}"
+        return candidate
 
     def clean(self):
         super().clean()
@@ -454,10 +461,17 @@ class Vendor(BaseModel):
     @classmethod
     def generate_next_code(cls, company_id):
         import re
-        existing_codes = cls.objects.filter(
+        from crm.models import CRMEntity
+        existing_vendor_codes = list(cls.objects.filter(
             company_id=company_id,
             code__startswith="VEN-"
-        ).values_list('code', flat=True)
+        ).values_list('code', flat=True))
+        existing_crm_codes = list(CRMEntity.objects.filter(
+            company_id=company_id,
+            code__startswith="VEN-"
+        ).values_list('code', flat=True))
+        existing_codes = set(existing_vendor_codes + existing_crm_codes)
+
         max_num = 0
         pattern = re.compile(r"^VEN-(\d+)$")
         for c in existing_codes:
@@ -471,19 +485,47 @@ class Vendor(BaseModel):
                     pass
         next_num = max_num + 1
         candidate = f"VEN-{next_num:04d}"
-        while cls.objects.filter(company_id=company_id, code=candidate).exists():
+        while cls.objects.filter(company_id=company_id, code=candidate).exists() or CRMEntity.objects.filter(company_id=company_id, code=candidate).exists():
             next_num += 1
             candidate = f"VEN-{next_num:04d}"
         return candidate
 
     def clean(self):
         super().clean()
+        if self.website:
+            val = str(self.website).strip()
+            if not val:
+                self.website = ''
+            else:
+                if not val.startswith(('http://', 'https://')):
+                    val = f"https://{val}"
+                from django.core.validators import URLValidator
+                try:
+                    URLValidator()(val)
+                    self.website = val
+                except ValidationError:
+                    # Sanitize invalid placeholder values (e.g. 'testing') rather than crashing save
+                    self.website = ''
         if self.category_id and self.category.company_id != self.company_id:
             raise ValidationError({'category': 'Vendor category belongs to a different company.'})
         if self.crm_entity_id and self.crm_entity.company_id != self.company_id:
             raise ValidationError({'crm_entity': 'Linked CRM Entity belongs to a different company.'})
 
     def save(self, *args, **kwargs):
+        if self.website:
+            val = str(self.website).strip()
+            if not val:
+                self.website = ''
+            else:
+                if not val.startswith(('http://', 'https://')):
+                    val = f"https://{val}"
+                from django.core.validators import URLValidator
+                try:
+                    URLValidator()(val)
+                    self.website = val
+                except ValidationError:
+                    self.website = ''
+
         if not self.code or not str(self.code).strip():
             cid = self.company_id or (self.company.id if getattr(self, 'company', None) else None)
             if cid:
@@ -495,6 +537,8 @@ class Vendor(BaseModel):
         # Synchronize / create underlying CRMEntity
         if not self.crm_entity_id and self.company_id:
             from crm.models import CRMEntity
+            if CRMEntity.objects.filter(company_id=self.company_id, code=self.code).exists():
+                self.code = self.__class__.generate_next_code(self.company_id)
             crm_entity = CRMEntity.objects.create(
                 company_id=self.company_id,
                 entity_type='SUPPLIER',

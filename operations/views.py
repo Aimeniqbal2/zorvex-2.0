@@ -774,6 +774,7 @@ class DeploymentViewSet(BaseSecurityOpsViewSet):
         from hrm.models import Employee
         qs = Employee.objects.filter(
             company_id=company_id,
+            is_active=True,
             employment_status='ACTIVE',
             is_deleted=False
         ).exclude(id__in=active_deployed_ids).select_related('designation', 'department')
@@ -1805,6 +1806,24 @@ class SecurityInventoryViewSet(viewsets.ViewSet):
         from platform_core.models import Warehouse
         from operations.serializers import SecurityStoreProfileSerializer
         if request.method == 'GET':
+            if not Warehouse.objects.filter(company=company).exists():
+                wh = Warehouse.objects.create(
+                    company=company,
+                    name='Main Armory & Equipment Store',
+                    code='MAIN-ARMORY',
+                    address='Headquarters Central Store & Armory',
+                    is_active=True
+                )
+                SecurityStoreProfile.objects.get_or_create(
+                    company=company,
+                    warehouse=wh,
+                    defaults={
+                        'store_type': SecurityStoreType.ARMORY,
+                        'is_armory': True,
+                        'requires_strong_auth': True,
+                        'notes': 'Auto-provisioned central armory and equipment depot'
+                    }
+                )
             profiles = SecurityStoreProfile.objects.filter(company=company).select_related('warehouse', 'site', 'supervisor')
             data = SecurityStoreProfileSerializer(profiles, many=True).data
             warehouses = Warehouse.objects.filter(company=company).values('id', 'name', 'code')
@@ -1913,6 +1932,59 @@ class SecurityInventoryViewSet(viewsets.ViewSet):
                 'reference': movement.reference,
                 'quantity': float(movement.quantity)
             }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='direct-stock-inward')
+    def direct_stock_inward(self, request):
+        company = self._resolve_company(request)
+        from operations.services.security_inventory_service import SecurityInventoryService
+        store_id = request.data.get('store_id') or request.data.get('warehouse_id')
+        if not store_id:
+            return Response({'error': 'Store / Warehouse ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        item_id = request.data.get('item_id')
+        item_data = request.data.get('item_data')
+        if not item_id and not item_data:
+            if request.data.get('item_name'):
+                item_data = {
+                    'name': request.data.get('item_name'),
+                    'sku': request.data.get('item_code') or request.data.get('sku'),
+                    'security_category': request.data.get('security_category', 'OTHER'),
+                    'is_controlled': request.data.get('is_controlled', False),
+                    'track_serial_number': request.data.get('track_serial_number', False),
+                    'unit_of_measure': request.data.get('unit_of_measure', 'pcs'),
+                    'cost_price': request.data.get('unit_cost', 0)
+                }
+            else:
+                return Response({'error': 'Either item_id or new item details must be provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        quantity = request.data.get('quantity', 1)
+        movement_type = request.data.get('movement_type', 'OPENING_BALANCE')
+        unit_cost = request.data.get('unit_cost', 0)
+        reference = request.data.get('reference', '')
+        notes = request.data.get('notes', '')
+        serial_numbers = request.data.get('serial_numbers')
+        if isinstance(serial_numbers, str):
+            serial_numbers = [s.strip() for s in serial_numbers.replace('\n', ',').split(',') if s.strip()]
+
+        try:
+            result = SecurityInventoryService.direct_stock_inward(
+                company=company,
+                warehouse=store_id,
+                item=item_id,
+                quantity=quantity,
+                movement_type=movement_type,
+                unit_cost=unit_cost,
+                reference=reference,
+                notes=notes,
+                serial_numbers=serial_numbers,
+                user=request.user,
+                item_data=item_data,
+                security_category=request.data.get('security_category'),
+                is_controlled=request.data.get('is_controlled', False)
+            )
+            return Response(result, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2714,7 +2786,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                     except Exception:
                         continue
                 emp_id = gd.get('employee_id')
-                emp = Employee.objects.filter(id=emp_id, company=ts.company).first()
+                emp = Employee.objects.filter(id=emp_id, company=ts.company, is_active=True, employment_status='ACTIVE').first()
                 if not emp:
                     continue
                 desig_id = gd.get('designation_id') or emp.designation_id
@@ -5044,6 +5116,11 @@ class MonthlyMusterAutoAttendanceConfigView(APIView):
         company = _resolve_company_for_api_view(request)
         if not company:
             return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        from operations.services.monthly_muster_service import MonthlyMusterService
+        try:
+            MonthlyMusterService.check_and_trigger_daily_auto_attendance(company)
+        except Exception:
+            pass
         from operations.models import AutoAttendanceConfig
         config = AutoAttendanceConfig.get_for_company(company)
         return Response({

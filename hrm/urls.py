@@ -12,7 +12,8 @@ from .views import (
     StatutorySchemeViewSet, StatutoryRuleViewSet, EmployeeStatutoryEnrollmentViewSet,
     PayrollDisbursementViewSet, PayslipDisbursementViewSet, CompanyPayrollPolicyViewSet,
     EmployeeNextOfKinViewSet, EmployeeDocumentViewSet, EmployeeTrainingViewSet,
-    EmploymentHistoryViewSet, StatutorySchemeRateHistoryViewSet, EmployeeReferenceViewSet
+    EmploymentHistoryViewSet, StatutorySchemeRateHistoryViewSet, EmployeeReferenceViewSet,
+    BlacklistedIndividualViewSet
 )
 
 router = DefaultRouter()
@@ -64,6 +65,7 @@ router.register(r'employee-references', EmployeeReferenceViewSet, basename='empl
 router.register(r'employee-trainings', EmployeeTrainingViewSet, basename='employeetraining')
 router.register(r'employment-history', EmploymentHistoryViewSet, basename='employmenthistory')
 router.register(r'statutory-scheme-rate-history', StatutorySchemeRateHistoryViewSet, basename='statutoryschemeratehistory')
+router.register(r'blacklist', BlacklistedIndividualViewSet, basename='blacklistedindividual')
 
 urlpatterns = [
     path('', include(router.urls)),

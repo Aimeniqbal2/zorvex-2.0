@@ -60,6 +60,25 @@ class ProcurementDocumentViewSet(BasePurchasingViewSet):
     search_fields = ['number', 'reference_number', 'crm_entity__name', 'vendor__name', 'vendor__code']
     ordering_fields = ['number', 'document_date', 'created_at', 'total_amount']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        doc_type = self.request.query_params.get('document_type')
+        if doc_type:
+            qs = qs.filter(document_type=doc_type)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        vendor_param = self.request.query_params.get('vendor')
+        if vendor_param:
+            qs = qs.filter(vendor_id=vendor_param)
+        warehouse_param = self.request.query_params.get('warehouse')
+        if warehouse_param:
+            qs = qs.filter(warehouse_id=warehouse_param)
+        crm_entity_param = self.request.query_params.get('crm_entity')
+        if crm_entity_param:
+            qs = qs.filter(crm_entity_id=crm_entity_param)
+        return qs
+
     def perform_create(self, serializer):
         from crm.models import CRMEntity
         vendor = serializer.validated_data.get('vendor')
@@ -541,6 +560,51 @@ class VendorCategoryViewSet(BasePurchasingViewSet):
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'code', 'description']
 
+    def list(self, request, *args, **kwargs):
+        cid = getattr(request.user, 'company_id', None)
+        if cid and not VendorCategory.objects.filter(company_id=cid).exists():
+            default_categories = [
+                ('Uniforms & Tactical Apparel', 'UNIFORM', 'Guard uniforms, tactical boots, belts, caps, badges, jackets'),
+                ('Security Equipment & Armory', 'EQUIPMENT', 'Weapons, ammo, holsters, metal detectors, batons, handcuffs'),
+                ('CCTV, Biometrics & Surveillance', 'SURVEILLANCE', 'CCTV cameras, DVR/NVR, biometric scanners, cabling, power supplies'),
+                ('Communication & Wireless Radios', 'COMMS', 'Walkie-talkies, base stations, repeater units, earpieces'),
+                ('Vehicles & Fleet Supplies', 'FLEET', 'Patrol cars, bikes, trackers, fuel, vehicle maintenance'),
+                ('Office & Stationery Supplies', 'OFFICE', 'Registers, log books, duty visitor passes, printing, stationary'),
+                ('Facility Consumables & General', 'GENERAL', 'Flashlights, batteries, first-aid kits, sanitizers, consumables'),
+            ]
+            for name, code, desc in default_categories:
+                VendorCategory.objects.get_or_create(
+                    company_id=cid,
+                    name=name,
+                    defaults={'code': code, 'description': desc, 'is_active': True}
+                )
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=False, methods=['post'], url_path='seed-defaults')
+    def seed_defaults(self, request):
+        cid = getattr(request.user, 'company_id', None)
+        if not cid:
+            return Response({'error': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        default_categories = [
+            ('Uniforms & Tactical Apparel', 'UNIFORM', 'Guard uniforms, tactical boots, belts, caps, badges, jackets'),
+            ('Security Equipment & Armory', 'EQUIPMENT', 'Weapons, ammo, holsters, metal detectors, batons, handcuffs'),
+            ('CCTV, Biometrics & Surveillance', 'SURVEILLANCE', 'CCTV cameras, DVR/NVR, biometric scanners, cabling, power supplies'),
+            ('Communication & Wireless Radios', 'COMMS', 'Walkie-talkies, base stations, repeater units, earpieces'),
+            ('Vehicles & Fleet Supplies', 'FLEET', 'Patrol cars, bikes, trackers, fuel, vehicle maintenance'),
+            ('Office & Stationery Supplies', 'OFFICE', 'Registers, log books, duty visitor passes, printing, stationary'),
+            ('Facility Consumables & General', 'GENERAL', 'Flashlights, batteries, first-aid kits, sanitizers, consumables'),
+        ]
+        created_count = 0
+        for name, code, desc in default_categories:
+            _, created = VendorCategory.objects.get_or_create(
+                company_id=cid,
+                name=name,
+                defaults={'code': code, 'description': desc, 'is_active': True}
+            )
+            if created:
+                created_count += 1
+        return Response({'message': f'Default categories verified. {created_count} added.'}, status=status.HTTP_200_OK)
+
 
 class VendorViewSet(BasePurchasingViewSet):
     queryset = Vendor.objects.select_related('category', 'crm_entity').all()
@@ -549,6 +613,16 @@ class VendorViewSet(BasePurchasingViewSet):
     filterset_fields = ['category', 'status']
     search_fields = ['name', 'code', 'contact_person', 'phone', 'email', 'tax_number']
     ordering_fields = ['name', 'code', 'created_at', 'rating']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        category = self.request.query_params.get('category')
+        if category:
+            qs = qs.filter(category_id=category)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
 
     @action(detail=True, methods=['get', 'post'])
     def contacts(self, request, pk=None):
@@ -713,12 +787,38 @@ class VendorItemViewSet(BasePurchasingViewSet):
     search_fields = ['item__name', 'item__sku', 'vendor_sku', 'vendor__name']
     ordering_fields = ['vendor_price', 'lead_time_days', 'created_at']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        vendor = self.request.query_params.get('vendor')
+        if vendor:
+            qs = qs.filter(vendor_id=vendor)
+        item = self.request.query_params.get('item')
+        if item:
+            qs = qs.filter(item_id=item)
+        is_preferred = self.request.query_params.get('is_preferred')
+        if is_preferred is not None:
+            qs = qs.filter(is_preferred=(is_preferred.lower() in ('true', '1')))
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=(is_active.lower() in ('true', '1')))
+        return qs
+
 
 class VendorDocumentViewSet(BasePurchasingViewSet):
     queryset = VendorDocument.objects.select_related('vendor', 'uploaded_by').all()
     serializer_class = VendorDocumentSerializer
     filterset_fields = ['vendor', 'document_type']
     search_fields = ['title', 'notes', 'vendor__name']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        vendor = self.request.query_params.get('vendor')
+        if vendor:
+            qs = qs.filter(vendor_id=vendor)
+        doc_type = self.request.query_params.get('document_type')
+        if doc_type:
+            qs = qs.filter(document_type=doc_type)
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(
@@ -742,6 +842,19 @@ class VendorPaymentViewSet(BasePurchasingViewSet):
     filterset_fields = ['vendor', 'status', 'payment_method', 'payment_date']
     search_fields = ['payment_number', 'reference_number', 'cheque_number', 'vendor__name', 'vendor__code']
     ordering_fields = ['payment_date', 'payment_number', 'amount', 'created_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        vendor = self.request.query_params.get('vendor')
+        if vendor:
+            qs = qs.filter(vendor_id=vendor)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        payment_method = self.request.query_params.get('payment_method')
+        if payment_method:
+            qs = qs.filter(payment_method=payment_method)
+        return qs
 
     def create(self, request, *args, **kwargs):
         """

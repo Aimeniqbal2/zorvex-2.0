@@ -413,7 +413,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
             }
             const res = await runAutoAttendance(payload);
             if (res.status === 'success') {
-                addToast('success', `⚡ Auto Attendance Completed: ${res.new_records_created} records created (${res.existing_records_skipped} existing preserved) for date ${res.target_date}.`);
+                addToast('success', `⚡ Auto Attendance Completed: ${res.new_records_created ?? res.records_created ?? 0} records created (${res.existing_records_skipped ?? 0} existing preserved) for date ${res.target_date}.`);
                 await loadMusterData();
                 if (autoConfig) {
                     setAutoConfig({
@@ -2334,18 +2334,12 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     <div style={{ background: 'var(--color-surface, #ffffff)', width: '100%', maxWidth: '640px', borderRadius: '16px', border: '1px solid var(--color-border, #cbd5e1)', padding: '24px 28px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', maxHeight: '90vh', overflowY: 'auto' }}>
                         
                         {/* Header */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid var(--color-border, #e2e8f0)', paddingBottom: '14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', borderBottom: '1px solid var(--color-border, #e2e8f0)', paddingBottom: '14px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <div style={{ width: 44, height: 44, borderRadius: '10px', background: modalIsEnabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: modalIsEnabled ? '#059669' : '#64748b', fontSize: '1.6rem' }}>
+                                <div style={{ width: 40, height: 40, borderRadius: '10px', background: modalIsEnabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: modalIsEnabled ? '#059669' : '#64748b', fontSize: '1.4rem' }}>
                                     <i className={`bx ${modalIsEnabled ? 'bx-bot' : 'bx-cog'}`}></i>
                                 </div>
-                                <div>
-                                    <h3 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--color-text, #0f172a)', fontWeight: 800 }}>Automated Attendance Settings</h3>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-                                        <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>Company-scoped attendance automation & previous-day rule engine</span>
-                                        <span style={{ padding: '2px 8px', borderRadius: '999px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', fontSize: '0.72rem', fontWeight: 700 }}>Tenant Isolated</span>
-                                    </div>
-                                </div>
+                                <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--color-text, #0f172a)', fontWeight: 800 }}>Automated Attendance Settings</h3>
                             </div>
                             <button onClick={() => setShowAutoModal(false)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '1.3rem', cursor: 'pointer', padding: '4px' }}>✕</button>
                         </div>
@@ -2353,7 +2347,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         {/* Toggle Switch: Enable / Disable */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: modalIsEnabled ? '#ecfdf5' : 'var(--color-bg, #f8fafc)', borderRadius: '10px', border: modalIsEnabled ? '1px solid #a7f3d0' : '1px solid var(--color-border, #cbd5e1)', marginBottom: '16px', transition: 'all 0.2s ease' }}>
                             <div>
-                                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: modalIsEnabled ? '#065f46' : 'var(--color-text, #0f172a)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: modalIsEnabled ? '#065f46' : 'var(--color-text, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <span>Automated Attendance System</span>
                                     {modalIsEnabled ? (
                                         <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: '#10b981', color: '#ffffff', fontWeight: 800 }}>ACTIVE</span>
@@ -2362,12 +2356,10 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                     )}
                                 </div>
                                 <div style={{ fontSize: '0.82rem', color: modalIsEnabled ? '#047857' : 'var(--color-text-muted, #64748b)', marginTop: '2px' }}>
-                                    {modalIsEnabled 
-                                        ? 'The engine runs automatically when the muster sheet is viewed or via background schedule.'
-                                        : 'Auto attendance generation is currently stopped for this company.'}
+                                    {modalIsEnabled ? 'Automatically marks daily attendance at midnight based on lag buffer.' : 'Auto attendance generation is paused.'}
                                 </div>
                             </div>
-                            <label style={{ position: 'relative', display: 'inline-block', width: '52px', height: '28px', cursor: 'pointer' }}>
+                            <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '26px', cursor: 'pointer' }}>
                                 <input 
                                     type="checkbox" 
                                     checked={modalIsEnabled} 
@@ -2377,11 +2369,11 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                 <span style={{
                                     position: 'absolute', inset: 0,
                                     backgroundColor: modalIsEnabled ? '#10b981' : '#cbd5e1',
-                                    borderRadius: '28px',
+                                    borderRadius: '26px',
                                     transition: '0.2s ease',
                                 }}>
                                     <span style={{
-                                        position: 'absolute', height: '20px', width: '20px', left: modalIsEnabled ? '26px' : '4px', bottom: '4px',
+                                        position: 'absolute', height: '18px', width: '18px', left: modalIsEnabled ? '26px' : '4px', bottom: '4px',
                                         backgroundColor: '#ffffff',
                                         borderRadius: '50%',
                                         transition: '0.2s ease',
@@ -2393,17 +2385,14 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                         {/* Delay Days Selection (Lag / Buffer) */}
                         <div style={{ marginBottom: '18px', padding: '16px', background: 'var(--color-bg, #f8fafc)', borderRadius: '10px', border: '1px solid var(--color-border, #e2e8f0)' }}>
-                            <label style={{ display: 'block', fontWeight: 800, fontSize: '0.9rem', color: 'var(--color-text, #0f172a)', marginBottom: '6px' }}>
+                            <label style={{ display: 'block', fontWeight: 800, fontSize: '0.9rem', color: 'var(--color-text, #0f172a)', marginBottom: '8px' }}>
                                 Attendance Lag Buffer (Days Delay)
                             </label>
-                            <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: 'var(--color-text-muted, #64748b)', lineHeight: '1.4' }}>
-                                Specifies how many days behind the current date attendance is auto-marked. For example, on <strong>27th Oct</strong> with a <strong>2-day lag</strong>, attendance is auto-marked for <strong>25th Oct</strong> based on <strong>24th Oct</strong>.
-                            </p>
 
                             {/* Preset Buttons */}
                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                                 {[
-                                    { days: 1, label: '1 Day Lag (Yesterday)' },
+                                    { days: 1, label: '1 Day Lag' },
                                     { days: 2, label: '2 Days Lag (Recommended Default)' },
                                     { days: 3, label: '3 Days Lag' },
                                 ].map(preset => (
@@ -2439,8 +2428,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                         value={modalDelayDays}
                                         onChange={(e) => setModalDelayDays(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
                                         style={{
-                                            width: '70px',
-                                            padding: '6px 10px',
+                                            width: '65px',
+                                            padding: '5px 8px',
                                             borderRadius: '6px',
                                             border: '1px solid var(--color-border, #cbd5e1)',
                                             background: 'var(--color-surface, #ffffff)',
@@ -2456,35 +2445,6 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                 <div style={{ flex: 1, padding: '6px 12px', borderRadius: '6px', background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.8rem', color: '#166534' }}>
                                     📅 Today: <strong>{new Date().toISOString().split('T')[0]}</strong> ➔ Fills for <strong>{calculatedTargetDate}</strong> based on <strong>{calculatedPrevDate}</strong>
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Attendance Code Transformation Rules Matrix */}
-                        <div style={{ marginBottom: '18px', padding: '14px 16px', background: '#fffbeb', borderRadius: '10px', border: '1px solid #fde68a' }}>
-                            <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                                <i className='bx bx-git-branch' style={{ fontSize: '1.1rem' }}></i>
-                                Previous Day ➔ Target Day Transformation Rules
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', fontSize: '0.8rem' }}>
-                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
-                                    <span style={{ color: '#059669', fontWeight: 800 }}>P, PO, POD, WP, W</span><br />
-                                    ➔ Marks <strong style={{ color: '#059669' }}>P (Present)</strong>
-                                </div>
-                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
-                                    <span style={{ color: '#dc2626', fontWeight: 800 }}>A (Absent)</span><br />
-                                    ➔ Marks <strong style={{ color: '#dc2626' }}>A (Absent)</strong>
-                                </div>
-                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
-                                    <span style={{ color: '#d97706', fontWeight: 800 }}>L (Leave)</span><br />
-                                    ➔ Marks <strong style={{ color: '#d97706' }}>L (Leave)</strong>
-                                </div>
-                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
-                                    <span style={{ color: '#64748b', fontWeight: 800 }}>O, OD, Blank</span><br />
-                                    ➔ Leaves <strong style={{ color: '#64748b' }}>Blank (No Code)</strong>
-                                </div>
-                            </div>
-                            <div style={{ fontSize: '0.75rem', color: '#b45309', marginTop: '8px' }}>
-                                💡 <em>Non-destructive:</em> Existing manual inputs are never overwritten unless explicitly requested below. Operators only manage exceptions!
                             </div>
                         </div>
 
@@ -2520,17 +2480,17 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             fontSize: '0.85rem'
                                         }}
                                     />
-                                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)' }}>Leave blank to use current lag buffer ({calculatedTargetDate})</span>
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted, #64748b)' }}>Leave blank for lag buffer ({calculatedTargetDate})</span>
                                 </div>
 
-                                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '6px' }}>
                                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--color-text, #0f172a)', cursor: 'pointer' }}>
                                         <input
                                             type="checkbox"
                                             checked={modalFillMonth}
                                             onChange={(e) => setModalFillMonth(e.target.checked)}
                                         />
-                                        <span>Fill missing month days chronologically</span>
+                                        <span>Fill missing days chronologically</span>
                                     </label>
 
                                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#b91c1c', cursor: 'pointer' }}>
@@ -2539,7 +2499,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             checked={modalOverwrite}
                                             onChange={(e) => setModalOverwrite(e.target.checked)}
                                         />
-                                        <span>Overwrite existing records (Use with caution)</span>
+                                        <span>Overwrite existing records</span>
                                     </label>
                                 </div>
                             </div>

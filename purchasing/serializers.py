@@ -351,10 +351,26 @@ class VendorDocumentSerializer(serializers.ModelSerializer):
 
 
 class VendorSerializer(serializers.ModelSerializer):
+    website = serializers.CharField(required=False, allow_blank=True, default='')
     category_name = serializers.CharField(source='category.name', read_only=True, default='')
     items_count = serializers.SerializerMethodField(read_only=True)
     documents_count = serializers.SerializerMethodField(read_only=True)
     contacts_count = serializers.SerializerMethodField(read_only=True)
+
+    def validate_website(self, value):
+        if not value:
+            return ''
+        val = str(value).strip()
+        if not val:
+            return ''
+        if not val.startswith(('http://', 'https://')):
+            val = f'https://{val}'
+        from django.core.validators import URLValidator
+        try:
+            URLValidator()(val)
+            return val
+        except Exception:
+            return 
 
     # Financial settlement metrics
     total_purchases = serializers.SerializerMethodField(read_only=True)

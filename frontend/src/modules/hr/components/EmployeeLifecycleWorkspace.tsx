@@ -23,7 +23,9 @@ type ActionType =
     | 'RESIGN' 
     | 'TERMINATE' 
     | 'RESOLVE_JUMP' 
-    | 'REHIRE';
+    | 'REHIRE'
+    | 'CANCEL_OSL'
+    | 'CONFIRM_OSL';
 
 export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProps> = ({
     employee,
@@ -140,6 +142,20 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                 setFormData({
                     effective_date: today,
                     reason: '',
+                    notes: '',
+                    reported_by_department: 'HR'
+                });
+                break;
+            case 'CANCEL_OSL':
+                setFormData({
+                    reason: 'Guard returned to duty / reported in error',
+                    notes: ''
+                });
+                break;
+            case 'CONFIRM_OSL':
+                setFormData({
+                    effective_date: today,
+                    reason: 'Guard absconded / bhag gaya without notice',
                     notes: ''
                 });
                 break;
@@ -177,6 +193,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                 break;
             case 'REHIRE':
                 setFormData({
+                    new_employee_code: '',
                     rehire_date: today,
                     designation: employee.designation || '',
                     department: employee.department || '',
@@ -194,6 +211,21 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
         if (!activeAction || !employee.id) return;
         setSubmitting(true);
         setActionError(null);
+
+        if (activeAction === 'REHIRE') {
+            const cleanCode = (formData.new_employee_code || '').trim();
+            if (!cleanCode) {
+                setActionError('New Employee Code is mandatory when rehiring.');
+                setSubmitting(false);
+                return;
+            }
+            const oldCode = (employee.employee_code || employee.previous_employee_code || '').trim();
+            if (cleanCode.toLowerCase() === oldCode.toLowerCase()) {
+                setActionError(`Cannot reuse previous code '${oldCode}'. A NEW distinct employee code is strictly required.`);
+                setSubmitting(false);
+                return;
+            }
+        }
 
         try {
             let endpoint = '';
@@ -219,7 +251,13 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                     endpoint = `/api/hrm/employees/${employee.id}/relieve/`;
                     break;
                 case 'SUSPEND':
-                    endpoint = `/api/hrm/employees/${employee.id}/suspend/`;
+                    endpoint = `/api/hrm/employees/${employee.id}/report-osl/`;
+                    break;
+                case 'CANCEL_OSL':
+                    endpoint = `/api/hrm/employees/${employee.id}/cancel-osl/`;
+                    break;
+                case 'CONFIRM_OSL':
+                    endpoint = `/api/hrm/employees/${employee.id}/confirm-osl/`;
                     break;
                 case 'REINSTATE':
                     endpoint = `/api/hrm/employees/${employee.id}/reinstate/`;
@@ -255,14 +293,18 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
         switch (st) {
             case 'ACTIVE':
                 return <span className="badge badge-success" style={{ fontSize: '12px', padding: '4px 10px' }}>ACTIVE</span>;
+            case 'OSL':
+                return <span className="badge badge-warning" style={{ fontSize: '12px', padding: '4px 10px', background: '#d97706', color: '#fff' }}>OSL (PENDING REVIEW)</span>;
+            case 'OSL_CONFIRMED':
+                return <span className="badge badge-danger" style={{ fontSize: '12px', padding: '4px 10px', background: '#991b1b', color: '#fff' }}>OSL (CONFIRMED / INACTIVE)</span>;
             case 'SUSPENDED':
-                return <span className="badge badge-warning" style={{ fontSize: '12px', padding: '4px 10px', background: '#d97706', color: '#fff' }}>SUSPENDED</span>;
+                return <span className="badge badge-warning" style={{ fontSize: '12px', padding: '4px 10px', background: '#b45309', color: '#fff' }}>SUSPENDED</span>;
             case 'RESIGNED':
                 return <span className="badge badge-danger" style={{ fontSize: '12px', padding: '4px 10px' }}>RESIGNED</span>;
             case 'TERMINATED':
                 return <span className="badge badge-danger" style={{ fontSize: '12px', padding: '4px 10px', background: '#b91c1c' }}>TERMINATED</span>;
             case 'JUMP':
-                return <span className="badge" style={{ fontSize: '12px', padding: '4px 10px', background: '#7c3aed', color: '#fff' }}>JUMP (ABSENT)</span>;
+                return <span className="badge" style={{ fontSize: '12px', padding: '4px 10px', background: '#7c3aed', color: '#fff' }}>OSL / JUMP</span>;
             default:
                 return <span className="badge badge-secondary" style={{ fontSize: '12px', padding: '4px 10px' }}>{st || 'INACTIVE'}</span>;
         }
@@ -298,8 +340,9 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
         }
     };
 
-    const isSeparated = ['RESIGNED', 'TERMINATED', 'INACTIVE'].includes(employee.employment_status);
+    const isSeparated = ['RESIGNED', 'TERMINATED', 'INACTIVE', 'OSL_CONFIRMED'].includes(employee.employment_status);
     const isSuspended = employee.employment_status === 'SUSPENDED';
+    const isOsl = employee.employment_status === 'OSL';
     const isJump = employee.employment_status === 'JUMP';
     const isActive = employee.employment_status === 'ACTIVE';
 
@@ -372,51 +415,52 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {isActive && (
                         <>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('PROMOTE')}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('PROMOTE')}>
                                 <i className="bx bx-award" style={{ marginRight: '4px' }}></i> Promote / Role
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('CHANGE_DEPT')}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('CHANGE_DEPT')}>
                                 <i className="bx bx-buildings" style={{ marginRight: '4px' }}></i> Change Dept
                             </Button>
                             {isSecurity && (
-                                <Button size="sm" variant="secondary" onClick={() => openAction('CHANGE_CLASS')}>
+                                <Button type="button" size="sm" variant="secondary" onClick={() => openAction('CHANGE_CLASS')}>
                                     <i className="bx bx-transfer-alt" style={{ marginRight: '4px' }}></i> Toggle Class
                                 </Button>
                             )}
-                            <Button size="sm" variant="secondary" onClick={() => openAction('REVISE_SALARY')}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('REVISE_SALARY')}>
                                 <i className="bx bx-money" style={{ marginRight: '4px' }}></i> Revise Salary
                             </Button>
-                            {isSecurity && (
-                                <>
-                                    <Button size="sm" variant="secondary" onClick={() => openAction('TRANSFER')}>
-                                        <i className="bx bx-map-pin" style={{ marginRight: '4px' }}></i> Transfer Site
-                                    </Button>
-                                    <Button size="sm" variant="secondary" onClick={() => openAction('RELIEVE')}>
-                                        <i className="bx bx-log-out" style={{ marginRight: '4px' }}></i> Relieve Duty
-                                    </Button>
-                                </>
-                            )}
-                            <Button size="sm" variant="secondary" onClick={() => openAction('SUSPEND')} style={{ color: '#d97706' }}>
-                                <i className="bx bx-pause-circle" style={{ marginRight: '4px' }}></i> Suspend
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('SUSPEND')} style={{ color: '#d97706', fontWeight: 600 }}>
+                                <i className="bx bx-run" style={{ marginRight: '4px' }}></i> OSL / Suspend
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('RESIGN')} style={{ color: 'var(--color-danger)' }}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('RESIGN')} style={{ color: 'var(--color-danger)' }}>
                                 <i className="bx bx-exit" style={{ marginRight: '4px' }}></i> Resign
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('TERMINATE')} style={{ color: 'var(--color-danger)' }}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('TERMINATE')} style={{ color: 'var(--color-danger)' }}>
                                 <i className="bx bx-x-circle" style={{ marginRight: '4px' }}></i> Terminate
+                            </Button>
+                        </>
+                    )}
+
+                    {isOsl && (
+                        <>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('CANCEL_OSL')} style={{ background: '#059669', color: '#fff', borderColor: '#059669', fontWeight: 600 }}>
+                                <i className="bx bx-check-circle" style={{ marginRight: '4px' }}></i> Cancel OSL (Guard Returned)
+                            </Button>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('CONFIRM_OSL')} style={{ background: '#b91c1c', color: '#fff', borderColor: '#b91c1c', fontWeight: 600 }}>
+                                <i className="bx bx-user-x" style={{ marginRight: '4px' }}></i> Confirm OSL (Absconded / Inactive)
                             </Button>
                         </>
                     )}
 
                     {isSuspended && (
                         <>
-                            <Button size="sm" variant="primary" onClick={() => openAction('REINSTATE')}>
+                            <Button type="button" size="sm" variant="primary" onClick={() => openAction('REINSTATE')}>
                                 <i className="bx bx-play-circle" style={{ marginRight: '4px' }}></i> Reinstate to Active
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('TERMINATE')} style={{ color: 'var(--color-danger)' }}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('TERMINATE')} style={{ color: 'var(--color-danger)' }}>
                                 <i className="bx bx-x-circle" style={{ marginRight: '4px' }}></i> Terminate
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => openAction('RESIGN')}>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => openAction('RESIGN')}>
                                 <i className="bx bx-exit" style={{ marginRight: '4px' }}></i> Resign
                             </Button>
                         </>
@@ -424,7 +468,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
 
                     {isJump && isSecurity && (
                         <>
-                            <Button size="sm" variant="primary" onClick={() => openAction('RESOLVE_JUMP')}>
+                            <Button type="button" size="sm" variant="primary" onClick={() => openAction('RESOLVE_JUMP')}>
                                 <i className="bx bx-check-shield" style={{ marginRight: '4px' }}></i> Resolve JUMP Status
                             </Button>
                         </>
@@ -432,7 +476,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
 
                     {isSeparated && (
                         <>
-                            <Button size="sm" variant="primary" onClick={() => openAction('REHIRE')}>
+                            <Button type="button" size="sm" variant="primary" onClick={() => openAction('REHIRE')}>
                                 <i className="bx bx-user-plus" style={{ marginRight: '4px' }}></i> Rehire Employee
                             </Button>
                         </>
@@ -743,41 +787,47 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                         )}
 
                         {activeAction === 'TERMINATE' && (
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Termination Date *</label>
-                                    <input
-                                        type="date"
-                                        value={formData.effective_date || ''}
-                                        onChange={e => setFormData({ ...formData, effective_date: e.target.value })}
-                                        required
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    />
+                            <div>
+                                <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'rgba(185, 28, 28, 0.1)', border: '1px solid rgba(185, 28, 28, 0.3)', marginBottom: '12px', fontSize: '12.5px', color: '#b91c1c' }}>
+                                    <i className="bx bx-shield-x"></i> <strong>Critical Blacklist Notice:</strong> Terminating this employee will automatically register their full identity (CNIC: <strong>{employee.cnic_number || 'N/A'}</strong>, Phone: <strong>{(employee.phone_number || (employee as any).phone || employee.telephone_number) || 'N/A'}</strong>, Old Code: <strong>{employee.display_code || employee.employee_code}</strong>) into the <strong>Enterprise BLACKLIST</strong>. They cannot be rehired or registered anywhere across the system unless formally delisted by an authorized administrator (CEO, COO, GM, HR Manager).
                                 </div>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Category *</label>
-                                    <select
-                                        value={formData.category || 'MISCONDUCT'}
-                                        onChange={e => setFormData({ ...formData, category: e.target.value })}
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    >
-                                        <option value="MISCONDUCT">Misconduct / Breach</option>
-                                        <option value="ABSENTEEISM">Chronic Absenteeism / JUMP</option>
-                                        <option value="PERFORMANCE">Performance Deficiency</option>
-                                        <option value="REDUNDANCY">Operational Redundancy</option>
-                                        <option value="OTHER">Other</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Reason / Ground *</label>
-                                    <input
-                                        type="text"
-                                        value={formData.reason || ''}
-                                        onChange={e => setFormData({ ...formData, reason: e.target.value })}
-                                        required
-                                        placeholder="Formal grounds for termination"
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    />
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Termination Date *</label>
+                                        <input
+                                            type="date"
+                                            value={formData.effective_date || ''}
+                                            onChange={e => setFormData({ ...formData, effective_date: e.target.value })}
+                                            required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Category *</label>
+                                        <select
+                                            value={formData.category || 'MISCONDUCT'}
+                                            onChange={e => setFormData({ ...formData, category: e.target.value })}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        >
+                                            <option value="MISCONDUCT">Misconduct / Disciplinary Breach</option>
+                                            <option value="ABSENTEEISM">Chronic Absenteeism / OSL</option>
+                                            <option value="THEFT_FRAUD">Theft / Fraud / Security Risk</option>
+                                            <option value="PERFORMANCE">Performance Deficiency</option>
+                                            <option value="REDUNDANCY">Operational Redundancy</option>
+                                            <option value="OTHER">Other Management Grounds</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Reason / Ground *</label>
+                                        <input
+                                            type="text"
+                                            value={formData.reason || ''}
+                                            onChange={e => setFormData({ ...formData, reason: e.target.value })}
+                                            required
+                                            placeholder="Formal grounds for termination"
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -822,49 +872,69 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                         )}
 
                         {activeAction === 'REHIRE' && (
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Rehire Date *</label>
-                                    <input
-                                        type="date"
-                                        value={formData.rehire_date || ''}
-                                        onChange={e => setFormData({ ...formData, rehire_date: e.target.value })}
-                                        required
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    />
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Designation</label>
-                                    <select
-                                        value={formData.designation || ''}
-                                        onChange={e => setFormData({ ...formData, designation: e.target.value })}
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    >
-                                        <option value="">-- Keep Current / None --</option>
-                                        {designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Department</label>
-                                    <select
-                                        value={formData.department || ''}
-                                        onChange={e => setFormData({ ...formData, department: e.target.value })}
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    >
-                                        <option value="">-- Keep Current / None --</option>
-                                        {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Base Salary (PKR)</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        value={formData.base_salary || ''}
-                                        onChange={e => setFormData({ ...formData, base_salary: e.target.value })}
-                                        placeholder="e.g. 35000"
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    />
+                            <div>
+                                {employee.is_blacklisted && (
+                                    <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'rgba(185, 28, 28, 0.12)', border: '1px solid #b91c1c', marginBottom: '12px', fontSize: '12.5px', color: '#b91c1c' }}>
+                                        <i className="bx bx-shield-x"></i> <strong>BLOCKED: This individual is currently BLACKLISTED.</strong> They cannot be rehired until an authorized executive (Admin/CEO/COO/GM/HR Manager) formally removes them from the Blacklist via the Blacklist Register.
+                                    </div>
+                                )}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-primary)' }}>
+                                            New Employee Code * (Old Code was: <strong>{employee.display_code || employee.employee_code}</strong>)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.new_employee_code || ''}
+                                            onChange={e => setFormData({ ...formData, new_employee_code: e.target.value })}
+                                            required
+                                            placeholder="Enter NEW unique badge code (cannot reuse previous code)"
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid var(--color-primary)', background: 'var(--color-surface)', color: 'var(--color-text)', fontWeight: 600 }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Rehire Date *</label>
+                                        <input
+                                            type="date"
+                                            value={formData.rehire_date || ''}
+                                            onChange={e => setFormData({ ...formData, rehire_date: e.target.value })}
+                                            required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Designation</label>
+                                        <select
+                                            value={formData.designation || ''}
+                                            onChange={e => setFormData({ ...formData, designation: e.target.value })}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        >
+                                            <option value="">-- Keep Current / None --</option>
+                                            {designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Department</label>
+                                        <select
+                                            value={formData.department || ''}
+                                            onChange={e => setFormData({ ...formData, department: e.target.value })}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        >
+                                            <option value="">-- Keep Current / None --</option>
+                                            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Base Salary (PKR)</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.base_salary || ''}
+                                            onChange={e => setFormData({ ...formData, base_salary: e.target.value })}
+                                            placeholder="e.g. 35000"
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         )}

@@ -3,7 +3,11 @@ import { Modal } from '../../../../components/ui/Modal';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { useToastStore } from '../../../../stores/toastStore';
-import { createVendor, updateVendor, getVendorCategories, type Vendor, type VendorCategory } from '../api';
+import { 
+    createVendor, updateVendor, getVendorCategories, extractApiError, 
+    type Vendor, type VendorCategory 
+} from '../api';
+import { VendorCategoryModal } from './VendorCategoryModal';
 
 interface VendorModalProps {
     isOpen: boolean;
@@ -39,6 +43,7 @@ export const VendorModal: React.FC<VendorModalProps> = ({
     const [notes, setNotes] = useState('');
     const [rating, setRating] = useState(5);
     const [isSaving, setIsSaving] = useState(false);
+    const [showQuickCategoryModal, setShowQuickCategoryModal] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -105,6 +110,11 @@ export const VendorModal: React.FC<VendorModalProps> = ({
 
         setIsSaving(true);
         try {
+            let cleanWebsite = website.trim();
+            if (cleanWebsite && !cleanWebsite.startsWith('http://') && !cleanWebsite.startsWith('https://')) {
+                cleanWebsite = `https://${cleanWebsite}`;
+            }
+
             const payload: Partial<Vendor> = {
                 name: name.trim(),
                 category: category || null,
@@ -112,7 +122,7 @@ export const VendorModal: React.FC<VendorModalProps> = ({
                 phone: phone.trim(),
                 email: email.trim(),
                 address: address.trim(),
-                website: website.trim(),
+                website: cleanWebsite,
                 tax_number: taxNumber.trim(),
                 registration_number: registrationNumber.trim(),
                 payment_terms: paymentTerms,
@@ -138,7 +148,7 @@ export const VendorModal: React.FC<VendorModalProps> = ({
             onSaved(res);
             onClose();
         } catch (err: any) {
-            useToastStore.getState().error(err?.response?.data?.detail || 'Failed to save vendor.');
+            useToastStore.getState().error(extractApiError(err, 'Failed to save vendor.'));
         } finally {
             setIsSaving(false);
         }
@@ -171,9 +181,26 @@ export const VendorModal: React.FC<VendorModalProps> = ({
                             />
                         </div>
                         <div>
-                            <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '4px' }}>
-                                Vendor Category
-                            </label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                <label style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                                    Vendor Category
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowQuickCategoryModal(true)}
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--color-primary, #2563eb)',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        padding: '0 2px'
+                                    }}
+                                >
+                                    + Category
+                                </button>
+                            </div>
                             <select
                                 value={category}
                                 onChange={(e) => setCategory(e.target.value)}
@@ -380,6 +407,13 @@ export const VendorModal: React.FC<VendorModalProps> = ({
                     </Button>
                 </div>
             </form>
+
+            {/* Quick Add Vendor Category Modal */}
+            <VendorCategoryModal
+                isOpen={showQuickCategoryModal}
+                onClose={() => setShowQuickCategoryModal(false)}
+                onCategoriesUpdated={() => loadCategories()}
+            />
         </Modal>
     );
 };

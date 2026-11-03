@@ -8,6 +8,7 @@ import {
     type Vendor, type VendorCategory 
 } from '../api';
 import { VendorModal } from './VendorModal';
+import { VendorCategoryModal } from './VendorCategoryModal';
 
 interface VendorListProps {
     onSelectVendor: (vendorId: string) => void;
@@ -26,6 +27,7 @@ export const VendorList: React.FC<VendorListProps> = ({ onSelectVendor }) => {
     // Add / Edit Modal
     const [showModal, setShowModal] = useState(false);
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+    const [showCategoryModal, setShowCategoryModal] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -78,12 +80,20 @@ export const VendorList: React.FC<VendorListProps> = ({ onSelectVendor }) => {
                         Manage supplier profiles, uniform makers, CCTV providers, and contracted equipment vendors.
                     </p>
                 </div>
-                <Button 
-                    variant="primary" 
-                    onClick={() => { setEditingVendor(null); setShowModal(true); }}
-                >
-                    <i className='bx bx-plus'></i> Add Vendor
-                </Button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <Button 
+                        variant="secondary" 
+                        onClick={() => setShowCategoryModal(true)}
+                    >
+                        <i className='bx bx-category' style={{ marginRight: '6px' }}></i> Manage Categories
+                    </Button>
+                    <Button 
+                        variant="primary" 
+                        onClick={() => { setEditingVendor(null); setShowModal(true); }}
+                    >
+                        <i className='bx bx-plus' style={{ marginRight: '6px' }}></i> Add Vendor
+                    </Button>
+                </div>
             </div>
 
             {/* Filter Bar */}
@@ -283,6 +293,13 @@ export const VendorList: React.FC<VendorListProps> = ({ onSelectVendor }) => {
                 onClose={() => setShowModal(false)}
                 onSaved={() => loadData()}
                 vendor={editingVendor}
+            />
+
+            {/* Vendor Category Management Modal */}
+            <VendorCategoryModal
+                isOpen={showCategoryModal}
+                onClose={() => setShowCategoryModal(false)}
+                onCategoriesUpdated={() => loadData()}
             />
         </div>
     );

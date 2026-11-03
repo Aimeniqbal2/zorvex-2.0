@@ -35,6 +35,10 @@ class LifecycleEventType:
     TERMINATION = 'TERMINATION'
     JUMP_OUTCOME = 'JUMP_OUTCOME'
     REHIRE = 'REHIRE'
+    OSL_REPORTED = 'OSL_REPORTED'
+    OSL_CONFIRMED = 'OSL_CONFIRMED'
+    OSL_CANCELLED = 'OSL_CANCELLED'
+    DELIST_BLACKLIST = 'DELIST_BLACKLIST'
 
     CHOICES = [
         (JOIN, 'Join'),
@@ -52,6 +56,10 @@ class LifecycleEventType:
         (TERMINATION, 'Termination'),
         (JUMP_OUTCOME, 'JUMP Outcome'),
         (REHIRE, 'Rehire'),
+        (OSL_REPORTED, 'OSL Reported'),
+        (OSL_CONFIRMED, 'OSL Confirmed'),
+        (OSL_CANCELLED, 'OSL Cancelled'),
+        (DELIST_BLACKLIST, 'Delisted from Blacklist'),
     ]
 
 
@@ -654,8 +662,8 @@ class LifecycleService:
         Handles controlled termination:
         - Relieves active deployments
         - Sets employee status -> TERMINATED, is_active -> False
+        - Automatically registers individual into Enterprise Blacklist
         - Preserves full audit and employment history
-        - Never automatically triggered from JUMP
         """
         if employee.employment_status in ['RESIGNED', 'TERMINATED']:
             raise ValidationError({'employment_status': f'Employee is already separated ({employee.employment_status}).'})
@@ -687,15 +695,32 @@ class LifecycleService:
             employee._skip_history_log = True
             employee.save(update_fields=['employment_status', 'is_active', 'termination_date', 'updated_at'])
 
-            # 3. Record history
-            summary = notes or f"Employment terminated effective {d}. Category: {category or 'General'}. Reason: {reason or 'Separation'}"
+            # 3. Automatically add to Enterprise Blacklist
+            from hrm.models import BlacklistedIndividual
+            bl_full_name = employee.full_name or f"{employee.first_name or ''} {employee.last_name or ''}".strip() or 'Terminated Employee'
+            BlacklistedIndividual.objects.create(
+                company=employee.company,
+                employee=employee,
+                full_name=bl_full_name,
+                cnic_number=employee.cnic_number or '',
+                phone_number=getattr(employee, 'phone', None) or getattr(employee, 'telephone_number', '') or '',
+                previous_employee_code=employee.employee_code or employee.previous_employee_code or '',
+                reason=reason or notes or f"Terminated by management ({category or 'General'})",
+                category=category or 'TERMINATION',
+                blacklisted_at=timezone.now(),
+                blacklisted_by=user or authorized_by,
+                is_active_blacklist=True
+            )
+
+            # 4. Record history
+            summary = notes or f"Employment terminated effective {d}. Category: {category or 'General'}. Reason: {reason or 'Separation'}. Automatically blacklisted."
             history = EmploymentHistory.objects.create(
                 company=employee.company,
                 employee=employee,
                 event_type=LifecycleEventType.TERMINATION,
                 effective_date=d,
                 old_value=old_status,
-                new_value='TERMINATED',
+                new_value='TERMINATED (BLACKLISTED)',
                 reason=reason,
                 notes=summary,
                 approved_by=authorized_by,
@@ -704,6 +729,7 @@ class LifecycleService:
                     'termination_date': str(d),
                     'category': category,
                     'previous_status': old_status,
+                    'is_blacklisted': True,
                 }
             )
             return history
@@ -849,6 +875,7 @@ class LifecycleService:
     def rehire_employee(
         cls,
         employee: Employee,
+        new_employee_code: str,
         rehire_date: date = None,
         designation: Designation = None,
         department: Department = None,
@@ -864,17 +891,62 @@ class LifecycleService:
         notes: str = '',
     ) -> tuple:
         """
-        Rehires a previously RESIGNED or TERMINATED employee without creating a duplicate Employee master.
-        Creates new employment period, sets status -> ACTIVE, provisions new salary assignment if provided,
-        and logs REHIRE event while preserving all prior history.
+        Rehires a previously separated (RESIGNED, TERMINATED, OSL_CONFIRMED) employee.
+        Strictly requires a NEW Employee Code (cannot reuse old badge code).
+        Enforces active Enterprise Blacklist check (rehire blocked if blacklisted).
         """
-        if employee.employment_status not in ['RESIGNED', 'TERMINATED', 'INACTIVE']:
-            raise ValidationError({'employment_status': f"Only separated employees (RESIGNED, TERMINATED, INACTIVE) can be rehired. Current status: {employee.employment_status}"})
+        if employee.employment_status not in ['RESIGNED', 'TERMINATED', 'INACTIVE', 'OSL_CONFIRMED']:
+            raise ValidationError({'employment_status': f"Only separated or confirmed OSL employees can be rehired. Current status: {employee.employment_status}"})
+
+        # 1. Active Blacklist Check
+        from hrm.models import BlacklistedIndividual
+        from django.db.models import Q
+        bl_cond = Q(employee=employee)
+        if employee.cnic_number:
+            bl_cond |= Q(cnic_number=employee.cnic_number)
+        emp_phone = getattr(employee, 'phone', None) or getattr(employee, 'telephone_number', None)
+        if emp_phone:
+            bl_cond |= Q(phone_number__icontains=str(emp_phone)[-10:])
+
+        bl_entry = BlacklistedIndividual.objects.filter(
+            company=employee.company,
+            is_active_blacklist=True
+        ).filter(bl_cond).first()
+
+        if bl_entry:
+            raise ValidationError({
+                'employee': f"Cannot rehire '{bl_entry.full_name}' (CNIC: {bl_entry.cnic_number}). "
+                            f"This individual is currently on the Enterprise BLACKLIST (Reason: {bl_entry.reason}). "
+                            f"They must be formally removed from the Blacklist by an authorized executive (Admin/CEO/COO/GM/HR Manager) before rehire."
+            })
+
+        # 2. Mandatory New Employee Code Validation
+        clean_new_code = str(new_employee_code or '').strip()
+        if not clean_new_code:
+            raise ValidationError({'new_employee_code': 'A new employee code is strictly required when rehiring. Cannot rehire without a new code.'})
+
+        old_code = str(employee.employee_code or '').strip()
+        if clean_new_code.lower() == old_code.lower():
+            raise ValidationError({'new_employee_code': f"Employee cannot be reactivated with previous code '{old_code}'. A NEW distinct employee code is required."})
+
+        # Ensure new code is not duplicate in company
+        dup_emp = Employee.objects.filter(
+            company=employee.company,
+            is_deleted=False
+        ).filter(
+            Q(employee_code__iexact=clean_new_code) | Q(previous_employee_code__iexact=clean_new_code)
+        ).exclude(pk=employee.pk).first()
+
+        if dup_emp:
+            existing_name = dup_emp.full_name or f"{dup_emp.first_name} {dup_emp.last_name or ''}".strip()
+            raise ValidationError({'new_employee_code': f"Employee code '{clean_new_code}' is already assigned to {existing_name} ({dup_emp.employee_code})."})
 
         d = rehire_date or date.today()
         old_status = employee.employment_status
 
         with transaction.atomic():
+            employee.previous_employee_code = old_code
+            employee.employee_code = clean_new_code
             employee.employment_status = 'ACTIVE'
             employee.is_active = True
             employee.rehire_date = d
@@ -915,14 +987,14 @@ class LifecycleService:
                     notes=notes or f"Rehired compensation on {d}"
                 )
 
-            summary = notes or f"Employee rehired into active duty on {d} as {employee.designation.name if employee.designation else 'Guard'} ({employee.classification})"
+            summary = notes or f"Employee rehired into active duty on {d} with NEW code {clean_new_code} (Old: {old_code}) as {employee.designation.name if employee.designation else 'Guard'} ({employee.classification})"
             history = EmploymentHistory.objects.create(
                 company=employee.company,
                 employee=employee,
                 event_type=LifecycleEventType.REHIRE,
                 effective_date=d,
-                old_value=f"Separated ({old_status})",
-                new_value=f"Active - {employee.designation.name if employee.designation else ''} ({employee.classification})",
+                old_value=f"Separated ({old_status}) [Old Code: {old_code}]",
+                new_value=f"Active - Code: {clean_new_code} - {employee.designation.name if employee.designation else ''} ({employee.classification})",
                 reason='Rehire',
                 notes=summary,
                 approved_by=approved_by,
@@ -930,6 +1002,8 @@ class LifecycleService:
                 metadata={
                     'rehire_date': str(d),
                     'previous_status': old_status,
+                    'old_employee_code': old_code,
+                    'new_employee_code': clean_new_code,
                     'designation_id': str(employee.designation_id) if employee.designation_id else None,
                     'department_id': str(employee.department_id) if employee.department_id else None,
                     'classification': employee.classification,
@@ -938,6 +1012,251 @@ class LifecycleService:
             )
 
             return employee, new_assign, history
+
+    @classmethod
+    def report_osl(
+        cls,
+        employee: Employee,
+        reported_by_department: str = 'HR',
+        effective_date: date = None,
+        reason: str = '',
+        notes: str = '',
+        user=None,
+    ) -> tuple:
+        """
+        Reports employee as OSL (Overstayed Leave / Absentee / Bhag gaya).
+        Can be initiated by HR or Operations.
+        Sets employment_status -> 'OSL' while keeping is_active = True during review.
+        Creates/updates JumpRecord in active jump status.
+        """
+        if employee.employment_status in ['RESIGNED', 'TERMINATED']:
+            raise ValidationError({'employment_status': f"Cannot mark separated employee ({employee.employment_status}) as OSL."})
+
+        d = effective_date or date.today()
+        old_status = employee.employment_status
+
+        with transaction.atomic():
+            employee.employment_status = 'OSL'
+            employee._skip_history_log = True
+            employee.save(update_fields=['employment_status', 'updated_at'])
+
+            # Create or update JumpRecord
+            from hrm.models import JumpRecord, JumpRecordStatus
+            jump_rec, created = JumpRecord.objects.get_or_create(
+                company=employee.company,
+                employee=employee,
+                status=JumpRecordStatus.ACTIVE_JUMP,
+                defaults={
+                    'absent_since': d,
+                    'consecutive_absent_days': 1,
+                    'reason': reason or f"Reported as OSL by {reported_by_department}",
+                    'reported_by_department': reported_by_department,
+                    'reported_by': user,
+                }
+            )
+            if not created:
+                jump_rec.absent_since = d
+                jump_rec.reported_by_department = reported_by_department
+                jump_rec.reported_by = user
+                jump_rec.reason = reason or f"Reported as OSL by {reported_by_department}"
+                jump_rec.save(update_fields=['absent_since', 'reported_by_department', 'reported_by', 'reason', 'updated_at'])
+
+            summary = notes or f"Employee reported as OSL by {reported_by_department}. Reason: {reason or 'Unexcused absence'}"
+            history = EmploymentHistory.objects.create(
+                company=employee.company,
+                employee=employee,
+                event_type=LifecycleEventType.OSL_REPORTED,
+                effective_date=d,
+                old_value=old_status,
+                new_value='OSL',
+                reason=reason,
+                notes=summary,
+                approved_by=None,
+                changed_by=user,
+                metadata={
+                    'reported_by_department': reported_by_department,
+                    'jump_record_id': str(jump_rec.id),
+                    'previous_status': old_status,
+                }
+            )
+            return jump_rec, history
+
+    @classmethod
+    def cancel_osl(
+        cls,
+        employee: Employee,
+        user=None,
+        reason: str = '',
+        notes: str = '',
+    ) -> tuple:
+        """
+        HR cancels OSL (e.g. guard returned or reported in error).
+        Restores employment_status -> 'ACTIVE', is_active = True.
+        Resolves JumpRecord as CANCELLED with no penalty.
+        """
+        if employee.employment_status != 'OSL':
+            raise ValidationError({'employment_status': f"Employee is not currently in OSL status (current: {employee.employment_status})."})
+
+        d = date.today()
+
+        with transaction.atomic():
+            employee.employment_status = 'ACTIVE'
+            employee.is_active = True
+            employee._skip_history_log = True
+            employee.save(update_fields=['employment_status', 'is_active', 'updated_at'])
+
+            from hrm.models import JumpRecord, JumpRecordStatus
+            active_jumps = JumpRecord.objects.filter(
+                company=employee.company,
+                employee=employee,
+                status=JumpRecordStatus.ACTIVE_JUMP
+            )
+            for j in active_jumps:
+                j.status = JumpRecordStatus.RESTORED
+                j.resolution_type = 'CANCELLED'
+                j.resolved_at = timezone.now()
+                j.resolved_by = user
+                j.resolution_notes = reason or notes or 'OSL cancelled by HR: guard returned / reported in error'
+                j.save(update_fields=['status', 'resolution_type', 'resolved_at', 'resolved_by', 'resolution_notes', 'updated_at'])
+
+            summary = notes or f"OSL cancelled by HR. Guard restored to ACTIVE duty without penalty. Reason: {reason or 'Returned / mistake'}"
+            history = EmploymentHistory.objects.create(
+                company=employee.company,
+                employee=employee,
+                event_type=LifecycleEventType.OSL_CANCELLED,
+                effective_date=d,
+                old_value='OSL',
+                new_value='ACTIVE',
+                reason=reason,
+                notes=summary,
+                approved_by=user,
+                changed_by=user,
+                metadata={
+                    'cancelled_by': user.get_full_name() if user else None,
+                }
+            )
+            return employee, history
+
+    @classmethod
+    def confirm_osl(
+        cls,
+        employee: Employee,
+        effective_date: date = None,
+        user=None,
+        reason: str = '',
+        notes: str = '',
+    ) -> tuple:
+        """
+        HR confirms OSL (absconded / bhag gaya).
+        Sets employment_status -> 'OSL_CONFIRMED', is_active = False.
+        Relieves active deployments.
+        Resolves JumpRecord as OSL_CONFIRMED.
+        """
+        if employee.employment_status != 'OSL':
+            raise ValidationError({'employment_status': f"Employee must be in pending OSL status to confirm (current: {employee.employment_status})."})
+
+        d = effective_date or date.today()
+
+        with transaction.atomic():
+            # 1. Close active deployments
+            from operations.models import Deployment, DeploymentStatus
+            active_deps = Deployment.objects.filter(
+                company=employee.company,
+                employee=employee,
+                status=DeploymentStatus.ACTIVE,
+                is_deleted=False
+            )
+            for dep in active_deps:
+                dep.status = DeploymentStatus.RELIEVED
+                dep.end_date = d
+                dep.relieved_date = d
+                dep.relief_reason = f"Confirmed OSL: {reason or 'Employee absconded / bhag gaya'}"
+                dep.relieved_by = user
+                dep.save()
+
+            # 2. Update employee
+            employee.employment_status = 'OSL_CONFIRMED'
+            employee.is_active = False
+            employee._skip_history_log = True
+            employee.save(update_fields=['employment_status', 'is_active', 'updated_at'])
+
+            # 3. Resolve JumpRecord
+            from hrm.models import JumpRecord, JumpRecordStatus
+            active_jumps = JumpRecord.objects.filter(
+                company=employee.company,
+                employee=employee,
+                status=JumpRecordStatus.ACTIVE_JUMP
+            )
+            for j in active_jumps:
+                j.status = JumpRecordStatus.TERMINATED
+                j.resolution_type = 'OSL_CONFIRMED'
+                j.resolved_at = timezone.now()
+                j.resolved_by = user
+                j.resolution_notes = reason or notes or 'OSL confirmed by HR: guard absconded'
+                j.save(update_fields=['status', 'resolution_type', 'resolved_at', 'resolved_by', 'resolution_notes', 'updated_at'])
+
+            summary = notes or f"OSL confirmed by HR. Employee marked inactive (absconded). If rehired later, a new employee code will be strictly required. Reason: {reason or 'Absconded'}"
+            history = EmploymentHistory.objects.create(
+                company=employee.company,
+                employee=employee,
+                event_type=LifecycleEventType.OSL_CONFIRMED,
+                effective_date=d,
+                old_value='OSL',
+                new_value='OSL_CONFIRMED',
+                reason=reason,
+                notes=summary,
+                approved_by=user,
+                changed_by=user,
+                metadata={
+                    'confirmed_by': user.get_full_name() if user else None,
+                }
+            )
+            return employee, history
+
+    @classmethod
+    def delist_from_blacklist(
+        cls,
+        blacklist_entry,
+        user=None,
+        removal_reason: str = '',
+    ):
+        """
+        Removes an individual from the Enterprise Blacklist (delist / whitelist).
+        Restricted to privileged roles.
+        Allows subsequent rehire with a mandatory NEW employee code.
+        """
+        if not blacklist_entry.is_active_blacklist:
+            raise ValidationError({'blacklist': 'This record is already delisted from the blacklist.'})
+
+        if not str(removal_reason or '').strip():
+            raise ValidationError({'removal_reason': 'A detailed reason for removing from the blacklist is required.'})
+
+        with transaction.atomic():
+            blacklist_entry.is_active_blacklist = False
+            blacklist_entry.removed_at = timezone.now()
+            blacklist_entry.removed_by = user
+            blacklist_entry.removal_reason = removal_reason
+            blacklist_entry.save(update_fields=['is_active_blacklist', 'removed_at', 'removed_by', 'removal_reason', 'updated_at'])
+
+            if blacklist_entry.employee:
+                summary = f"Delisted from enterprise Blacklist by {user.get_full_name() if user else 'Executive'}. Reason: {removal_reason}"
+                EmploymentHistory.objects.create(
+                    company=blacklist_entry.company,
+                    employee=blacklist_entry.employee,
+                    event_type=LifecycleEventType.DELIST_BLACKLIST,
+                    effective_date=date.today(),
+                    old_value='BLACKLISTED',
+                    new_value='DELISTED (Eligible for Rehire)',
+                    reason=removal_reason,
+                    notes=summary,
+                    approved_by=user,
+                    changed_by=user,
+                    metadata={
+                        'blacklist_id': str(blacklist_entry.id),
+                        'removal_reason': removal_reason,
+                    }
+                )
+        return blacklist_entry
 
     @classmethod
     def get_unified_timeline(cls, employee: Employee) -> list[dict]:
@@ -1120,6 +1439,14 @@ class LifecycleService:
             return f"JUMP Outcome: {h.new_value}"
         elif etype in [LifecycleEventType.REHIRE, 'REHIRE']:
             return "Rehired into Active Employment"
+        elif etype in [LifecycleEventType.OSL_REPORTED, 'OSL_REPORTED']:
+            return "Reported as OSL (Absentee / Bhag gaya)"
+        elif etype in [LifecycleEventType.OSL_CONFIRMED, 'OSL_CONFIRMED']:
+            return "OSL Confirmed (Absconded / Inactive)"
+        elif etype in [LifecycleEventType.OSL_CANCELLED, 'OSL_CANCELLED']:
+            return "OSL Cancelled (Restored to Active)"
+        elif etype in [LifecycleEventType.DELIST_BLACKLIST, 'DELIST_BLACKLIST']:
+            return "Delisted from Blacklist" 
         elif etype in [LifecycleEventType.CONFIRMATION, 'CONFIRMATION']:
             return "Employment Confirmed"
         elif etype in [LifecycleEventType.JOIN, 'JOIN', 'JOINING']:

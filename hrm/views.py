@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import viewsets
+from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -136,7 +136,10 @@ class EmployeeViewSet(TenantModelViewSet):
             qs = qs.filter(designation_id=designation)
         employment_status = self.request.query_params.get('employment_status')
         if employment_status:
-            qs = qs.filter(employment_status=employment_status)
+            if str(employment_status).upper() == 'OSL':
+                qs = qs.filter(employment_status__in=['OSL', 'JUMP'])
+            else:
+                qs = qs.filter(employment_status=employment_status)
         background_type = self.request.query_params.get('background_type')
         if background_type:
             qs = qs.filter(background_type=background_type)
@@ -194,7 +197,7 @@ class EmployeeViewSet(TenantModelViewSet):
         status_param = self.request.query_params.get('status')
         if status_param and str(status_param).upper() != 'ALL':
             if str(status_param).upper() == 'ACTIVE':
-                qs = qs.filter(is_active=True)
+                qs = qs.filter(is_active=True, employment_status='ACTIVE')
             elif str(status_param).upper() == 'INACTIVE':
                 qs = qs.filter(is_active=False)
             else:
@@ -735,6 +738,7 @@ class EmployeeViewSet(TenantModelViewSet):
 
         emp, assign, history = LifecycleService.rehire_employee(
             employee=employee,
+            new_employee_code=data['new_employee_code'],
             rehire_date=data.get('rehire_date'),
             designation=desig_model,
             department=dept_model,
@@ -745,6 +749,73 @@ class EmployeeViewSet(TenantModelViewSet):
             double_ot_rate=data.get('double_ot_rate'),
             approved_by=request.user,
             user=request.user,
+            notes=data.get('notes', '')
+        )
+        return Response({
+            'status': 'success',
+            'employee': EmployeeSerializer(emp).data,
+            'history': EmploymentHistorySerializer(history).data
+        })
+
+    @action(detail=True, methods=['post'], url_path='report-osl')
+    def report_osl(self, request, pk=None):
+        employee = self.get_object()
+        from hrm.serializers import ReportOSLActionSerializer, EmploymentHistorySerializer, JumpRecordSerializer
+        from hrm.services.lifecycle_service import LifecycleService
+        serializer = ReportOSLActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        jump_rec, history = LifecycleService.report_osl(
+            employee=employee,
+            reported_by_department=data.get('reported_by_department', 'HR'),
+            effective_date=data.get('effective_date'),
+            reason=data.get('reason', ''),
+            notes=data.get('notes', ''),
+            user=request.user
+        )
+        return Response({
+            'status': 'success',
+            'employee': EmployeeSerializer(employee).data,
+            'jump_record': JumpRecordSerializer(jump_rec).data if jump_rec else None,
+            'history': EmploymentHistorySerializer(history).data
+        })
+
+    @action(detail=True, methods=['post'], url_path='cancel-osl')
+    def cancel_osl(self, request, pk=None):
+        employee = self.get_object()
+        from hrm.serializers import CancelOSLActionSerializer, EmploymentHistorySerializer
+        from hrm.services.lifecycle_service import LifecycleService
+        serializer = CancelOSLActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        emp, history = LifecycleService.cancel_osl(
+            employee=employee,
+            user=request.user,
+            reason=data.get('reason', ''),
+            notes=data.get('notes', '')
+        )
+        return Response({
+            'status': 'success',
+            'employee': EmployeeSerializer(emp).data,
+            'history': EmploymentHistorySerializer(history).data
+        })
+
+    @action(detail=True, methods=['post'], url_path='confirm-osl')
+    def confirm_osl(self, request, pk=None):
+        employee = self.get_object()
+        from hrm.serializers import ConfirmOSLActionSerializer, EmploymentHistorySerializer
+        from hrm.services.lifecycle_service import LifecycleService
+        serializer = ConfirmOSLActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        emp, history = LifecycleService.confirm_osl(
+            employee=employee,
+            effective_date=data.get('effective_date'),
+            user=request.user,
+            reason=data.get('reason', ''),
             notes=data.get('notes', '')
         )
         return Response({
@@ -1580,3 +1651,78 @@ class EmployeeReferenceViewSet(TenantModelViewSet):
         ref.save()
         return Response(EmployeeReferenceSerializer(ref).data, status=status.HTTP_200_OK)
 
+class BlacklistedIndividualViewSet(TenantModelViewSet):
+    """
+    Enterprise Blacklist Management.
+    Enforces tenant-scoped listing and privileged delisting.
+    """
+    from hrm.models import BlacklistedIndividual
+    from hrm.serializers import BlacklistedIndividualSerializer
+    queryset = BlacklistedIndividual.objects.all()
+    serializer_class = BlacklistedIndividualSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['full_name', 'cnic_number', 'phone_number', 'previous_employee_code', 'reason']
+    ordering_fields = ['blacklisted_at', 'full_name', 'created_at']
+    ordering = ['-blacklisted_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        active_param = self.request.query_params.get('is_active')
+        if active_param is not None:
+            if active_param.lower() in ('true', '1'):
+                qs = qs.filter(is_active_blacklist=True)
+            elif active_param.lower() in ('false', '0'):
+                qs = qs.filter(is_active_blacklist=False)
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='delist')
+    def delist(self, request, pk=None):
+        entry = self.get_object()
+        user = request.user
+        role = getattr(user, 'role', '')
+        allowed_roles = ['COMPANY_ADMIN', 'CEO', 'COO', 'GENERAL_MANAGER', 'HR_MANAGER']
+        if not (user.is_superuser or user.is_staff or role in allowed_roles):
+            return Response(
+                {'error': 'You do not have permission to delist blacklisted individuals. Only Company Admin, CEO, COO, General Manager, or HR Manager can perform this action.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from hrm.serializers import DelistBlacklistActionSerializer
+        from hrm.services.lifecycle_service import LifecycleService
+        serializer = DelistBlacklistActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = serializer.validated_data['removal_reason']
+
+        LifecycleService.delist_from_blacklist(entry, user=user, removal_reason=reason)
+        from hrm.serializers import BlacklistedIndividualSerializer
+        return Response({
+            'status': 'success',
+            'data': BlacklistedIndividualSerializer(entry).data,
+            'message': f"Individual '{entry.full_name}' has been successfully delisted from the Blacklist."
+        })
+
+    @action(detail=False, methods=['get'], url_path='check')
+    def check_blacklist(self, request):
+        cnic = request.query_params.get('cnic', '').strip()
+        phone = request.query_params.get('phone', '').strip()
+        from django.db.models import Q
+        from hrm.models import BlacklistedIndividual
+        from hrm.serializers import BlacklistedIndividualSerializer
+
+        cond = Q()
+        if cnic:
+            clean_cnic = cnic.replace('-', '').strip()
+            cond |= Q(cnic_number=cnic) | Q(cnic_number=clean_cnic)
+        if phone:
+            cond |= Q(phone_number__icontains=phone)
+
+        if not cond:
+            return Response({'is_blacklisted': False, 'entry': None})
+
+        bl = self.get_queryset().filter(is_active_blacklist=True).filter(cond).first()
+        if bl:
+            return Response({
+                'is_blacklisted': True,
+                'entry': BlacklistedIndividualSerializer(bl).data
+            })
+        return Response({'is_blacklisted': False, 'entry': None})

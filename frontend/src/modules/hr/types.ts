@@ -141,8 +141,10 @@ export interface Employee {
     education?: string;
     marital_status?: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED';
     background_type?: 'CIVILIAN' | 'EX_ARMY' | string;
-    employment_status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'TERMINATED' | 'JUMP';
+    employment_status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'TERMINATED' | 'JUMP' | 'OSL' | 'OSL_CONFIRMED';
     is_active: boolean;
+    phone_number?: string;
+    is_blacklisted?: boolean;
     training_completed?: boolean;
     eobi_number?: string;
     sessi_number?: string;

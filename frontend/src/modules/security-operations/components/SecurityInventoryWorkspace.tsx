@@ -13,8 +13,11 @@ import {
     getSerializedEquipmentHistory,
     getSecurityItemProfiles,
     getEquipmentIssues,
-    getOperationalSites
+    getOperationalSites,
+    directStockInward,
+    getActivePersonnel
 } from '../api';
+import { useToastStore } from '../../../stores/toastStore';
 import type {
     SecurityInventoryOverview,
     SecurityStoreProfile,
@@ -81,6 +84,25 @@ export const SecurityInventoryWorkspace: React.FC = () => {
     const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
     const [selectedIncidentForResolve, setSelectedIncidentForResolve] = useState<EquipmentIncident | null>(null);
     const [isConfigureStoreModalOpen, setIsConfigureStoreModalOpen] = useState(false);
+    const [isDirectEntryModalOpen, setIsDirectEntryModalOpen] = useState(false);
+    const [directEntryMode, setDirectEntryMode] = useState<'existing' | 'new'>('existing');
+    const [personnel, setPersonnel] = useState<Array<{ id: string; full_name: string; employee_id: string; designation_name?: string }>>([]);
+
+    const [directEntryForm, setDirectEntryForm] = useState({
+        store_id: '',
+        item_id: '',
+        item_name: '',
+        item_code: '',
+        security_category: 'UNIFORM',
+        unit_of_measure: 'pcs',
+        track_serial_number: false,
+        movement_type: 'OPENING_BALANCE' as 'OPENING_BALANCE' | 'IN' | 'ADJUSTMENT_IN',
+        quantity: 1,
+        unit_cost: 0,
+        reference: '',
+        notes: '',
+        serial_numbers: ''
+    });
 
     // Form inputs state
     const [issueForm, setIssueForm] = useState({
@@ -151,7 +173,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
     const loadOverviewAndData = useCallback(async () => {
         setError(null);
         try {
-            const [ov, storeRes, stockRes, issueRes, incRes, siteRes, profRes] = await Promise.all([
+            const [ov, storeRes, stockRes, issueRes, incRes, siteRes, profRes, personnelRes] = await Promise.all([
                 getSecurityInventoryOverview(),
                 getSecurityStores(),
                 getSecurityStockAvailability({
@@ -164,7 +186,8 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 getEquipmentIssues({ search: searchQuery || undefined, status: statusFilter || undefined }),
                 getEquipmentIncidents(),
                 getOperationalSites({ is_active: true, page: 1 }),
-                getSecurityItemProfiles()
+                getSecurityItemProfiles(),
+                getActivePersonnel()
             ]);
 
             setOverview(ov);
@@ -174,6 +197,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
             setIssues(issueRes.results || []);
             setIncidents(incRes || []);
             setSites(siteRes.results || []);
+            setPersonnel(personnelRes || []);
             setAvailableItems((profRes.items || []).map((item: any) => ({
                 id: item.id,
                 name: item.name,
@@ -207,6 +231,70 @@ export const SecurityInventoryWorkspace: React.FC = () => {
     };
 
     // Actions
+    const handleDirectEntrySubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!directEntryForm.store_id) {
+            useToastStore.getState().error('Please select a store / armory.');
+            return;
+        }
+        if (directEntryMode === 'existing' && !directEntryForm.item_id) {
+            useToastStore.getState().error('Please select an item from store inventory.');
+            return;
+        }
+        if (directEntryMode === 'new' && !directEntryForm.item_name.trim()) {
+            useToastStore.getState().error('Please enter the new item name.');
+            return;
+        }
+        if (Number(directEntryForm.quantity) <= 0) {
+            useToastStore.getState().error('Quantity must be greater than zero.');
+            return;
+        }
+
+        try {
+            const payload: any = {
+                store_id: directEntryForm.store_id,
+                movement_type: directEntryForm.movement_type,
+                quantity: Number(directEntryForm.quantity),
+                unit_cost: Number(directEntryForm.unit_cost) || 0,
+                reference: directEntryForm.reference.trim(),
+                notes: directEntryForm.notes.trim(),
+                serial_numbers: directEntryForm.serial_numbers.trim()
+            };
+
+            if (directEntryMode === 'existing') {
+                payload.item_id = directEntryForm.item_id;
+            } else {
+                payload.item_name = directEntryForm.item_name.trim();
+                payload.item_code = directEntryForm.item_code.trim();
+                payload.security_category = directEntryForm.security_category;
+                payload.unit_of_measure = directEntryForm.unit_of_measure.trim() || 'pcs';
+                payload.track_serial_number = directEntryForm.track_serial_number;
+            }
+
+            const res = await directStockInward(payload);
+            useToastStore.getState().success(res.message || 'Direct stock inward successfully recorded.');
+            setIsDirectEntryModalOpen(false);
+            setDirectEntryForm({
+                store_id: (stores[0]?.warehouse as any) || stores[0]?.id || '',
+                item_id: '',
+                item_name: '',
+                item_code: '',
+                security_category: 'UNIFORM',
+                unit_of_measure: 'pcs',
+                track_serial_number: false,
+                movement_type: 'OPENING_BALANCE',
+                quantity: 1,
+                unit_cost: 0,
+                reference: '',
+                notes: '',
+                serial_numbers: ''
+            });
+            await loadOverviewAndData();
+        } catch (err: any) {
+            useToastStore.getState().error(err?.response?.data?.error || err.message || 'Failed to process direct stock entry.');
+        }
+    };
+
     const handleIssueSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
@@ -232,9 +320,10 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 notes: '',
                 authorization_code: ''
             });
+            useToastStore.getState().success('Equipment successfully issued.');
             await loadOverviewAndData();
         } catch (err: any) {
-            alert(err?.response?.data?.error || err.message || 'Failed to issue equipment.');
+            useToastStore.getState().error(err?.response?.data?.error || err.message || 'Failed to issue equipment.');
         }
     };
 
@@ -252,9 +341,10 @@ export const SecurityInventoryWorkspace: React.FC = () => {
             setIsReturnModalOpen(false);
             setSelectedIssueForReturn(null);
             setReturnForm({ store_id: '', condition: 'GOOD', notes: '', authorization_code: '' });
+            useToastStore.getState().success('Equipment return logged and stock updated.');
             await loadOverviewAndData();
         } catch (err: any) {
-            alert(err?.response?.data?.error || err.message || 'Failed to return equipment.');
+            useToastStore.getState().error(err?.response?.data?.error || err.message || 'Failed to return equipment.');
         }
     };
 
@@ -284,9 +374,10 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 notes: '',
                 authorization_code: ''
             });
+            useToastStore.getState().success('Store transfer completed successfully.');
             await loadOverviewAndData();
         } catch (err: any) {
-            alert(err?.response?.data?.error || err.message || 'Failed to execute store transfer.');
+            useToastStore.getState().error(err?.response?.data?.error || err.message || 'Failed to execute store transfer.');
         }
     };
 
@@ -395,7 +486,19 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                             Universal inventory-backed controlled custody, stores, site assignments, serialized tracking, and damage workflows.
                         </p>
                     </div>
-                    <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <Button 
+                            variant="primary" 
+                            onClick={() => {
+                                if (stores.length > 0 && !directEntryForm.store_id) {
+                                    setDirectEntryForm(prev => ({ ...prev, store_id: (stores[0].warehouse as any) || stores[0].id }));
+                                }
+                                setIsDirectEntryModalOpen(true);
+                            }}
+                            style={{ background: '#10b981', borderColor: '#059669', color: '#ffffff' }}
+                        >
+                            <i className="bx bx-plus-circle" style={{ marginRight: '6px' }}></i> + Direct Stock Entry / Opening Balance
+                        </Button>
                         <Button variant="secondary" onClick={() => setIsTransferModalOpen(true)}>
                             <i className="bx bx-transfer-alt" style={{ marginRight: '6px' }}></i> Stock Transfer
                         </Button>
@@ -403,7 +506,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                             <i className="bx bx-error" style={{ marginRight: '6px' }}></i> Report Loss/Damage
                         </Button>
                         <Button variant="primary" onClick={() => setIsIssueModalOpen(true)}>
-                            <i className="bx bx-plus" style={{ marginRight: '6px' }}></i> Issue Equipment
+                            <i className="bx bx-shield-plus" style={{ marginRight: '6px' }}></i> Issue Equipment
                         </Button>
                     </div>
                 </div>
@@ -1149,13 +1252,27 @@ export const SecurityInventoryWorkspace: React.FC = () => {
 
                             {issueForm.custody_type === 'EMPLOYEE' ? (
                                 <div>
-                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Employee ID / UUID *</label>
-                                    <Input
-                                        placeholder="Enter Employee UUID"
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>
+                                        Select Employee / Security Guard * ({personnel.length} active)
+                                    </label>
+                                    <select
                                         required
                                         value={issueForm.employee_id}
                                         onChange={e => setIssueForm({ ...issueForm, employee_id: e.target.value })}
-                                    />
+                                        style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--color-border, #d1d5db)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #111827)', fontSize: '13px' }}
+                                    >
+                                        <option value="">-- Choose Guard / Employee --</option>
+                                        {personnel.map(p => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.full_name} {p.employee_id ? `(${p.employee_id})` : ''} {p.designation_name ? `• ${p.designation_name}` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {personnel.length === 0 && (
+                                        <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px' }}>
+                                            No active employees found in HRM.
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div>
@@ -1519,6 +1636,269 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
                                 <Button type="button" variant="secondary" onClick={() => setIsResolveModalOpen(false)}>Cancel</Button>
                                 <Button type="submit" variant="primary">Confirm Resolution</Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL: Direct Stock Entry / Opening Balance */}
+            {isDirectEntryModalOpen && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1050,
+                    padding: '16px'
+                }}>
+                    <div style={{
+                        background: 'var(--color-surface, #ffffff)',
+                        borderRadius: '12px',
+                        width: '100%',
+                        maxWidth: '640px',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        padding: '24px',
+                        boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text, #111827)' }}>
+                                    Direct Store Stock Intake & Opening Balance
+                                </h3>
+                                <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--color-text-muted, #6b7280)' }}>
+                                    Receive stock directly into armories and stores without requiring a Purchase Order.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsDirectEntryModalOpen(false)}
+                                style={{ background: 'transparent', border: 'none', fontSize: '22px', cursor: 'pointer', color: 'var(--color-text-muted, #6b7280)' }}
+                            >
+                                &times;
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleDirectEntrySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>
+                                    Destination Store / Armory *
+                                </label>
+                                <select
+                                    required
+                                    value={directEntryForm.store_id}
+                                    onChange={e => setDirectEntryForm({ ...directEntryForm, store_id: e.target.value })}
+                                    style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--color-border, #d1d5db)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #111827)' }}
+                                >
+                                    <option value="">-- Select Store --</option>
+                                    {stores.map(st => (
+                                        <option key={st.id} value={(st.warehouse as any) || st.id}>
+                                            {st.warehouse_name} ({st.warehouse_code}) {st.is_armory ? '• Armory' : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>
+                                    Inward Entry Type *
+                                </label>
+                                <select
+                                    value={directEntryForm.movement_type}
+                                    onChange={e => setDirectEntryForm({ ...directEntryForm, movement_type: e.target.value as any })}
+                                    style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--color-border, #d1d5db)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #111827)' }}
+                                >
+                                    <option value="OPENING_BALANCE">Opening Stock Balance (Historical / Initial Stock)</option>
+                                    <option value="IN">Direct Store Inward (No Purchase Order)</option>
+                                    <option value="ADJUSTMENT_IN">Stock Surplus / Physical Audit Inward</option>
+                                </select>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: 'var(--color-surface-secondary, #f8fafc)', padding: '4px', borderRadius: '8px', border: '1px solid var(--color-border, #e2e8f0)' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setDirectEntryMode('existing')}
+                                    style={{
+                                        padding: '8px',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: directEntryMode === 'existing' ? 'var(--color-primary, #2563eb)' : 'transparent',
+                                        color: directEntryMode === 'existing' ? '#ffffff' : 'var(--color-text-muted)',
+                                        fontWeight: 600,
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Pick Existing Item ({availableItems.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setDirectEntryMode('new')}
+                                    style={{
+                                        padding: '8px',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: directEntryMode === 'new' ? 'var(--color-primary, #2563eb)' : 'transparent',
+                                        color: directEntryMode === 'new' ? '#ffffff' : 'var(--color-text-muted)',
+                                        fontWeight: 600,
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    + Create & Inward New Item
+                                </button>
+                            </div>
+
+                            {directEntryMode === 'existing' ? (
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>
+                                        Store Inventory Item *
+                                    </label>
+                                    <select
+                                        required
+                                        value={directEntryForm.item_id}
+                                        onChange={e => {
+                                            const selected = availableItems.find(it => it.id === e.target.value);
+                                            setDirectEntryForm({
+                                                ...directEntryForm,
+                                                item_id: e.target.value,
+                                                track_serial_number: selected?.is_serialized || false
+                                            });
+                                        }}
+                                        style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--color-border, #d1d5db)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #111827)' }}
+                                    >
+                                        <option value="">-- Choose Item ({availableItems.length} available) --</option>
+                                        {availableItems.map(it => (
+                                            <option key={it.id} value={it.id}>
+                                                {it.name} {it.code ? `(${it.code})` : ''} {it.is_serialized ? '• Serialized' : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            ) : (
+                                <div style={{ background: 'var(--color-surface-secondary, #f8fafc)', border: '1px solid var(--color-border, #e2e8f0)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                    <div>
+                                        <Input
+                                            label="Item Name *"
+                                            placeholder="e.g. Motorola CP040 VHF Walkie Talkie"
+                                            value={directEntryForm.item_name}
+                                            onChange={e => setDirectEntryForm({ ...directEntryForm, item_name: e.target.value })}
+                                            required
+                                        />
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '10px' }}>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Security Category</label>
+                                            <select
+                                                value={directEntryForm.security_category}
+                                                onChange={e => setDirectEntryForm({ ...directEntryForm, security_category: e.target.value })}
+                                                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--color-border, #d1d5db)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #111827)' }}
+                                            >
+                                                {SECURITY_CATEGORIES.map(c => (
+                                                    <option key={c.value} value={c.value}>{c.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <Input
+                                                label="Item Code / SKU"
+                                                placeholder="Auto if empty"
+                                                value={directEntryForm.item_code}
+                                                onChange={e => setDirectEntryForm({ ...directEntryForm, item_code: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <input
+                                            type="checkbox"
+                                            id="deTrackSerial"
+                                            checked={directEntryForm.track_serial_number}
+                                            onChange={e => setDirectEntryForm({ ...directEntryForm, track_serial_number: e.target.checked })}
+                                        />
+                                        <label htmlFor="deTrackSerial" style={{ fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>
+                                            Track individual serial numbers for this item
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <Input
+                                        label="Quantity to Inward *"
+                                        type="number"
+                                        min="1"
+                                        value={directEntryForm.quantity}
+                                        onChange={e => setDirectEntryForm({ ...directEntryForm, quantity: Number(e.target.value) })}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <Input
+                                        label="Unit Cost Price (PKR)"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        placeholder="0.00"
+                                        value={directEntryForm.unit_cost}
+                                        onChange={e => setDirectEntryForm({ ...directEntryForm, unit_cost: Number(e.target.value) })}
+                                    />
+                                </div>
+                            </div>
+
+                            {directEntryForm.track_serial_number && (
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>
+                                        Serial Numbers (1 per line or comma-separated) — {directEntryForm.quantity} required
+                                    </label>
+                                    <textarea
+                                        rows={3}
+                                        placeholder="e.g. SN-8801&#10;SN-8802&#10;SN-8803 (Leave blank to auto-generate)"
+                                        value={directEntryForm.serial_numbers}
+                                        onChange={e => setDirectEntryForm({ ...directEntryForm, serial_numbers: e.target.value })}
+                                        style={{
+                                            width: '100%',
+                                            padding: '8px 12px',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--color-border, #d1d5db)',
+                                            background: 'var(--color-surface, #ffffff)',
+                                            color: 'var(--color-text, #111827)',
+                                            fontSize: '13px',
+                                            fontFamily: 'monospace'
+                                        }}
+                                    />
+                                </div>
+                            )}
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <Input
+                                        label="Reference / Document #"
+                                        placeholder="e.g. OB-2026-001 or physical GRN #"
+                                        value={directEntryForm.reference}
+                                        onChange={e => setDirectEntryForm({ ...directEntryForm, reference: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <Input
+                                        label="Notes / Description"
+                                        placeholder="Opening audit, donation, direct purchase..."
+                                        value={directEntryForm.notes}
+                                        onChange={e => setDirectEntryForm({ ...directEntryForm, notes: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
+                                <Button type="button" variant="secondary" onClick={() => setIsDirectEntryModalOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button type="submit" variant="primary" style={{ background: '#10b981', borderColor: '#059669', color: '#ffffff' }}>
+                                    <i className="bx bx-check"></i> Post Direct Stock Entry
+                                </Button>
                             </div>
                         </form>
                     </div>

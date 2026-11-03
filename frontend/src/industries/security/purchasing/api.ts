@@ -114,6 +114,8 @@ export interface UniversalItem {
     cost_price?: number | string;
     selling_price?: number | string;
     is_active?: boolean;
+    track_inventory?: boolean;
+    track_serial_number?: boolean;
 }
 
 // Vendor Endpoints
@@ -141,6 +143,33 @@ export const deleteVendor = async (id: string): Promise<void> => {
     await api.delete(`/api/purchasing/vendors/${id}/`);
 };
 
+export function extractApiError(err: any, fallback = 'Operation failed'): string {
+    if (!err) return fallback;
+    const data = err.response?.data;
+    if (!data) return err.message || fallback;
+    if (typeof data === 'string') return data;
+    if (data.detail && typeof data.detail === 'string') return data.detail;
+    if (data.message && typeof data.message === 'string') return data.message;
+    if (data.error && typeof data.error === 'string') return data.error;
+
+    if (typeof data === 'object') {
+        const messages: string[] = [];
+        for (const [key, val] of Object.entries(data)) {
+            if (Array.isArray(val)) {
+                messages.push(`${key}: ${val.join(' ')}`);
+            } else if (typeof val === 'string') {
+                messages.push(`${key}: ${val}`);
+            } else if (val && typeof val === 'object') {
+                messages.push(`${key}: ${JSON.stringify(val)}`);
+            }
+        }
+        if (messages.length > 0) {
+            return messages.join(' | ');
+        }
+    }
+    return fallback;
+}
+
 // Vendor Categories Endpoints
 export const getVendorCategories = async (): Promise<VendorCategory[]> => {
     const res = await api.get('/api/purchasing/vendor-categories/');
@@ -149,6 +178,20 @@ export const getVendorCategories = async (): Promise<VendorCategory[]> => {
 
 export const createVendorCategory = async (data: { name: string; code?: string; description?: string }): Promise<VendorCategory> => {
     const res = await api.post('/api/purchasing/vendor-categories/', data);
+    return res.data;
+};
+
+export const updateVendorCategory = async (id: string, data: Partial<VendorCategory>): Promise<VendorCategory> => {
+    const res = await api.patch(`/api/purchasing/vendor-categories/${id}/`, data);
+    return res.data;
+};
+
+export const deleteVendorCategory = async (id: string): Promise<void> => {
+    await api.delete(`/api/purchasing/vendor-categories/${id}/`);
+};
+
+export const seedDefaultVendorCategories = async (): Promise<any> => {
+    const res = await api.post('/api/purchasing/vendor-categories/seed-defaults/');
     return res.data;
 };
 
@@ -358,11 +401,49 @@ export const getWarehouses = async (): Promise<Warehouse[]> => {
 // Universal Inventory Items for item catalogue picker
 export const getUniversalInventoryItems = async (): Promise<UniversalItem[]> => {
     try {
-        const res = await api.get('/api/inventory/items/');
+        const res = await api.get('/api/inventory/items/?page_size=200');
         return res.data.results || res.data;
     } catch {
         return [];
     }
+};
+
+export const createUniversalInventoryItem = async (data: {
+    name: string;
+    sku?: string;
+    unit_of_measure?: string;
+    cost_price?: number;
+    selling_price?: number;
+    track_inventory?: boolean;
+    track_serial_number?: boolean;
+    brand?: string;
+    security_category?: string;
+    is_controlled?: boolean;
+}): Promise<UniversalItem> => {
+    const res = await api.post('/api/inventory/items/', {
+        name: data.name,
+        sku: data.sku || undefined,
+        unit_of_measure: data.unit_of_measure || 'pcs',
+        cost_price: data.cost_price || 0,
+        selling_price: data.selling_price || 0,
+        track_inventory: data.track_inventory !== undefined ? data.track_inventory : true,
+        track_serial_number: !!data.track_serial_number,
+        brand: data.brand || '',
+        item_type: 'PRODUCT'
+    });
+    const createdItem = res.data;
+    if (data.security_category) {
+        try {
+            await api.post('/api/operations/security-inventory/item-profiles/', {
+                item_id: createdItem.id,
+                security_category: data.security_category,
+                is_controlled: !!data.is_controlled
+            });
+        } catch {
+            // Profile optional / handled by backend
+        }
+    }
+    return createdItem;
 };
 
 // ==========================================

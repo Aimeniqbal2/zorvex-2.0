@@ -323,4 +323,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'reports.tasks.dispatch_due_reports',
         'schedule': crontab(minute='*'), # runs every minute
     },
+    'run-daily-auto-attendance-hourly': {
+        'task': 'operations.tasks.run_daily_auto_attendance_task',
+        'schedule': crontab(minute='5', hour='*'), # runs 5 min past every hour (and at 00:05 midnight)
+    },
 }
