@@ -678,14 +678,14 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
         columns.push({
             key: 'actions', 
             header: 'Action',
-            width: filterTab === 'OSL' ? '280px' : '115px',
+            width: filterTab === 'OSL' ? '280px' : '185px',
             align: 'center',
             sticky: 'right',
             render: (e: Employee) => {
                 const isGuardOsl = e.employment_status === 'OSL';
                 return (
                     <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
-                        {isGuardOsl && (
+                        {isGuardOsl ? (
                             <>
                                 <button
                                     type="button"
@@ -734,6 +734,35 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                                     <i className="bx bx-x"></i> Confirm OSL
                                 </button>
                             </>
+                        ) : (
+                            (e.employment_status === 'ACTIVE' && e.is_active) && (
+                                <button
+                                    type="button"
+                                    onClick={(evt) => {
+                                        evt.stopPropagation();
+                                        setOslTargetEmployee(e);
+                                        setOslModalDate(new Date().toISOString().split('T')[0]);
+                                        setOslModalReason('Absent without notice / bhag gaya / unreachable');
+                                        setIsOslReportModalOpen(true);
+                                    }}
+                                    style={{
+                                        background: 'rgba(217, 119, 6, 0.1)',
+                                        color: '#d97706',
+                                        border: '1px solid #d97706',
+                                        borderRadius: '4px',
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px'
+                                    }}
+                                    title="Report guard as OSL (Bhag gaya / Absent)"
+                                >
+                                    <i className="bx bx-run"></i> Report OSL
+                                </button>
+                            )
                         )}
                         <button 
                             type="button"
@@ -1324,7 +1353,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                 {oslTargetEmployee && (
                     <form onSubmit={handleReportOslSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                         <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'rgba(217, 119, 6, 0.1)', border: '1px solid rgba(217, 119, 6, 0.25)', fontSize: '12.5px', color: '#d97706' }}>
-                            <i className="bx bx-run"></i> <strong>Operations OSL Notification:</strong> This reports the guard to the HR department as an absentee (bhag gaya). The guard will be placed in the OSL review queue. Operations will not mark them inactive directly; HR will confirm or cancel.
+                            <i className="bx bx-run"></i> <strong>{isReadOnly ? 'Operations OSL Notification:' : 'HR OSL Review Record:'}</strong> {isReadOnly ? 'This reports the guard to the HR department as an absentee (bhag gaya). The guard will be placed in the OSL review queue. Operations will not mark them inactive directly; HR will confirm or cancel.' : 'This places the employee under the OSL review category (remains active). HR can confirm (mark inactive / absconded) or cancel (guard returned) from the OSL tab or workforce profile.'}
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px' }}>
@@ -1364,7 +1393,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                                 rows={3}
                                 value={oslModalReason}
                                 onChange={e => setOslModalReason(e.target.value)}
-                                placeholder="Describe why this guard is reported as OSL (e.g. left post during night shift, phone unreachable)"
+                                placeholder="Describe why this guard is reported as OSL (e.g. left post during night shift, phone unreachable, bhag gaya)"
                                 style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', resize: 'vertical' }}
                             />
                         </div>
@@ -1374,7 +1403,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                                 Cancel
                             </Button>
                             <Button type="submit" variant="primary" size="sm" loading={oslSubmitting} style={{ background: '#d97706', borderColor: '#d97706' }}>
-                                <i className="bx bx-paper-plane"></i> Submit OSL to HR
+                                <i className="bx bx-run"></i> {isReadOnly ? 'Submit OSL to HR' : 'Record & Report as OSL'}
                             </Button>
                         </div>
                     </form>

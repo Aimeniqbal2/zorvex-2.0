@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { apiClient } from '../api';
 import type { Employee, Designation, Department, UnifiedTimelineItem } from '../types';
 import { Button } from '../../../components/ui/Button';
+import { useToastStore } from '../../../stores/toastStore';
 
 interface EmployeeLifecycleWorkspaceProps {
     employee: Employee;
@@ -208,6 +209,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
 
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        e.stopPropagation();
         if (!activeAction || !employee.id) return;
         setSubmitting(true);
         setActionError(null);
@@ -252,6 +254,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                     break;
                 case 'SUSPEND':
                     endpoint = `/api/hrm/employees/${employee.id}/report-osl/`;
+                    payload.reported_by_department = 'HR';
                     break;
                 case 'CANCEL_OSL':
                     endpoint = `/api/hrm/employees/${employee.id}/cancel-osl/`;
@@ -277,6 +280,24 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
             }
 
             await apiClient.post(endpoint, payload);
+
+            let successMsg = `Action ${activeAction.replace('_', ' ')} executed successfully.`;
+            const empName = employee.full_name || employee.first_name || 'Employee';
+            if (activeAction === 'SUSPEND') {
+                successMsg = `Guard ${empName} reported as OSL. Placed under review in OSL category.`;
+            } else if (activeAction === 'RESIGN') {
+                successMsg = `Resignation recorded for ${empName}. Status set to Resigned (Inactive).`;
+            } else if (activeAction === 'TERMINATE') {
+                successMsg = `Employee ${empName} terminated and registered into Enterprise Blacklist.`;
+            } else if (activeAction === 'CONFIRM_OSL') {
+                successMsg = `OSL confirmed for ${empName}. Marked Inactive (Absconded).`;
+            } else if (activeAction === 'CANCEL_OSL') {
+                successMsg = `OSL cancelled for ${empName}. Restored to Active status without penalty.`;
+            } else if (activeAction === 'REHIRE') {
+                successMsg = `Employee ${empName} rehired successfully with new code: ${formData.new_employee_code}.`;
+            }
+            useToastStore.getState().success(successMsg);
+
             setActiveAction(null);
             fetchTimeline();
             onRefresh();
@@ -495,7 +516,14 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <i className="bx bx-cog"></i> Execute Lifecycle Action: {activeAction.replace('_', ' ')}
+                            <i className="bx bx-cog"></i> Execute Lifecycle Action: {
+                                activeAction === 'SUSPEND' ? 'Report OSL / Suspend (Bhag gaya / Absent)' :
+                                activeAction === 'RESIGN' ? 'Resign Employee (Voluntary Separation)' :
+                                activeAction === 'TERMINATE' ? 'Terminate Employee (Management Blacklist)' :
+                                activeAction === 'CONFIRM_OSL' ? 'Confirm OSL (Absconded / Inactive)' :
+                                activeAction === 'CANCEL_OSL' ? 'Cancel OSL (Guard Returned / Mistake)' :
+                                activeAction.replace('_', ' ')
+                            }
                         </h4>
                         <button
                             type="button"
@@ -726,7 +754,38 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                             </div>
                         )}
 
-                        {(activeAction === 'SUSPEND' || activeAction === 'REINSTATE') && (
+                        {activeAction === 'SUSPEND' && (
+                            <div>
+                                <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'rgba(217, 119, 6, 0.1)', border: '1px solid rgba(217, 119, 6, 0.3)', marginBottom: '12px', fontSize: '12.5px', color: '#b45309' }}>
+                                    <i className="bx bx-info-circle"></i> <strong>OSL Review Protocol:</strong> Reporting as OSL (Absentee / Bhag gaya) flags this employee under review in the <strong>OSL Category</strong>. Their record remains active while HR investigates. Once confirmed, they become inactive; or if they return to duty, OSL can be cancelled without penalty.
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Date of Absence *</label>
+                                        <input
+                                            type="date"
+                                            value={formData.effective_date || ''}
+                                            onChange={e => setFormData({ ...formData, effective_date: e.target.value })}
+                                            required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>OSL Reason / Incident Grounds *</label>
+                                        <input
+                                            type="text"
+                                            value={formData.reason || ''}
+                                            onChange={e => setFormData({ ...formData, reason: e.target.value })}
+                                            required
+                                            placeholder="e.g. Guard left duty post without notice / phone unreachable / bhag gaya"
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeAction === 'REINSTATE' && (
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                 <div>
                                     <label style={{ fontSize: '12px', fontWeight: 600 }}>Effective Date *</label>
@@ -739,13 +798,13 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                                     />
                                 </div>
                                 <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Formal Reason *</label>
+                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Reinstatement Grounds *</label>
                                     <input
                                         type="text"
                                         value={formData.reason || ''}
                                         onChange={e => setFormData({ ...formData, reason: e.target.value })}
                                         required
-                                        placeholder={activeAction === 'SUSPEND' ? 'Disciplinary inquiry, misconduct...' : 'Inquiry completed, reinstatement granted...'}
+                                        placeholder="Inquiry completed, reinstatement granted..."
                                         style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
                                     />
                                 </div>
@@ -753,25 +812,41 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                         )}
 
                         {activeAction === 'RESIGN' && (
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Resignation Date *</label>
-                                    <input
-                                        type="date"
-                                        value={formData.resignation_date || ''}
-                                        onChange={e => setFormData({ ...formData, resignation_date: e.target.value })}
-                                        required
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    />
+                            <div>
+                                <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', marginBottom: '12px', fontSize: '12.5px', color: '#1d4ed8' }}>
+                                    <i className="bx bx-info-circle"></i> <strong>Voluntary Resignation:</strong> Marks employee status as <strong>RESIGNED</strong> and <strong>INACTIVE</strong>, relieving active deployments. The individual is eligible for future rehire, but <strong>a NEW distinct employee code will be strictly required</strong> upon rehire.
                                 </div>
-                                <div>
-                                    <label style={{ fontSize: '12px', fontWeight: 600 }}>Last Working Date</label>
-                                    <input
-                                        type="date"
-                                        value={formData.last_working_date || ''}
-                                        onChange={e => setFormData({ ...formData, last_working_date: e.target.value })}
-                                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-                                    />
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '10px' }}>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Resignation Date *</label>
+                                        <input
+                                            type="date"
+                                            value={formData.resignation_date || ''}
+                                            onChange={e => setFormData({ ...formData, resignation_date: e.target.value })}
+                                            required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Last Working Date</label>
+                                        <input
+                                            type="date"
+                                            value={formData.last_working_date || ''}
+                                            onChange={e => setFormData({ ...formData, last_working_date: e.target.value })}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: 600 }}>Resignation Reason *</label>
+                                        <input
+                                            type="text"
+                                            value={formData.reason || ''}
+                                            onChange={e => setFormData({ ...formData, reason: e.target.value })}
+                                            required
+                                            placeholder="Personal reasons, better opportunity, health..."
+                                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                                        />
+                                    </div>
                                 </div>
                                 <div>
                                     <label style={{ fontSize: '12px', fontWeight: 600 }}>Notice Details</label>
@@ -779,7 +854,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                                         type="text"
                                         value={formData.notice_details || ''}
                                         onChange={e => setFormData({ ...formData, notice_details: e.target.value })}
-                                        placeholder="1 month notice served / payment in lieu"
+                                        placeholder="1 month notice served / payment in lieu / immediate"
                                         style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
                                     />
                                 </div>
@@ -954,8 +1029,27 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                             <Button type="button" variant="secondary" size="sm" onClick={() => setActiveAction(null)}>
                                 Cancel
                             </Button>
-                            <Button type="submit" variant="primary" size="sm" loading={submitting}>
-                                Confirm {activeAction.replace('_', ' ')}
+                            <Button 
+                                type="submit" 
+                                variant="primary" 
+                                size="sm" 
+                                loading={submitting}
+                                style={{
+                                    ...(activeAction === 'SUSPEND' ? { background: '#d97706', borderColor: '#d97706' } : {}),
+                                    ...(activeAction === 'RESIGN' ? { background: 'var(--color-danger, #dc2626)', borderColor: 'var(--color-danger, #dc2626)' } : {}),
+                                    ...(activeAction === 'TERMINATE' ? { background: '#991b1b', borderColor: '#991b1b' } : {}),
+                                    ...(activeAction === 'CONFIRM_OSL' ? { background: '#991b1b', borderColor: '#991b1b' } : {}),
+                                    ...(activeAction === 'CANCEL_OSL' ? { background: '#059669', borderColor: '#059669' } : {}),
+                                }}
+                            >
+                                {activeAction === 'SUSPEND' && <><i className="bx bx-run" style={{ marginRight: '4px' }}></i> Confirm & Report as OSL</>}
+                                {activeAction === 'RESIGN' && <><i className="bx bx-exit" style={{ marginRight: '4px' }}></i> Confirm Resignation</>}
+                                {activeAction === 'TERMINATE' && <><i className="bx bx-x-circle" style={{ marginRight: '4px' }}></i> Confirm Termination & Blacklist</>}
+                                {activeAction === 'CANCEL_OSL' && <><i className="bx bx-check-circle" style={{ marginRight: '4px' }}></i> Confirm Cancel OSL (Restore Active)</>}
+                                {activeAction === 'CONFIRM_OSL' && <><i className="bx bx-user-x" style={{ marginRight: '4px' }}></i> Confirm OSL (Mark Absconded / Inactive)</>}
+                                {!['SUSPEND', 'RESIGN', 'TERMINATE', 'CANCEL_OSL', 'CONFIRM_OSL'].includes(activeAction) && (
+                                    <>Confirm {activeAction.replace('_', ' ')}</>
+                                )}
                             </Button>
                         </div>
                     </form>

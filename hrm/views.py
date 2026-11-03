@@ -272,6 +272,9 @@ class EmployeeViewSet(TenantModelViewSet):
             qs = qs.exclude(id=exclude_id)
 
         from django.db.models import Q
+        from hrm.models import BlacklistedIndividual
+
+        company = getattr(request, 'company', None) or (qs.first().company if qs.exists() else None)
 
         if field_type == 'cnic':
             clean_cnic = value.replace(' ', '').strip()
@@ -281,6 +284,24 @@ class EmployeeViewSet(TenantModelViewSet):
             else:
                 formatted_cnic = clean_cnic
 
+            # 1. Check Enterprise Blacklist first
+            bl_qs = BlacklistedIndividual.objects.filter(is_active_blacklist=True)
+            if company:
+                bl_qs = bl_qs.filter(company=company)
+            bl = bl_qs.filter(
+                Q(cnic_number=formatted_cnic) |
+                Q(cnic_number=clean_cnic) |
+                Q(cnic_number=raw_digits)
+            ).first()
+            if bl:
+                return Response({
+                    'exists': True,
+                    'is_blacklisted': True,
+                    'message': f"CRITICAL BLACKLIST ALERT: Individual '{bl.full_name}' (CNIC: {bl.cnic_number}) is on the Enterprise BLACKLIST (Reason: {bl.reason}). They cannot be registered or hired unless formally delisted by Company Admin / Executive.",
+                    'blacklisted_by': bl.blacklisted_by.get_full_name() if bl.blacklisted_by else 'Executive'
+                })
+
+            # 2. Check existing employee duplicate
             matched = qs.filter(
                 Q(cnic_number=formatted_cnic) |
                 Q(cnic_number=clean_cnic) |
@@ -291,11 +312,26 @@ class EmployeeViewSet(TenantModelViewSet):
                 code = matched.previous_employee_code or matched.employee_code
                 return Response({
                     'exists': True,
+                    'is_blacklisted': False,
                     'message': f"This CNIC is already assigned to {emp_name} ({code}). Please enter a unique CNIC.",
                     'employee_name': emp_name,
                     'employee_code': code,
                     'employee_id': str(matched.id)
                 })
+        elif field_type == 'phone':
+            clean_phone = ''.join(filter(str.isdigit, value))[-10:]
+            if len(clean_phone) >= 7:
+                bl_qs = BlacklistedIndividual.objects.filter(is_active_blacklist=True)
+                if company:
+                    bl_qs = bl_qs.filter(company=company)
+                bl = bl_qs.filter(phone_number__icontains=clean_phone).first()
+                if bl:
+                    return Response({
+                        'exists': True,
+                        'is_blacklisted': True,
+                        'message': f"CRITICAL BLACKLIST ALERT: Mobile number is linked to BLACKLISTED individual '{bl.full_name}' (CNIC: {bl.cnic_number}). Reason: {bl.reason}.",
+                        'blacklisted_by': bl.blacklisted_by.get_full_name() if bl.blacklisted_by else 'Executive'
+                    })
         elif field_type == 'code':
             matched = qs.filter(
                 Q(previous_employee_code__iexact=value) |

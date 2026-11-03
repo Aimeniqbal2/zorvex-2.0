@@ -368,7 +368,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         }
     };
 
-    const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handlePhoneChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const raw = e.target.value;
         const digits = raw.replace(/\D/g, '').slice(0, 11);
         setFormData(prev => ({ ...prev, phone: digits }));
@@ -379,6 +379,21 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             setPhoneError(`Mobile number must be exactly 11 digits (e.g. 03001234567). Current: ${digits.length}/11`);
         } else {
             setPhoneError(null);
+            // Check Enterprise Blacklist for mobile number
+            try {
+                const res = await apiClient.get('/api/hrm/employees/check-duplicate/', {
+                    params: {
+                        field: 'phone',
+                        value: digits,
+                        exclude_id: employee?.id || ''
+                    }
+                });
+                if (res.data?.is_blacklisted) {
+                    setPhoneError(res.data.message || 'This mobile number is linked to a BLACKLISTED individual.');
+                }
+            } catch {
+                // Silently ignore network fail
+            }
         }
     };
 
@@ -1016,7 +1031,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
                 {renderError()}
 
-                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                <form id="employee-master-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
                     {/* UNIFIED TAB: GENERAL & PERSONAL DETAILS */}
                     {activeModalTab === 'GENERAL' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
@@ -2291,65 +2306,70 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                             )}
                         </div>
                     )}
+                </form>
 
-                    {/* TAB 9: LIFECYCLE & HISTORY */}
-                    {activeModalTab === 'LIFECYCLE' && employee && (
-                        <div className="modal-form-card">
-                            <EmployeeLifecycleWorkspace
-                                employee={employee}
-                                designations={designations}
-                                departments={departments}
-                                isSecurity={isSecurity}
-                                onRefresh={async () => {
-                                    if (employee?.id) {
-                                        fetchChildData(employee.id);
-                                        try {
-                                            const res = await apiClient.get(`/api/hrm/employees/${employee.id}/`);
-                                            if (res.data) {
-                                                setFormData(prev => ({
-                                                    ...prev,
-                                                    ...res.data,
-                                                    employment_status: res.data.employment_status,
-                                                    is_active: res.data.is_active,
-                                                    rehire_date: res.data.rehire_date,
-                                                    termination_date: res.data.termination_date,
-                                                    resignation_date: res.data.resignation_date,
-                                                    employee_code: res.data.employee_code,
-                                                    previous_employee_code: res.data.previous_employee_code,
-                                                }));
-                                            }
-                                        } catch (e) {
-                                            console.error('Failed to reload employee on refresh', e);
+                {/* TAB 9: LIFECYCLE & HISTORY (Rendered outside <form> so action executions do not bubble to master save) */}
+                {activeModalTab === 'LIFECYCLE' && employee && (
+                    <div className="modal-form-card">
+                        <EmployeeLifecycleWorkspace
+                            employee={{ ...employee, ...formData } as any}
+                            designations={designations}
+                            departments={departments}
+                            isSecurity={isSecurity}
+                            onRefresh={async () => {
+                                if (employee?.id) {
+                                    fetchChildData(employee.id);
+                                    try {
+                                        const res = await apiClient.get(`/api/hrm/employees/${employee.id}/`);
+                                        if (res.data) {
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                ...res.data,
+                                                employment_status: res.data.employment_status,
+                                                is_active: res.data.is_active,
+                                                rehire_date: res.data.rehire_date,
+                                                termination_date: res.data.termination_date,
+                                                resignation_date: res.data.resignation_date,
+                                                employee_code: res.data.employee_code,
+                                                previous_employee_code: res.data.previous_employee_code,
+                                            }));
                                         }
+                                    } catch (e) {
+                                        console.error('Failed to reload employee on refresh', e);
                                     }
-                                    onSave();
-                                }}
-                            />
-                        </div>
-                    )}
+                                }
+                                onSave();
+                            }}
+                        />
+                    </div>
+                )}
 
-                    {/* Pinned Modal Form Footer */}
-                    <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        marginTop: '16px', 
-                        paddingTop: '16px', 
-                        borderTop: '1px solid var(--color-border)' 
-                    }}>
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                            * Fields marked with red asterisk are required.
-                        </div>
-                        <div style={{ display: 'flex', gap: '10px' }}>
-                            <Button type="button" variant="secondary" onClick={onClose}>
-                                <i className="bx bx-x"></i> Close
-                            </Button>
-                            <Button type="submit" variant="primary" loading={loading}>
+                {/* Pinned Modal Form Footer */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    marginTop: '16px', 
+                    paddingTop: '16px', 
+                    borderTop: '1px solid var(--color-border)' 
+                }}>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                        {activeModalTab === 'LIFECYCLE'
+                            ? 'Lifecycle Management: Select and execute career actions from the workspace above.'
+                            : '* Fields marked with red asterisk are required.'
+                        }
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                        <Button type="button" variant="secondary" onClick={onClose}>
+                            <i className="bx bx-x"></i> Close
+                        </Button>
+                        {activeModalTab !== 'LIFECYCLE' && (
+                            <Button type="submit" form="employee-master-form" variant="primary" loading={loading}>
                                 <i className="bx bx-save"></i> {isSecurity ? 'Save Workforce Record' : 'Save Employee Details'}
                             </Button>
-                        </div>
+                        )}
                     </div>
-                </form>
+                </div>
             </div>
         </Modal>
     );
