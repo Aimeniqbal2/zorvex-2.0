@@ -2308,41 +2308,21 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     )}
                 </form>
 
-                {/* TAB 9: LIFECYCLE & HISTORY (Rendered outside <form> so action executions do not bubble to master save) */}
-                {activeModalTab === 'LIFECYCLE' && employee && (
-                    <div className="modal-form-card">
-                        <EmployeeLifecycleWorkspace
-                            employee={{ ...employee, ...formData } as any}
-                            designations={designations}
-                            departments={departments}
-                            isSecurity={isSecurity}
-                            onRefresh={async () => {
-                                if (employee?.id) {
-                                    fetchChildData(employee.id);
-                                    try {
-                                        const res = await apiClient.get(`/api/hrm/employees/${employee.id}/`);
-                                        if (res.data) {
-                                            setFormData(prev => ({
-                                                ...prev,
-                                                ...res.data,
-                                                employment_status: res.data.employment_status,
-                                                is_active: res.data.is_active,
-                                                rehire_date: res.data.rehire_date,
-                                                termination_date: res.data.termination_date,
-                                                resignation_date: res.data.resignation_date,
-                                                employee_code: res.data.employee_code,
-                                                previous_employee_code: res.data.previous_employee_code,
-                                            }));
-                                        }
-                                    } catch (e) {
-                                        console.error('Failed to reload employee on refresh', e);
-                                    }
-                                }
-                                onSave();
-                            }}
-                        />
-                    </div>
-                )}
+                    {/* TAB 9: LIFECYCLE & HISTORY */}
+                    {activeModalTab === 'LIFECYCLE' && employee && (
+                        <div className="modal-form-card">
+                            <EmployeeLifecycleWorkspace
+                                employee={employee}
+                                designations={designations}
+                                departments={departments}
+                                isSecurity={isSecurity}
+                                onRefresh={() => {
+                                    if (employee?.id) fetchChildData(employee.id);
+                                    onSave();
+                                }}
+                            />
+                        </div>
+                    )}
 
                 {/* Pinned Modal Form Footer */}
                 <div style={{ 

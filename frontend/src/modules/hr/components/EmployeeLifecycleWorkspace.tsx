@@ -24,7 +24,7 @@ type ActionType =
     | 'RESIGN' 
     | 'TERMINATE' 
     | 'RESOLVE_JUMP' 
-    | 'REHIRE'
+    | 'REHIRE' 
     | 'CANCEL_OSL'
     | 'CONFIRM_OSL';
 
@@ -253,14 +253,7 @@ export const EmployeeLifecycleWorkspace: React.FC<EmployeeLifecycleWorkspaceProp
                     endpoint = `/api/hrm/employees/${employee.id}/relieve/`;
                     break;
                 case 'SUSPEND':
-                    endpoint = `/api/hrm/employees/${employee.id}/report-osl/`;
-                    payload.reported_by_department = 'HR';
-                    break;
-                case 'CANCEL_OSL':
-                    endpoint = `/api/hrm/employees/${employee.id}/cancel-osl/`;
-                    break;
-                case 'CONFIRM_OSL':
-                    endpoint = `/api/hrm/employees/${employee.id}/confirm-osl/`;
+                    endpoint = `/api/hrm/employees/${employee.id}/suspend/`;
                     break;
                 case 'REINSTATE':
                     endpoint = `/api/hrm/employees/${employee.id}/reinstate/`;
