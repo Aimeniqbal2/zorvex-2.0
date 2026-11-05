@@ -678,22 +678,106 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
         columns.push({
             key: 'actions', 
             header: 'Action',
-            width: '115px',
+            width: '180px',
             align: 'center',
             sticky: 'right',
             render: (e: Employee) => (
-                <button 
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                    {e.employment_status === 'JUMP' && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={(evt) => {
+                                    evt.stopPropagation();
+                                    handleConfirmOsl(e);
+                                }}
+                                style={{
+                                    padding: '3px 7px',
+                                    background: '#fee2e2',
+                                    color: '#991b1b',
+                                    border: '1px solid #fca5a5',
+                                    borderRadius: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                                title="Confirm OSL: Employee has absconded"
+                            >
+                                Confirm
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(evt) => {
+                                    evt.stopPropagation();
+                                    handleCancelOsl(e);
+                                }}
+                                style={{
+                                    padding: '3px 7px',
+                                    background: '#ecfdf5',
+                                    color: '#065f46',
+                                    border: '1px solid #a7f3d0',
+                                    borderRadius: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                                title="Cancel OSL: Restore to active"
+                            >
+                                Cancel
+                            </button>
+                        </>
+                    )}
+                    <button
+                        type="button"
+                        className="btn-action-edit"
+                        onClick={(evt) => { 
+                            evt.stopPropagation(); 
+                            setSelectedEmployee(e); 
+                            setIsModalOpen(true); 
+                        }}
+                        title="View & Edit Employee Profile"
+                    >
+                        <i className="bx bx-edit-alt" style={{ fontSize: '13.5px' }}></i>
+                        <span>View / Edit</span>
+                    </button>
+                </div>
+            )
+        });
+    }
+
+    if (isReadOnly) {
+        columns.push({
+            key: 'actions',
+            header: 'Action',
+            width: '90px',
+            align: 'center',
+            sticky: 'right',
+            render: (e: Employee) => (
+                <button
                     type="button"
-                    className="btn-action-edit"
-                    onClick={(evt) => { 
-                        evt.stopPropagation(); 
-                        setSelectedEmployee(e); 
-                        setIsModalOpen(true); 
+                    onClick={(evt) => {
+                        evt.stopPropagation();
+                        setOslTargetEmployee(e);
+                        setOslModalDate(new Date().toISOString().split('T')[0]);
+                        setOslModalReason('');
+                        setIsOslReportModalOpen(true);
                     }}
-                    title="View & Edit Employee Profile"
+                    style={{
+                        padding: '4px 8px',
+                        background: '#fef3c7',
+                        color: '#92400e',
+                        border: '1px solid #fde68a',
+                        borderRadius: '4px',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                    }}
+                    title="Report employee as OSL / absent without notice"
                 >
-                    <i className="bx bx-edit-alt" style={{ fontSize: '13.5px' }}></i>
-                    <span>View / Edit</span>
+                    <i className="bx bx-run"></i> OSL
                 </button>
             )
         });
@@ -1203,137 +1287,306 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
             {!isReadOnly && (
                 <>
                     <EmployeeModal
-                isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
-                employee={selectedEmployee}
-                onSave={() => fetchEmployees(currentPage, pageSize)}
-                isSecurity={isSecurity}
-            />
+                        isOpen={isModalOpen}
+                        onClose={() => setIsModalOpen(false)}
+                        employee={selectedEmployee}
+                        onSave={() => fetchEmployees(currentPage, pageSize)}
+                        isSecurity={isSecurity}
+                    />
 
-            {/* Legacy Data Migration Modal */}
-            <Modal
-                isOpen={isImportModalOpen}
-                onClose={() => setIsImportModalOpen(false)}
-                width="840px"
-                title="Legacy HRIS Data Migration — One Security Importer"
-            >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ padding: '12px', background: 'var(--color-surface-hover, #f8fafc)', borderRadius: '6px', fontSize: '13px', lineHeight: 1.5 }}>
-                        <strong>Safe Multi-Tenant Importer:</strong> Import legacy employee records from CSV.
-                        Leading zeros in codes (e.g. <code>000014</code>) are preserved. Duplicate checks prevent double-creation.
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        <Button variant="secondary" size="sm" onClick={handleDownloadTemplate}>
-                            <i className="bx bx-download"></i> Download CSV Template
-                        </Button>
-                        <input
-                            type="file"
-                            accept=".csv"
-                            onChange={(e) => {
-                                if (e.target.files && e.target.files[0]) {
-                                    setImportFile(e.target.files[0]);
-                                }
-                            }}
-                            style={{ fontSize: '12.5px' }}
-                        />
-                        <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={handlePreviewImport}
-                            disabled={!importFile || importLoading}
-                            loading={importLoading}
-                        >
-                            Preview & Validate
-                        </Button>
-                    </div>
-
-                    {importError && (
-                        <div style={{ color: 'var(--color-danger)', padding: '10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px', fontSize: '13px' }}>
-                            {importError}
-                        </div>
-                    )}
-
-                    {importSuccess && (
-                        <div style={{ color: '#10b981', padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px', fontSize: '13px' }}>
-                            <strong>Import Complete!</strong> Processed: {importSuccess.total_processed} | Created: {importSuccess.created} | Updated: {importSuccess.updated} | Skipped: {importSuccess.skipped}
-                        </div>
-                    )}
-
-                    {/* Preview Table */}
-                    {importPreview && (
-                        <div>
-                            <div style={{ display: 'flex', gap: '16px', padding: '10px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', fontSize: '12.5px', marginBottom: '10px' }}>
-                                <div>Total Rows: <strong>{importPreview.total_rows}</strong></div>
-                                <div>Valid: <strong style={{ color: '#10b981' }}>{importPreview.valid_rows}</strong></div>
-                                <div>Existing: <strong style={{ color: '#f59e0b' }}>{importPreview.existing_rows}</strong></div>
-                                <div>Invalid: <strong style={{ color: '#ef4444' }}>{importPreview.invalid_rows}</strong></div>
+                    {/* Legacy Data Migration Modal */}
+                    <Modal
+                        isOpen={isImportModalOpen}
+                        onClose={() => setIsImportModalOpen(false)}
+                        width="840px"
+                        title="Legacy HRIS Data Migration — One Security Importer"
+                    >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            <div style={{ padding: '12px', background: 'var(--color-surface-hover, #f8fafc)', borderRadius: '6px', fontSize: '13px', lineHeight: 1.5 }}>
+                                <strong>Safe Multi-Tenant Importer:</strong> Import legacy employee records from CSV.
+                                Leading zeros in codes (e.g. <code>000014</code>) are preserved. Duplicate checks prevent double-creation.
                             </div>
 
-                            <div style={{ maxHeight: '280px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '4px' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                                    <thead>
-                                        <tr style={{ background: 'var(--color-surface-hover, #f1f5f9)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
-                                            <th style={{ padding: '6px 8px' }}>#</th>
-                                            <th style={{ padding: '6px 8px' }}>Legacy Code</th>
-                                            <th style={{ padding: '6px 8px' }}>Full Name</th>
-                                            <th style={{ padding: '6px 8px' }}>CNIC</th>
-                                            <th style={{ padding: '6px 8px' }}>Status</th>
-                                            <th style={{ padding: '6px 8px' }}>Notes</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {importPreview.preview?.map((p: any) => (
-                                            <tr key={p.row_number} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                                                <td style={{ padding: '6px 8px' }}>{p.row_number}</td>
-                                                <td style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--color-primary)' }}>{p.legacy_code}</td>
-                                                <td style={{ padding: '6px 8px' }}>{p.full_name}</td>
-                                                <td style={{ padding: '6px 8px' }}>{p.cnic || '—'}</td>
-                                                <td style={{ padding: '6px 8px' }}>
-                                                    <span style={{
-                                                        padding: '2px 6px',
-                                                        borderRadius: '3px',
-                                                        fontSize: '10.5px',
-                                                        fontWeight: 600,
-                                                        background: p.status === 'VALID' ? 'rgba(16, 185, 129, 0.15)' : p.status === 'EXISTING' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                                                        color: p.status === 'VALID' ? '#10b981' : p.status === 'EXISTING' ? '#f59e0b' : '#ef4444'
-                                                    }}>
-                                                        {p.status}
-                                                    </span>
-                                                </td>
-                                                <td style={{ padding: '6px 8px', color: p.errors?.length ? '#ef4444' : 'var(--color-text-muted)' }}>
-                                                    {p.errors?.join(', ') || 'OK'}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={updateExisting}
-                                        onChange={(e) => setUpdateExisting(e.target.checked)}
-                                    />
-                                    Update existing employee records if code or CNIC matches
-                                </label>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <Button variant="secondary" size="sm" onClick={handleDownloadTemplate}>
+                                    <i className="bx bx-download"></i> Download CSV Template
+                                </Button>
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    onChange={(e) => {
+                                        if (e.target.files && e.target.files[0]) {
+                                            setImportFile(e.target.files[0]);
+                                        }
+                                    }}
+                                    style={{ fontSize: '12.5px' }}
+                                />
                                 <Button
                                     variant="primary"
-                                    onClick={handleExecuteImport}
+                                    size="sm"
+                                    onClick={handlePreviewImport}
+                                    disabled={!importFile || importLoading}
                                     loading={importLoading}
-                                    disabled={importPreview.valid_rows === 0 && !updateExisting}
                                 >
-                                    Execute Import ({importPreview.valid_rows} records)
+                                    Preview & Validate
+                                </Button>
+                            </div>
+
+                            {importError && (
+                                <div style={{ color: 'var(--color-danger)', padding: '10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px', fontSize: '13px' }}>
+                                    {importError}
+                                </div>
+                            )}
+
+                            {importSuccess && (
+                                <div style={{ color: '#10b981', padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px', fontSize: '13px' }}>
+                                    <strong>Import Complete!</strong> Processed: {importSuccess.total_processed} | Created: {importSuccess.created} | Updated: {importSuccess.updated} | Skipped: {importSuccess.skipped}
+                                </div>
+                            )}
+
+                            {/* Preview Table */}
+                            {importPreview && (
+                                <div>
+                                    <div style={{ display: 'flex', gap: '16px', padding: '10px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', fontSize: '12.5px', marginBottom: '10px' }}>
+                                        <div>Total Rows: <strong>{importPreview.total_rows}</strong></div>
+                                        <div>Valid: <strong style={{ color: '#10b981' }}>{importPreview.valid_rows}</strong></div>
+                                        <div>Existing: <strong style={{ color: '#f59e0b' }}>{importPreview.existing_rows}</strong></div>
+                                        <div>Invalid: <strong style={{ color: '#ef4444' }}>{importPreview.invalid_rows}</strong></div>
+                                    </div>
+
+                                    <div style={{ maxHeight: '280px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '4px' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                            <thead>
+                                                <tr style={{ background: 'var(--color-surface-hover, #f1f5f9)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
+                                                    <th style={{ padding: '6px 8px' }}>#</th>
+                                                    <th style={{ padding: '6px 8px' }}>Legacy Code</th>
+                                                    <th style={{ padding: '6px 8px' }}>Full Name</th>
+                                                    <th style={{ padding: '6px 8px' }}>CNIC</th>
+                                                    <th style={{ padding: '6px 8px' }}>Status</th>
+                                                    <th style={{ padding: '6px 8px' }}>Notes</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {importPreview.preview?.map((p: any) => (
+                                                    <tr key={p.row_number} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                                                        <td style={{ padding: '6px 8px' }}>{p.row_number}</td>
+                                                        <td style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--color-primary)' }}>{p.legacy_code}</td>
+                                                        <td style={{ padding: '6px 8px' }}>{p.full_name}</td>
+                                                        <td style={{ padding: '6px 8px' }}>{p.cnic || '—'}</td>
+                                                        <td style={{ padding: '6px 8px' }}>
+                                                            <span style={{
+                                                                padding: '2px 6px',
+                                                                borderRadius: '3px',
+                                                                fontSize: '10.5px',
+                                                                fontWeight: 600,
+                                                                background: p.status === 'VALID' ? 'rgba(16, 185, 129, 0.15)' : p.status === 'EXISTING' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                                                color: p.status === 'VALID' ? '#10b981' : p.status === 'EXISTING' ? '#f59e0b' : '#ef4444'
+                                                            }}>
+                                                                {p.status}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '6px 8px', color: p.errors?.length ? '#ef4444' : 'var(--color-text-muted)' }}>
+                                                            {p.errors?.join(', ') || 'OK'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={updateExisting}
+                                                onChange={(e) => setUpdateExisting(e.target.checked)}
+                                            />
+                                            Update existing employee records if code or CNIC matches
+                                        </label>
+                                        <Button
+                                            variant="primary"
+                                            onClick={handleExecuteImport}
+                                            loading={importLoading}
+                                            disabled={importPreview.valid_rows === 0 && !updateExisting}
+                                        >
+                                            Execute Import ({importPreview.valid_rows} records)
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </Modal>
+
+                    {/* Blacklist Register Modal */}
+                    <Modal
+                        isOpen={isBlacklistModalOpen}
+                        onClose={() => {
+                            setIsBlacklistModalOpen(false);
+                            setDelistTargetId(null);
+                            setDelistReason('');
+                        }}
+                        width="840px"
+                        title="Company Blacklist Register"
+                    >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '70vh', overflowY: 'auto' }}>
+                            <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--color-text-muted)' }}>
+                                Individuals listed here are barred from recruitment. Terminated employees with serious violations are flagged here.
+                            </p>
+
+                            {loadingBlacklist ? (
+                                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading blacklist entries...</div>
+                            ) : blacklistRecords.length === 0 ? (
+                                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--color-text-muted)', border: '1px dashed var(--color-border)', borderRadius: '6px' }}>
+                                    No active blacklisted records found.
+                                </div>
+                            ) : (
+                                <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                        <thead>
+                                            <tr style={{ background: 'var(--color-surface-hover, #f1f5f9)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
+                                                <th style={{ padding: '6px 8px' }}>Name</th>
+                                                <th style={{ padding: '6px 8px' }}>CNIC</th>
+                                                <th style={{ padding: '6px 8px' }}>Phone</th>
+                                                <th style={{ padding: '6px 8px' }}>Reason</th>
+                                                <th style={{ padding: '6px 8px' }}>Blacklisted Date</th>
+                                                <th style={{ padding: '6px 8px' }}>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {blacklistRecords.map((b: any) => (
+                                                <tr key={b.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                                                    <td style={{ padding: '6px 8px', fontWeight: 600 }}>{b.name || b.employee_name || '—'}</td>
+                                                    <td style={{ padding: '6px 8px' }}>{b.cnic || '—'}</td>
+                                                    <td style={{ padding: '6px 8px' }}>{b.phone_number || '—'}</td>
+                                                    <td style={{ padding: '6px 8px', color: '#dc2626' }}>{b.reason || b.blacklist_reason || '—'}</td>
+                                                    <td style={{ padding: '6px 8px' }}>{b.blacklisted_date || b.created_at?.split('T')[0] || '—'}</td>
+                                                    <td style={{ padding: '6px 8px' }}>
+                                                        {delistTargetId === b.id ? (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '180px' }}>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Approval reason..."
+                                                                    value={delistReason}
+                                                                    onChange={(e) => setDelistReason(e.target.value)}
+                                                                    style={{ fontSize: '11px', padding: '3px 6px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
+                                                                />
+                                                                <div style={{ display: 'flex', gap: '4px' }}>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleDelistSubmit(b.id)}
+                                                                        disabled={delisting}
+                                                                        style={{ padding: '2px 6px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
+                                                                    >
+                                                                        {delisting ? '...' : 'Confirm Delist'}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => { setDelistTargetId(null); setDelistReason(''); }}
+                                                                        style={{ padding: '2px 6px', fontSize: '11px', background: '#94a3b8', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => { setDelistTargetId(b.id); setDelistReason(''); }}
+                                                                style={{ padding: '3px 7px', fontSize: '11px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                                                            >
+                                                                Delist / Allow Rehire
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setIsBlacklistModalOpen(false);
+                                        setDelistTargetId(null);
+                                        setDelistReason('');
+                                    }}
+                                >
+                                    Close
                                 </Button>
                             </div>
                         </div>
-                    )}
-                </div>
-            </Modal>
+                    </Modal>
                 </>
             )}
+
+            {/* OSL Report Modal (Available for both HR and Operations) */}
+            <Modal
+                isOpen={isOslReportModalOpen}
+                onClose={() => {
+                    setIsOslReportModalOpen(false);
+                    setOslTargetEmployee(null);
+                }}
+                title="Report Employee as OSL (Absent Without Leave)"
+            >
+                <form onSubmit={handleReportOslSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', color: '#92400e' }}>
+                        <strong>Employee: </strong> {oslTargetEmployee?.first_name} {oslTargetEmployee?.last_name} ({oslTargetEmployee?.employee_code || oslTargetEmployee?.previous_employee_code || '—'})
+                        <div style={{ marginTop: '4px', fontSize: '12px' }}>
+                            Reporting an employee as OSL will place them under review in the OSL category without terminating them immediately. HR can later Confirm or Cancel.
+                        </div>
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, marginBottom: '4px' }}>
+                            Effective Date of Absence:
+                        </label>
+                        <input
+                            type="date"
+                            value={oslModalDate}
+                            onChange={(e) => setOslModalDate(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                        />
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, marginBottom: '4px' }}>
+                            Reason / Field Notes:
+                        </label>
+                        <textarea
+                            value={oslModalReason}
+                            onChange={(e) => setOslModalReason(e.target.value)}
+                            rows={3}
+                            placeholder="e.g. Left duty post without notice, mobile powered off..."
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', resize: 'vertical' }}
+                        />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => {
+                                setIsOslReportModalOpen(false);
+                                setOslTargetEmployee(null);
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="submit"
+                            variant="primary"
+                            loading={oslSubmitting}
+                        >
+                            Submit OSL Report
+                        </Button>
+                    </div>
+                </form>
+            </Modal>
         </div>
     );
 };

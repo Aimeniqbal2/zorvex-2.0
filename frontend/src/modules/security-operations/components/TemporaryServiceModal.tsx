@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
 import { Badge } from '../../../components/ui/Badge';
 import { useToastStore } from '../../../stores/toastStore';
 import { apiClient } from '../api';
-import type { 
-    TemporaryServiceRequest, 
-    TemporaryServiceLine, 
+import type {
+    TemporaryServiceRequest,
+    TemporaryServiceLine,
     TemporaryServiceAssignment,
     TemporaryServiceLineType,
-    TemporaryServiceStatus 
+    TemporaryServiceStatus
 } from '../types';
 import { createTemporaryService, updateTemporaryService } from '../api';
 
@@ -54,7 +54,7 @@ interface SearchableGuardSelectProps {
     style?: React.CSSProperties;
 }
 
-const SearchableGuardSelect: React.FC<SearchableGuardSelectProps> = ({ value, employees, onChange, style }) => {
+const SearchableGuardSelect: React.FC<SearchableGuardSelectProps> = ({ value, employees, onChange }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState('');
     const containerRef = useRef<HTMLDivElement>(null);
@@ -122,12 +122,12 @@ const SearchableGuardSelect: React.FC<SearchableGuardSelectProps> = ({ value, em
             >
                 {selectedEmp ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                        <span style={{ 
-                            background: '#eff6ff', 
-                            color: '#1d4ed8', 
-                            padding: '1px 5px', 
-                            borderRadius: '3px', 
-                            fontWeight: 700, 
+                        <span style={{
+                            background: '#eff6ff',
+                            color: '#1d4ed8',
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            fontWeight: 700,
                             fontSize: '11px',
                             flexShrink: 0
                         }}>
@@ -283,10 +283,10 @@ const SearchableGuardSelect: React.FC<SearchableGuardSelectProps> = ({ value, em
     );
 };
 
-export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({ 
-    isOpen, 
-    onClose, 
-    onSaved, 
+export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
+    isOpen,
+    onClose,
+    onSaved,
     service,
     preselectedCrmEntityId,
     preselectedCrmEntityName,
@@ -297,7 +297,6 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
     const [activeTab, setActiveTab] = useState<ModalTab>('event');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    
     // Dependencies (fast cached)
     const [entities, setEntities] = useState<any[]>(cachedEntities || []);
     const [sites, setSites] = useState<any[]>(cachedSites || []);
@@ -477,7 +476,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
 
             // If targetSiteName exists and sites are loaded, match operational site
             if (targetSiteName && sites.length > 0) {
-                const match = sites.find(s => 
+                const match = sites.find(s =>
                     s.name?.trim().toLowerCase() === targetSiteName.trim().toLowerCase() &&
                     (!targetClient || String(s.crm_entity) === String(targetClient) || String(s.customer) === String(targetClient))
                 );
@@ -528,7 +527,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             setOperationalSite(String(preselectedSiteId));
         }
         if (preselectedSiteName && sites.length > 0) {
-            const match = sites.find(s => 
+            const match = sites.find(s =>
                 s.name?.trim().toLowerCase() === preselectedSiteName.trim().toLowerCase() &&
                 (!crmEntity || String(s.crm_entity) === String(crmEntity) || String(s.customer) === String(crmEntity))
             );
@@ -563,7 +562,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
     const clientSites = useMemo(() => {
         if (!crmEntity) return sites;
         const filtered = sites.filter(s => String(s.crm_entity) === String(crmEntity) || String(s.customer) === String(crmEntity));
-        
+
         const currentId = operationalSite || preselectedSiteId;
         const currentName = preselectedSiteName || siteName;
         if (currentId && !filtered.some(s => String(s.id) === String(currentId))) {
@@ -588,8 +587,6 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
         }
     }, [isOpen, clientSites, operationalSite, isTemporarySite, service]);
 
-
-
     // Quick client creation for Scenario 3
     const handleCreateNewClient = async () => {
         if (!newClientName.trim()) {
@@ -606,7 +603,6 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                 preferred_language: 'en',
                 active: true,
                 status: 'active',
-
                 notes: 'Created via Temporary Security Service request'
             });
             const created = res.data;
@@ -616,7 +612,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             setNewClientName('');
             useToastStore.getState().success(`Client "${created.name}" created successfully!`);
         } catch (err: any) {
-            const errDetail = err.response?.data?.detail 
+            const errDetail = err.response?.data?.detail
                 || (typeof err.response?.data === 'object' ? Object.entries(err.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ') : null)
                 || err.message;
             useToastStore.getState().error(`Failed to create client: ${errDetail}`);
@@ -775,7 +771,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                 setIsNewClientMode(false);
                 setNewClientName('');
             } catch (err: any) {
-                const errDetail = err.response?.data?.detail 
+                const errDetail = err.response?.data?.detail
                     || (typeof err.response?.data === 'object' ? Object.entries(err.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ') : null)
                     || err.message;
                 useToastStore.getState().error(`Failed to create client: ${errDetail}`);
@@ -805,7 +801,6 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             setIsSubmitting(false);
             return;
         }
-
 
         const matchedOpSite = sites.find(s => String(s.id) === String(operationalSite));
         const effectiveSiteName = siteName.trim() || (matchedOpSite ? matchedOpSite.name : (preselectedSiteName || undefined));
@@ -859,8 +854,8 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
         } catch (error: any) {
             console.error('Failed saving temporary service', error);
             if (error.response?.data) {
-                const msg = typeof error.response.data === 'string' 
-                    ? error.response.data 
+                const msg = typeof error.response.data === 'string'
+                    ? error.response.data
                     : error.response.data.error || 'Please review validation errors in the form.';
                 useToastStore.getState().error(msg);
             } else {
@@ -872,9 +867,9 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
     };
 
     return (
-        <Modal 
-            isOpen={isOpen} 
-            onClose={onClose} 
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
             title={
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <i className="bx bx-shield-quarter" style={{ color: 'var(--color-primary, #2563eb)', fontSize: '22px' }} />
@@ -984,7 +979,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                
+
                 {/* ----------------- TAB 1: EVENT & LOCATION ----------------- */}
                 {activeTab === 'event' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1327,7 +1322,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                                                             value={line.designation || ''}
                                                             onChange={e => updateLine(idx, 'designation', e.target.value)}
                                                         >
-                                                            <option value="">Select Role...</option>
+                                                            <option value="">Select Designation...</option>
                                                             {designations.map(d => (
                                                                 <option key={d.id} value={d.id}>{d.name}</option>
                                                             ))}
@@ -1465,40 +1460,12 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                                     <tbody>
                                         {assignedGuards.map((asgn, idx) => (
                                             <tr key={idx} style={{ borderBottom: '1px solid var(--color-border, #e2e8f0)' }}>
-                                                <td style={{ padding: '8px' }}>
-                                                    <select
-                                                        className="input-base"
-                                                        style={{ padding: '4px 8px', fontSize: '12px' }}
-                                                        style={{ display: 'none' }}
-
-
-                                                    />
-                                                    {false && (
-                                                        <select
-                                                            style={{ display: 'none' }}
-                                                        onChange={() => {}}
-                                                    >
-                                                    </select>
-                                                    )}
+                                                <td style={{ padding: '8px', minWidth: '240px' }}>
                                                     <SearchableGuardSelect
-                                                        style={{ display: 'none' }}
                                                         value={asgn.employee_id || ''}
                                                         employees={employees}
                                                         onChange={val => updateGuardAssignment(idx, 'employee_id', val)}
                                                     />
-                                                    {false && (
-                                                        <select
-                                                    >
-                                                    </select>
-                                                    )}
-
-
-                                                        <select style={{ display: 'none' }}><option>{false && (
-                                                            null
-                                                                null
-                                                            )} </option> {false && ((
-                                                        ))}
-                                                    </select>
                                                 </td>
                                                 <td style={{ padding: '8px' }}>
                                                     <select

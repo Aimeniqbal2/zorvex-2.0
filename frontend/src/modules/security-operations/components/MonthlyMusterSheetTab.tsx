@@ -1647,7 +1647,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                         {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
                                             const diff = grandDailySummary.dailyDiff[d] ?? 0;
                                             const isPositive = diff > 0;
-                                            const isZero = diff === 0;
+
                                             const isNegative = diff < 0;
 
                                             return (
