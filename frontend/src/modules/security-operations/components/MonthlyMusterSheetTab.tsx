@@ -491,6 +491,50 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         }).filter(Boolean) as SiteBlock[];
     }, [sitesData, selectedSiteFilter, searchQuery]);
 
+    // Live consolidated aggregate summary across all active operational locations
+    const grandDailySummary = useMemo(() => {
+        const sitesToAggregate = filteredSites;
+
+        let totalRequiredDaily = 0;
+        sitesToAggregate.forEach(site => {
+            if (site.requirements && site.requirements.length > 0) {
+                site.requirements.forEach(r => {
+                    totalRequiredDaily += (Number(r.required_headcount) || 0);
+                });
+            } else {
+                totalRequiredDaily += (Number(site.supervisors_req) || 0) + (Number(site.guards_req) || 0);
+            }
+        });
+
+        const dailyFulfilled: Record<number, number> = {};
+        const dailyDiff: Record<number, number> = {};
+        let monthTotalFulfilled = 0;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            let dayFulfilled = 0;
+            sitesToAggregate.forEach(site => {
+                dayFulfilled += (site.daily_totals?.[String(d)] || 0);
+            });
+            dailyFulfilled[d] = dayFulfilled;
+            dailyDiff[d] = dayFulfilled - totalRequiredDaily;
+            monthTotalFulfilled += dayFulfilled;
+        }
+
+        const monthTotalRequired = totalRequiredDaily * daysInMonth;
+        const monthTotalDiff = monthTotalFulfilled - monthTotalRequired;
+
+        return {
+            totalRequiredDaily,
+            dailyFulfilled,
+            dailyDiff,
+            monthTotalFulfilled,
+            monthTotalRequired,
+            monthTotalDiff,
+            sitesCount: sitesToAggregate.length,
+            totalGuardsCount: sitesToAggregate.reduce((acc, s) => acc + (s.guards?.length || 0), 0)
+        };
+    }, [filteredSites, daysInMonth]);
+
     // Fast inline cell edit with anti-cheating cross-location duplicate check
     const handleCellChange = (siteId: string, employeeId: string, day: number, rawValue: string) => {
         if (isFrozen) {
@@ -1365,6 +1409,333 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     <i className='bx bx-folder-open' style={{ fontSize: '3rem', color: '#94a3b8', marginBottom: '12px' }}></i>
                     <h3 style={{ margin: 0, color: 'var(--color-text, #0f172a)' }}>No Operational Sites Match Current Filter</h3>
                     <p style={{ color: 'var(--color-text-muted, #64748b)' }}>Adjust your search query or select "All Operational Sites" in the dropdown.</p>
+                </div>
+            )}
+
+            {/* Day-by-Day Total Consolidated Summary Matrix (Top of All Attendance Sheets) */}
+            {!loading && filteredSites.length > 0 && (
+                <div style={{
+                    marginBottom: '28px',
+                    background: 'var(--color-surface, #ffffff)',
+                    borderRadius: '12px',
+                    border: '1.5px solid #10b981',
+                    boxShadow: '0 4px 15px rgba(16, 185, 129, 0.1)',
+                    position: 'relative',
+                    width: '100%',
+                    maxWidth: '100%',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden'
+                }}>
+                    {/* Header Banner */}
+                    <div style={{
+                        background: 'linear-gradient(135deg, #064e3b 0%, #047857 50%, #059669 100%)',
+                        padding: '12px 20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                        color: '#ffffff'
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ width: 34, height: 34, borderRadius: '8px', background: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem' }}>
+                                <i className='bx bx-calculator'></i>
+                            </div>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, letterSpacing: '0.3px', color: '#ffffff' }}>
+                                    Overall Operational Duty & Shifts Daily Grand Total (All Locations)
+                                </h3>
+                                <span style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+                                    Live day-by-day fulfillment matrix, difference, and required shifts across {grandDailySummary.sitesCount} active sites ({grandDailySummary.totalGuardsCount} total guards)
+                                </span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                            <div style={{ background: 'rgba(0,0,0,0.22)', padding: '5px 12px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>Total Required / Day:</span>
+                                <strong style={{ background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
+                                    {grandDailySummary.totalRequiredDaily} Shifts
+                                </strong>
+                            </div>
+                            <div style={{ background: 'rgba(0,0,0,0.22)', padding: '5px 12px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>Monthly Fulfilled:</span>
+                                <strong style={{ background: '#ecfdf5', color: '#047857', padding: '2px 8px', borderRadius: '4px' }}>
+                                    {grandDailySummary.monthTotalFulfilled}
+                                </strong>
+                            </div>
+                            <div style={{ background: 'rgba(0,0,0,0.22)', padding: '5px 12px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>Net Difference:</span>
+                                <strong style={{ 
+                                    background: grandDailySummary.monthTotalDiff >= 0 ? '#ecfdf5' : '#fee2e2', 
+                                    color: grandDailySummary.monthTotalDiff >= 0 ? '#059669' : '#dc2626', 
+                                    padding: '2px 8px', 
+                                    borderRadius: '4px' 
+                                }}>
+                                    {grandDailySummary.monthTotalDiff > 0 ? `+${grandDailySummary.monthTotalDiff}` : grandDailySummary.monthTotalDiff}
+                                </strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Table Matrix Container */}
+                    <div style={{ display: 'flex', width: '100%', maxWidth: '100%', position: 'relative', boxSizing: 'border-box', overflow: 'hidden' }}>
+                        {/* Fixed Left Header Column (362px matching site cards) */}
+                        <div style={{
+                            width: '362px',
+                            minWidth: '362px',
+                            maxWidth: '362px',
+                            flexShrink: 0,
+                            background: '#ffffff',
+                            borderRight: '2px solid #cbd5e1',
+                            boxShadow: '4px 0 8px rgba(0, 0, 0, 0.08)',
+                            zIndex: 5,
+                            boxSizing: 'border-box'
+                        }}>
+                            <table style={{ width: '362px', tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0, fontSize: '0.82rem', boxSizing: 'border-box' }}>
+                                <thead>
+                                    <tr style={{ height: '40px', background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 800, color: '#334155', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                            Consolidated Metric
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {/* Row 1: Total Marked Shifts Fulfilled */}
+                                    <tr style={{ height: '42px', background: '#ecfdf5', borderBottom: '1px solid #a7f3d0' }}>
+                                        <td style={{ padding: '6px 12px', height: '42px', verticalAlign: 'middle', borderBottom: '1px solid #a7f3d0', borderRight: '1px solid #a7f3d0' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                                <div style={{ fontWeight: 800, color: '#047857', fontSize: '0.85rem' }}>
+                                                    Total Marked Shifts Fulfilled
+                                                </div>
+                                                <span style={{ fontSize: '0.7rem', background: '#d1fae5', color: '#065f46', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                                    P=1 | PO=2 | POD=2
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+
+                                    {/* Row 2: Daily Variance / Difference */}
+                                    <tr style={{ height: '42px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                        <td style={{ padding: '6px 12px', height: '42px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                                <div style={{ fontWeight: 800, color: '#1e293b', fontSize: '0.85rem' }}>
+                                                    Daily Variance / Difference
+                                                </div>
+                                                <span style={{ fontSize: '0.7rem', background: '#e2e8f0', color: '#334155', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                                    Fulfilled − Required
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+
+                                    {/* Row 3: Total Shifts Required */}
+                                    <tr style={{ height: '42px', background: '#f1f5f9' }}>
+                                        <td style={{ padding: '6px 12px', height: '42px', verticalAlign: 'middle', borderRight: '1px solid #cbd5e1' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                                <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.85rem' }}>
+                                                    Total Shifts Required
+                                                </div>
+                                                <span style={{ fontSize: '0.7rem', background: '#cbd5e1', color: '#1e293b', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                                    Sum All Sites
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Scrollable Days Columns (1..daysInMonth + Total) */}
+                        <div style={{ flex: '1 1 0px', minWidth: 0, maxWidth: '100%', overflowX: 'auto', boxSizing: 'border-box' }}>
+                            <table style={{ width: `${daysInMonth * 34 + 90}px`, minWidth: `${daysInMonth * 34 + 90}px`, tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0, fontSize: '0.82rem', textAlign: 'center', boxSizing: 'border-box' }}>
+                                <thead>
+                                    <tr style={{ height: '40px', background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                                        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                                            const isToday = (d === todayDay);
+                                            return (
+                                                <th
+                                                    key={d}
+                                                    style={{
+                                                        width: '34px',
+                                                        minWidth: '34px',
+                                                        maxWidth: '34px',
+                                                        padding: '4px',
+                                                        height: '40px',
+                                                        textAlign: 'center',
+                                                        verticalAlign: 'middle',
+                                                        background: isToday ? '#ecfdf5' : '#f8fafc',
+                                                        color: isToday ? '#059669' : '#334155',
+                                                        fontWeight: isToday ? 900 : 700,
+                                                        borderRight: '1px solid #e2e8f0',
+                                                        borderBottom: '2px solid #cbd5e1',
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                >
+                                                    {d}
+                                                </th>
+                                            );
+                                        })}
+                                        <th style={{
+                                            width: '90px',
+                                            minWidth: '90px',
+                                            maxWidth: '90px',
+                                            padding: '4px 6px',
+                                            height: '40px',
+                                            textAlign: 'center',
+                                            verticalAlign: 'middle',
+                                            background: '#f1f5f9',
+                                            color: '#0f172a',
+                                            fontWeight: 800,
+                                            borderLeft: '2px solid #cbd5e1',
+                                            borderBottom: '2px solid #cbd5e1',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            Total Month
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {/* Row 1: Total Marked Shifts Fulfilled on that day */}
+                                    <tr style={{ height: '42px', background: '#ecfdf5', color: '#047857', fontWeight: 900 }}>
+                                        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                                            const f = grandDailySummary.dailyFulfilled[d] || 0;
+                                            return (
+                                                <td
+                                                    key={d}
+                                                    style={{
+                                                        padding: '4px',
+                                                        width: '34px',
+                                                        minWidth: '34px',
+                                                        maxWidth: '34px',
+                                                        height: '42px',
+                                                        verticalAlign: 'middle',
+                                                        borderBottom: '1px solid #a7f3d0',
+                                                        borderRight: '1px solid #a7f3d0',
+                                                        background: '#ecfdf5',
+                                                        color: '#047857',
+                                                        fontSize: '0.88rem',
+                                                        fontWeight: 900,
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                >
+                                                    {f}
+                                                </td>
+                                            );
+                                        })}
+                                        <td style={{
+                                            padding: '4px 6px',
+                                            width: '90px',
+                                            minWidth: '90px',
+                                            maxWidth: '90px',
+                                            height: '42px',
+                                            verticalAlign: 'middle',
+                                            borderBottom: '1px solid #a7f3d0',
+                                            borderLeft: '2px solid #cbd5e1',
+                                            background: '#d1fae5',
+                                            color: '#065f46',
+                                            fontWeight: 900,
+                                            fontSize: '0.9rem',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            {grandDailySummary.monthTotalFulfilled}
+                                        </td>
+                                    </tr>
+
+                                    {/* Row 2: Showing Difference (Fulfilled - Required) */}
+                                    <tr style={{ height: '42px', background: '#ffffff' }}>
+                                        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                                            const diff = grandDailySummary.dailyDiff[d] ?? 0;
+                                            const isPositive = diff > 0;
+                                            const isZero = diff === 0;
+                                            const isNegative = diff < 0;
+
+                                            return (
+                                                <td
+                                                    key={d}
+                                                    style={{
+                                                        padding: '4px',
+                                                        width: '34px',
+                                                        minWidth: '34px',
+                                                        maxWidth: '34px',
+                                                        height: '42px',
+                                                        verticalAlign: 'middle',
+                                                        borderBottom: '1px solid #e2e8f0',
+                                                        borderRight: '1px solid #e2e8f0',
+                                                        background: isNegative ? '#fee2e2' : (isPositive ? '#ecfdf5' : '#f8fafc'),
+                                                        color: isNegative ? '#dc2626' : (isPositive ? '#059669' : '#16a34a'),
+                                                        fontSize: '0.86rem',
+                                                        fontWeight: 900,
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                >
+                                                    {isPositive ? `+${diff}` : diff}
+                                                </td>
+                                            );
+                                        })}
+                                        <td style={{
+                                            padding: '4px 6px',
+                                            width: '90px',
+                                            minWidth: '90px',
+                                            maxWidth: '90px',
+                                            height: '42px',
+                                            verticalAlign: 'middle',
+                                            borderBottom: '1px solid #e2e8f0',
+                                            borderLeft: '2px solid #cbd5e1',
+                                            background: grandDailySummary.monthTotalDiff < 0 ? '#fee2e2' : '#ecfdf5',
+                                            color: grandDailySummary.monthTotalDiff < 0 ? '#dc2626' : '#059669',
+                                            fontWeight: 900,
+                                            fontSize: '0.9rem',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            {grandDailySummary.monthTotalDiff > 0 ? `+${grandDailySummary.monthTotalDiff}` : grandDailySummary.monthTotalDiff}
+                                        </td>
+                                    </tr>
+
+                                    {/* Row 3: How many shifts required in total, sum of all locations */}
+                                    <tr style={{ height: '42px', background: '#f8fafc', color: '#0f172a', fontWeight: 800 }}>
+                                        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
+                                            <td
+                                                key={d}
+                                                style={{
+                                                    padding: '4px',
+                                                    width: '34px',
+                                                    minWidth: '34px',
+                                                    maxWidth: '34px',
+                                                    height: '42px',
+                                                    verticalAlign: 'middle',
+                                                    borderRight: '1px solid #e2e8f0',
+                                                    background: '#f8fafc',
+                                                    color: '#0f172a',
+                                                    fontSize: '0.86rem',
+                                                    fontWeight: 800,
+                                                    boxSizing: 'border-box'
+                                                }}
+                                            >
+                                                {grandDailySummary.totalRequiredDaily}
+                                            </td>
+                                        ))}
+                                        <td style={{
+                                            padding: '4px 6px',
+                                            width: '90px',
+                                            minWidth: '90px',
+                                            maxWidth: '90px',
+                                            height: '42px',
+                                            verticalAlign: 'middle',
+                                            borderLeft: '2px solid #cbd5e1',
+                                            background: '#f1f5f9',
+                                            color: '#0f172a',
+                                            fontWeight: 900,
+                                            fontSize: '0.9rem',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            {grandDailySummary.monthTotalRequired}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             )}
 

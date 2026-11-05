@@ -396,7 +396,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
             });
             useToastStore.getState().success(`"${locName}" and its requirements deleted successfully!`);
             setRows(prevRows => prevRows.filter(r => r !== targetRow && (!r.id || r.id !== targetRow.id)));
-            await loadGrid();
+            loadGrid().catch(e => console.error('Background refresh failed', e));
         } catch (err: any) {
             useToastStore.getState().error(err?.response?.data?.error || err?.message || 'Failed to delete row.');
         }
@@ -453,7 +453,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
             const res = await syncCostingGrid(preparedRows as any);
             useToastStore.getState().success(res.message || `Successfully synced ${targetRows.length} location(s) into Operations & CRM!`);
             setDirtyRowKeys(new Set());
-            await loadGrid();
+            loadGrid().catch(e => console.error('Background refresh failed', e));
         } catch (err: any) {
             useToastStore.getState().error(err?.response?.data?.error || err?.message || 'Failed to sync costing grid.');
         } finally {
@@ -469,7 +469,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
         try {
             const res = await importCostingExcel(file);
             useToastStore.getState().success(res.message || `Imported ${res.imported_clients} clients successfully!`);
-            await loadGrid();
+            loadGrid().catch(e => console.error('Background refresh failed', e));
         } catch (err: any) {
             useToastStore.getState().error(err?.response?.data?.error || err?.message || 'Failed to import Excel file.');
         } finally {

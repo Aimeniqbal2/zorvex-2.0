@@ -248,6 +248,26 @@ export const SecurityCRMModule: React.FC = () => {
                 <button
                     style={{
                         padding: '8px 16px',
+                        background: activeTab === 'customers' ? 'var(--color-primary)' : 'var(--color-background)',
+                        border: `1px solid ${activeTab === 'customers' ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                        borderRadius: '20px',
+                        color: activeTab === 'customers' ? 'white' : 'var(--color-text-muted)',
+                        fontWeight: 600,
+                        fontSize: '13.5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: activeTab === 'customers' ? '0 4px 10px rgba(var(--color-primary-rgb), 0.25)' : 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                    }}
+                    onClick={() => setActiveTab('customers')}
+                >
+                    <i className='bx bx-user-pin'></i> Clients
+                </button>
+                <button
+                    style={{
+                        padding: '8px 16px',
                         background: 'var(--color-background)',
                         border: '1px solid var(--color-border)',
                         borderRadius: '20px',

@@ -47,6 +47,242 @@ let cachedSites: any[] | null = null;
 let cachedDesignations: any[] | null = null;
 let cachedEmployees: any[] | null = null;
 
+interface SearchableGuardSelectProps {
+    value: string;
+    employees: any[];
+    onChange: (employeeId: string) => void;
+    style?: React.CSSProperties;
+}
+
+const SearchableGuardSelect: React.FC<SearchableGuardSelectProps> = ({ value, employees, onChange, style }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const containerRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    const selectedEmp = useMemo(() => {
+        if (!value) return null;
+        return employees.find(e => String(e.id) === String(value));
+    }, [value, employees]);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            setTimeout(() => inputRef.current?.focus(), 50);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isOpen]);
+
+    const filtered = useMemo(() => {
+        if (!search.trim()) {
+            return employees.slice(0, 50);
+        }
+        const q = search.toLowerCase().trim();
+        const qNoZero = q.replace(/^0+/, '');
+        return employees.filter(emp => {
+            const code = (emp.display_code || emp.employee_code || '').toLowerCase();
+            const prevCode = (emp.previous_employee_code || '').toLowerCase();
+            const codeNoZero = code.replace(/^0+/, '');
+            const fullName = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
+            const desig = (emp.designation_name || '').toLowerCase();
+
+            return code.includes(q) ||
+                (qNoZero && codeNoZero.includes(qNoZero)) ||
+                prevCode.includes(q) ||
+                fullName.includes(q) ||
+                desig.includes(q);
+        }).slice(0, 60);
+    }, [employees, search]);
+
+    return (
+        <div ref={containerRef} style={{ position: 'relative', width: '100%', minWidth: '240px' }}>
+            <div
+                onClick={() => setIsOpen(prev => !prev)}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '6px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    border: '1px solid var(--color-border, #cbd5e1)',
+                    borderRadius: '4px',
+                    background: 'var(--color-surface, #ffffff)',
+                    cursor: 'pointer',
+                    minHeight: '30px',
+                    boxSizing: 'border-box'
+                }}
+            >
+                {selectedEmp ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                        <span style={{ 
+                            background: '#eff6ff', 
+                            color: '#1d4ed8', 
+                            padding: '1px 5px', 
+                            borderRadius: '3px', 
+                            fontWeight: 700, 
+                            fontSize: '11px',
+                            flexShrink: 0
+                        }}>
+                            {selectedEmp.display_code || selectedEmp.employee_code}
+                        </span>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text, #0f172a)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {selectedEmp.first_name} {selectedEmp.last_name || ''}
+                        </span>
+                        <span style={{ color: '#64748b', fontSize: '11px', flexShrink: 0 }}>
+                            ({selectedEmp.designation_name || 'Guard'})
+                        </span>
+                    </div>
+                ) : (
+                    <span style={{ color: '#94a3b8' }}>
+                        <i className="bx bx-search" style={{ marginRight: '4px' }}></i>Search guard by code or name...
+                    </span>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                    {selectedEmp && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onChange('');
+                            }}
+                            style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: '#94a3b8',
+                                cursor: 'pointer',
+                                padding: '0 2px',
+                                fontSize: '13px'
+                            }}
+                            title="Clear selection"
+                        >
+                            ✕
+                        </button>
+                    )}
+                    <i className={`bx bx-chevron-${isOpen ? 'up' : 'down'}`} style={{ color: '#64748b', fontSize: '14px' }} />
+                </div>
+            </div>
+
+            {isOpen && (
+                <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    left: 0,
+                    width: '380px',
+                    maxWidth: '90vw',
+                    background: 'var(--color-surface, #ffffff)',
+                    border: '1px solid var(--color-border, #cbd5e1)',
+                    borderRadius: '6px',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25)',
+                    zIndex: 1000,
+                    padding: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                }}>
+                    <div style={{ position: 'relative' }}>
+                        <i className="bx bx-search" style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '14px' }} />
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            className="input-base"
+                            placeholder="Type code (e.g. 042123) or name..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            onKeyDown={e => {
+                                if (e.key === 'Escape') {
+                                    setIsOpen(false);
+                                }
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '5px 8px 5px 28px',
+                                fontSize: '12px',
+                                boxSizing: 'border-box'
+                            }}
+                        />
+                    </div>
+
+                    <div style={{ maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {filtered.length === 0 ? (
+                            <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                                No guards found matching "{search}"
+                            </div>
+                        ) : (
+                            filtered.map(emp => {
+                                const isSelected = String(emp.id) === String(value);
+                                return (
+                                    <div
+                                        key={emp.id}
+                                        onClick={() => {
+                                            onChange(String(emp.id));
+                                            setIsOpen(false);
+                                            setSearch('');
+                                        }}
+                                        style={{
+                                            padding: '6px 8px',
+                                            borderRadius: '4px',
+                                            cursor: 'pointer',
+                                            background: isSelected ? 'var(--color-primary-subtle, #eff6ff)' : 'transparent',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            gap: '8px',
+                                            fontSize: '12px',
+                                            transition: 'background-color 0.1s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!isSelected) (e.currentTarget as HTMLDivElement).style.backgroundColor = '#f1f5f9';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (!isSelected) (e.currentTarget as HTMLDivElement).style.backgroundColor = 'transparent';
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                            <span style={{
+                                                background: '#e0f2fe',
+                                                color: '#0369a1',
+                                                padding: '1px 5px',
+                                                borderRadius: '3px',
+                                                fontWeight: 700,
+                                                fontSize: '11px',
+                                                flexShrink: 0
+                                            }}>
+                                                {emp.display_code || emp.employee_code}
+                                            </span>
+                                            <span style={{ fontWeight: 600, color: 'var(--color-text, #0f172a)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {emp.first_name} {emp.last_name || ''}
+                                            </span>
+                                        </div>
+                                        <span style={{
+                                            fontSize: '11px',
+                                            color: '#64748b',
+                                            background: '#f8fafc',
+                                            border: '1px solid #e2e8f0',
+                                            padding: '1px 6px',
+                                            borderRadius: '3px',
+                                            flexShrink: 0
+                                        }}>
+                                            {emp.designation_name || 'Guard'}
+                                        </span>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({ 
     isOpen, 
     onClose, 
@@ -178,7 +414,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             return;
         }
 
-        apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=500')
+        apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=2000')
             .then(res => {
                 const emps = res.data.results || res.data || [];
                 cachedEmployees = emps;
@@ -363,9 +599,14 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
         setIsCreatingClient(true);
         try {
             const res = await apiClient.post('/api/crm/entities/', {
+                entity_type: 'CUSTOMER',
                 name: newClientName.trim(),
-                is_active: true,
-                status: 'ACTIVE',
+                display_name: newClientName.trim(),
+                preferred_currency: 'PKR',
+                preferred_language: 'en',
+                active: true,
+                status: 'active',
+
                 notes: 'Created via Temporary Security Service request'
             });
             const created = res.data;
@@ -375,7 +616,10 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             setNewClientName('');
             useToastStore.getState().success(`Client "${created.name}" created successfully!`);
         } catch (err: any) {
-            useToastStore.getState().error(`Failed to create client: ${err.response?.data?.detail || err.message}`);
+            const errDetail = err.response?.data?.detail 
+                || (typeof err.response?.data === 'object' ? Object.entries(err.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ') : null)
+                || err.message;
+            useToastStore.getState().error(`Failed to create client: ${errDetail}`);
         } finally {
             setIsCreatingClient(false);
         }
@@ -511,7 +755,37 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
         e.preventDefault();
         setIsSubmitting(true);
 
-        if (!crmEntity) {
+        let effectiveClient = crmEntity || (preselectedCrmEntityId ? String(preselectedCrmEntityId) : '');
+        if (!effectiveClient && isNewClientMode && newClientName.trim()) {
+            try {
+                const res = await apiClient.post('/api/crm/entities/', {
+                    entity_type: 'CUSTOMER',
+                    name: newClientName.trim(),
+                    display_name: newClientName.trim(),
+                    status: 'active',
+                    active: true,
+                    preferred_currency: 'PKR',
+                    preferred_language: 'en',
+                    notes: 'Created via Temporary Security Service request'
+                });
+                const created = res.data;
+                setEntities(prev => [created, ...prev]);
+                setCrmEntity(String(created.id));
+                effectiveClient = String(created.id);
+                setIsNewClientMode(false);
+                setNewClientName('');
+            } catch (err: any) {
+                const errDetail = err.response?.data?.detail 
+                    || (typeof err.response?.data === 'object' ? Object.entries(err.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ') : null)
+                    || err.message;
+                useToastStore.getState().error(`Failed to create client: ${errDetail}`);
+                setActiveTab('event');
+                setIsSubmitting(false);
+                return;
+            }
+        }
+
+        if (!effectiveClient) {
             useToastStore.getState().error('Please select or create a client/entity.');
             setActiveTab('event');
             setIsSubmitting(false);
@@ -532,7 +806,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             return;
         }
 
-        const effectiveClient = crmEntity || (preselectedCrmEntityId ? String(preselectedCrmEntityId) : '');
+
         const matchedOpSite = sites.find(s => String(s.id) === String(operationalSite));
         const effectiveSiteName = siteName.trim() || (matchedOpSite ? matchedOpSite.name : (preselectedSiteName || undefined));
 
@@ -1195,14 +1469,34 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                                                     <select
                                                         className="input-base"
                                                         style={{ padding: '4px 8px', fontSize: '12px' }}
-                                                        value={asgn.employee_id || ''}
-                                                        onChange={e => updateGuardAssignment(idx, 'employee_id', e.target.value)}
+                                                        style={{ display: 'none' }}
+
+
+                                                    />
+                                                    {false && (
+                                                        <select
+                                                            style={{ display: 'none' }}
+                                                        onChange={() => {}}
                                                     >
-                                                        <option value="">Select Employee...</option>
-                                                        {employees.map(emp => (
-                                                            <option key={emp.id} value={emp.id}>
-                                                                {emp.display_code || emp.employee_code} - {emp.first_name} {emp.last_name || ''} ({emp.designation_name || 'Guard'})
-                                                            </option>
+                                                    </select>
+                                                    )}
+                                                    <SearchableGuardSelect
+                                                        style={{ display: 'none' }}
+                                                        value={asgn.employee_id || ''}
+                                                        employees={employees}
+                                                        onChange={val => updateGuardAssignment(idx, 'employee_id', val)}
+                                                    />
+                                                    {false && (
+                                                        <select
+                                                    >
+                                                    </select>
+                                                    )}
+
+
+                                                        <select style={{ display: 'none' }}><option>{false && (
+                                                            null
+                                                                null
+                                                            )} </option> {false && ((
                                                         ))}
                                                     </select>
                                                 </td>

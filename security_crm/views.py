@@ -1948,6 +1948,22 @@ class CostingGridBatchSyncView(APIView):
         ]
 
         proposals_to_sync = set()
+
+        # Ultra-fast in-memory cache for SecurityServiceTypes
+        existing_types = list(SecurityServiceType.objects.filter(company=company))
+        st_by_code = {st.code.upper(): st for st in existing_types if st.code}
+        st_by_name = {st.name.strip().lower(): st for st in existing_types if st.name}
+        for _, r_name, r_code, _ in role_definitions:
+            st = st_by_code.get(r_code.upper()) or st_by_name.get(r_name.strip().lower())
+            if not st:
+                st = SecurityServiceType.objects.create(
+                    company=company,
+                    name=r_name,
+                    code=r_code,
+                    is_active=True
+                )
+                st_by_code[r_code.upper()] = st
+                st_by_name[r_name.strip().lower()] = st
         try:
             with transaction.atomic():
                 for row in rows:
@@ -2196,16 +2212,7 @@ class CostingGridBatchSyncView(APIView):
                         rate = Decimal(str(raw_rate or 0))
                         sal = Decimal(str(raw_sal or 0))
 
-                        st = SecurityServiceType.objects.filter(company=company, code=role_code).first()
-                        if not st:
-                            st = SecurityServiceType.objects.filter(company=company, name__iexact=role_name).first()
-                        if not st:
-                            st = SecurityServiceType.objects.create(
-                                company=company,
-                                name=role_name,
-                                code=role_code,
-                                is_active=True
-                            )
+                        st = st_by_code.get(role_code.upper()) or st_by_name.get(role_name.strip().lower())
 
                         # Match existing line by canonical role category
                         matched_lines = []
