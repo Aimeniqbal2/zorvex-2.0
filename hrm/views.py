@@ -1088,6 +1088,7 @@ from .serializers import (
 class WorkforceAttendanceViewSet(TenantModelViewSet):
     queryset = WorkforceAttendance.objects.select_related('employee', 'employment').all()
     serializer_class = WorkforceAttendanceSerializer
+    permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=['get'], url_path='register')
     def register(self, request):
@@ -1108,8 +1109,21 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
             site_id=request.query_params.get('site_id'),
             shift_id=request.query_params.get('shift_id'),
             client_id=request.query_params.get('client_id'),
-            status_filter=request.query_params.get('status')
+            status_filter=request.query_params.get('status'),
+            search=request.query_params.get('search'),
+            marked_only=request.query_params.get('marked_only', False),
         )
+        data['exported_by'] = (
+            (request.user.get_full_name() if hasattr(request.user, 'get_full_name') else '')
+            or getattr(request.user, 'username', '')
+            or getattr(request.user, 'email', '')
+            or 'OPERATION'
+        )
+        try:
+            from erp_core.models import Company
+            data['company_name'] = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
+        except Exception:
+            data['company_name'] = ''
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='export-register')
@@ -1131,12 +1145,43 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
             site_id=request.query_params.get('site_id'),
             shift_id=request.query_params.get('shift_id'),
             client_id=request.query_params.get('client_id'),
-            status_filter=request.query_params.get('status')
+            status_filter=request.query_params.get('status'),
+            search=request.query_params.get('search'),
+            marked_only=request.query_params.get('marked_only', False),
         )
-        csv_content = AttendanceRegisterService.export_attendance_register_csv(data)
         from django.http import HttpResponse
-        response = HttpResponse(csv_content, content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="attendance_register.csv"'
+        export_format = (request.query_params.get('export_format') or 'csv').strip().lower()
+        year_val = data.get('year', '')
+        month_val = str(data.get('month', '')).zfill(2)
+
+        if export_format in ('xlsx', 'excel'):
+            company_name = ''
+            try:
+                from erp_core.models import Company
+                company_name = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
+            except Exception:
+                pass
+            exported_by = (
+                (request.user.get_full_name() if hasattr(request.user, 'get_full_name') else '')
+                or getattr(request.user, 'username', '')
+                or getattr(request.user, 'email', '')
+                or 'OPERATION'
+            )
+            xlsx_bytes = AttendanceRegisterService.export_attendance_register_xlsx(
+                data,
+                company_name=company_name,
+                exported_by=exported_by,
+            )
+            response = HttpResponse(
+                xlsx_bytes,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            )
+            response['Content-Disposition'] = f'attachment; filename="attendance_register_{year_val}_{month_val}.xlsx"'
+            return response
+
+        csv_content = AttendanceRegisterService.export_attendance_register_csv(data)
+        response = HttpResponse(csv_content, content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="attendance_register_{year_val}_{month_val}.csv"'
         return response
 
 class ShiftViewSet(TenantModelViewSet):

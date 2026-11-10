@@ -150,19 +150,19 @@ class ProcurementDocumentSerializer(serializers.ModelSerializer):
         ]
 
     def get_paid_amount(self, obj):
-        if obj.document_type == 'VENDOR_INVOICE':
+        if obj.document_type in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
             from .services.payment_service import get_invoice_payment_summary
             return get_invoice_payment_summary(obj)['paid_amount']
         return Decimal('0.00')
 
     def get_outstanding_amount(self, obj):
-        if obj.document_type == 'VENDOR_INVOICE':
+        if obj.document_type in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
             from .services.payment_service import get_invoice_payment_summary
             return get_invoice_payment_summary(obj)['outstanding_amount']
         return obj.total_amount or Decimal('0.00')
 
     def get_is_overdue(self, obj):
-        if obj.document_type == 'VENDOR_INVOICE':
+        if obj.document_type in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
             from .services.payment_service import get_invoice_payment_summary
             return get_invoice_payment_summary(obj)['is_overdue']
         return False

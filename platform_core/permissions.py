@@ -86,11 +86,13 @@ class ModulePermission(BasePermission):
         if getattr(request.user, 'access_mode', 'FULL_COMPANY') == 'CUSTOM':
             codes = [module_code]
             if module_code == 'billing':
-                codes.extend(['finance', 'security_ops', 'operations'])
+                codes.extend(['finance', 'security_finance', 'security_ops', 'operations'])
             elif module_code == 'payroll':
-                codes.extend(['hr', 'finance'])
-            elif module_code == 'security_finance':
-                codes.extend(['finance', 'security_ops', 'operations'])
+                codes.extend(['hr', 'finance', 'security_finance', 'security_ops', 'operations'])
+            elif module_code in ('finance', 'security_finance'):
+                codes.extend(['finance', 'security_finance', 'billing', 'security_ops', 'operations'])
+            elif module_code == 'purchasing':
+                codes.extend(['finance', 'security_finance', 'inventory', 'security_ops', 'operations'])
             elif module_code in ('security_ops', 'operations'):
                 codes.extend(['security_ops', 'operations', 'guards_staff'])
             elif module_code == 'hr' and request.method in SAFE_METHODS:

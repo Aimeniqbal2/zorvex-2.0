@@ -4,11 +4,12 @@
  */
 import axios from 'axios';
 import { getApiBaseUrl } from '../../../api/client';
+import { TokenManager } from '../../../auth/tokenManager';
 
 const API_BASE = getApiBaseUrl() + '/api/finance';
 
 function getAuthHeaders() {
-  const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+  const token = TokenManager.getAccessToken() || localStorage.getItem('token') || localStorage.getItem('access_token');
   const companyId = localStorage.getItem('current_company_id');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -682,7 +683,123 @@ export interface GenerateFromCRMPayload {
   payment_terms?: string;
   tax_rate?: number;
   group_by?: 'PER_LOCATION' | 'CONSOLIDATED';
+  initial_status?: 'DRAFT' | 'ISSUED';
   services: CRMInvoiceServiceItem[];
+}
+
+export interface CRMBillingPreviewSite {
+  client_id: string;
+  client_name: string;
+  site_id: string;
+  site_name: string;
+  contract_id?: string | null;
+  contract_code?: string;
+  contract_heads: number;
+  contract_monthly_rate: number;
+  fulfilled_shifts: number;
+  guard_daily_bill_rate: number;
+  attendance_monthly_amount: number;
+  tax_rate: number;
+  payment_terms: string;
+  line_breakdown: Array<{
+    service_type: string;
+    quantity: number;
+    client_rate: number;
+    daily_client_rate: number;
+    monthly_subtotal: number;
+  }>;
+  existing_invoice_id?: string | null;
+  existing_invoice_number?: string | null;
+  existing_invoice_status?: ClientInvoiceStatus | null;
+}
+
+export interface CRMBillingPreviewTempService {
+  temporary_service_id: string;
+  client_id: string;
+  client_name: string;
+  title: string;
+  reference_number: string;
+  venue: string;
+  site_id?: string | null;
+  date_str: string;
+  status: string;
+  billing_type: string;
+  subtotal: number;
+  tax_amount: number;
+  amount: number;
+  existing_invoice_id?: string | null;
+  existing_invoice_number?: string | null;
+  existing_invoice_status?: ClientInvoiceStatus | null;
+}
+
+export interface CRMBillingPreviewResponse {
+  billing_month: string;
+  current_month: string;
+  previous_month: string;
+  available_months: string[];
+  days_in_month: number;
+  clients: Array<{ id: string; name: string; email?: string; phone?: string }>;
+  permanent_services: CRMBillingPreviewSite[];
+  temporary_services: CRMBillingPreviewTempService[];
+  summary: {
+    total_clients: number;
+    total_locations: number;
+    total_temp_services: number;
+    unbilled_locations_count: number;
+    unbilled_temp_count: number;
+    total_crm_contract_value: number;
+    total_attendance_value: number;
+    total_temp_value: number;
+  };
+}
+
+export async function fetchCRMBillingPreview(month?: string): Promise<CRMBillingPreviewResponse> {
+  const resp = await axios.get(`${BILLING_API_BASE}/client-invoices/crm-billing-preview/`, {
+    ...getAuthHeaders(),
+    params: month ? { month } : undefined
+  });
+  return resp.data;
+}
+
+export async function autoSyncCRMInvoices(data?: {
+  billing_month?: string;
+  months?: string[];
+  calculation_mode?: 'CONTRACT_RATE' | 'ATTENDANCE_RATE';
+  initial_status?: 'DRAFT' | 'ISSUED';
+}): Promise<{
+  success: boolean;
+  created_count: number;
+  skipped_count: number;
+  months_synced: string[];
+  invoices: ClientInvoice[];
+}> {
+  const resp = await axios.post(`${BILLING_API_BASE}/client-invoices/auto-sync-month/`, data || {}, getAuthHeaders());
+  return resp.data;
+}
+
+export async function switchInvoiceCalculationMode(
+  invoiceId: string,
+  data: {
+    calculation_mode: 'CONTRACT_RATE' | 'ATTENDANCE_RATE';
+    fulfilled_shifts?: number;
+    guard_daily_bill_rate?: number;
+    tax_rate?: number;
+  }
+): Promise<ClientInvoice> {
+  const resp = await axios.post(`${BILLING_API_BASE}/client-invoices/${invoiceId}/switch-calculation-mode/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function approveAllDraftInvoices(data?: {
+  billing_month?: string;
+  invoice_ids?: string[];
+}): Promise<{
+  success: boolean;
+  issued_count: number;
+  invoices: ClientInvoice[];
+}> {
+  const resp = await axios.post(`${BILLING_API_BASE}/client-invoices/approve-all-drafts/`, data || {}, getAuthHeaders());
+  return resp.data;
 }
 
 export async function generateClientInvoiceFromCRM(data: GenerateFromCRMPayload): Promise<{
@@ -755,7 +872,15 @@ export async function fetchRecoveryActivities(params?: Record<string, any>): Pro
 export async function fetchVendorBills(params?: Record<string, any>): Promise<any[]> {
   const resp = await axios.get(`${getApiBaseUrl()}/api/purchasing/documents/`, {
     ...getAuthHeaders(),
-    params: { document_type: 'VENDOR_BILL', ...params }
+    params: { document_type: 'VENDOR_INVOICE', ...params }
+  });
+  return resp.data.results || resp.data;
+}
+
+export async function fetchPurchaseOrders(params?: Record<string, any>): Promise<any[]> {
+  const resp = await axios.get(`${getApiBaseUrl()}/api/purchasing/documents/`, {
+    ...getAuthHeaders(),
+    params: { document_type: 'PURCHASE_ORDER', ...params }
   });
   return resp.data.results || resp.data;
 }
@@ -774,12 +899,13 @@ export async function createVendorPayment(data: {
   amount: number | string;
   payment_method?: string;
   bank_cash_account?: string;
+  bank_account_id?: string;
   account?: string;
   reference_number?: string;
   cheque_number?: string;
   cheque_date?: string;
   notes?: string;
-  allocations?: Array<{ invoice: string; amount: number | string }>;
+  allocations?: Array<{ invoice?: string; invoice_id?: string; amount: number | string }>;
   auto_post?: boolean;
 }): Promise<any> {
   const resp = await axios.post(`${getApiBaseUrl()}/api/purchasing/payments/`, data, getAuthHeaders());
@@ -2977,6 +3103,108 @@ export async function fetchAccountingHealth(): Promise<any> {
 
 export async function fetchFinanceActionCenter(): Promise<FinanceActionItem[]> {
   const resp = await axios.get(`${EXEC_BASE}/action-center/`, getAuthHeaders());
+  return resp.data;
+}
+
+// ==========================================
+// Live Operations Attendance -> Payroll & Guard Salaries APIs
+// ==========================================
+export interface LiveAttendanceEmployeeSalaryRow {
+  employee_id: string;
+  employee_code: string;
+  employee_name: string;
+  designation_name: string;
+  department_name: string;
+  sites: string[];
+  present_days: number;
+  ot_shifts: number;
+  duty_earnings: number;
+  overtime_pay: number;
+  allowances: number;
+  gross_earnings: number;
+  deductions: number;
+  advance_recovery: number;
+  outstanding_advance: number;
+  net_salary: number;
+  is_finalized: boolean;
+  payment_status: 'UNPAID' | 'IN_BATCH' | 'PAID' | 'FAILED' | 'REVERSED';
+  snapshot_id?: string | null;
+  integration_id?: string | null;
+  calculation_id?: string | null;
+  batch_number?: string;
+  payment_reference?: string;
+  paid_at?: string | null;
+  has_blockers: boolean;
+  blocking_reasons: string[];
+  payment_destination?: {
+    method: string;
+    bank_name?: string;
+    account_number?: string;
+    wallet_provider?: string;
+  } | null;
+}
+
+export interface LiveAttendanceSalariesResponse {
+  month: string;
+  current_month: string;
+  previous_month: string;
+  available_months: string[];
+  period_start: string;
+  period_end: string;
+  is_finalized: boolean;
+  integration_id?: string | null;
+  integration_status: string;
+  summary: {
+    employee_count: number;
+    total_gross: number;
+    total_deductions: number;
+    total_net_payable: number;
+    total_paid: number;
+    remaining_payable: number;
+    paid_count: number;
+    unpaid_count: number;
+  };
+  employees: LiveAttendanceEmployeeSalaryRow[];
+}
+
+export async function fetchLiveAttendanceSalaries(month?: string): Promise<LiveAttendanceSalariesResponse> {
+  const resp = await axios.get(`${API_BASE}/payroll-integrations/live-attendance-salaries/`, {
+    ...getAuthHeaders(),
+    params: month ? { month } : undefined
+  });
+  return resp.data;
+}
+
+export async function finalizeAndSyncPayrollMonth(data: {
+  month: string;
+  employee_ids?: string[];
+}): Promise<{
+  success: boolean;
+  finalized_count: number;
+  payroll_run_id?: string;
+  skipped?: string[];
+  message: string;
+}> {
+  const resp = await axios.post(`${API_BASE}/payroll-integrations/finalize-and-sync-month/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function payGuardSalaries(data: {
+  month: string;
+  employee_ids?: string[];
+  treasury_account_id?: string;
+  payment_date?: string;
+  payment_reference?: string;
+  payment_provider?: string;
+  notes?: string;
+}): Promise<{
+  success: boolean;
+  paid_count: number;
+  total_disbursed: number;
+  batch_numbers: string[];
+  message: string;
+}> {
+  const resp = await axios.post(`${API_BASE}/payroll-integrations/pay-guard-salaries/`, data, getAuthHeaders());
   return resp.data;
 }
 

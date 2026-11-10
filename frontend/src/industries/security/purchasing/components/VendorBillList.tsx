@@ -4,7 +4,6 @@ import {
     type VendorInvoice
 } from '../api';
 import { VendorInvoiceDetailModal } from './VendorInvoiceDetailModal';
-import { VendorPaymentModal } from './VendorPaymentModal';
 
 export const VendorBillList: React.FC = () => {
     const [invoices, setInvoices] = useState<VendorInvoice[]>([]);
@@ -13,7 +12,6 @@ export const VendorBillList: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<string>('ALL');
     const [matchFilter, setMatchFilter] = useState<string>('ALL');
     const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
-    const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<VendorInvoice | null>(null);
 
     useEffect(() => {
         fetchInvoices();
@@ -305,27 +303,23 @@ export const VendorBillList: React.FC = () => {
                                                     Inspect
                                                 </button>
                                                 {inv.status === 'POSTED' && outstandingAmt > 0 && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setSelectedInvoiceForPayment(inv);
-                                                        }}
+                                                    <span
+                                                        title="All vendor disbursements are processed exclusively inside Finance → Vendor & PO Payments"
                                                         style={{
                                                             padding: '4px 10px',
                                                             borderRadius: '4px',
-                                                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                                            border: '1px solid rgba(16, 185, 129, 0.3)',
-                                                            color: '#34d399',
-                                                            fontSize: '0.8rem',
+                                                            backgroundColor: 'rgba(148, 163, 184, 0.12)',
+                                                            border: '1px solid rgba(148, 163, 184, 0.25)',
+                                                            color: '#94a3b8',
+                                                            fontSize: '0.75rem',
                                                             fontWeight: 600,
-                                                            cursor: 'pointer',
-                                                            display: 'flex',
+                                                            display: 'inline-flex',
                                                             alignItems: 'center',
                                                             gap: '4px'
                                                         }}
                                                     >
-                                                        <i className='bx bx-credit-card'></i> Pay
-                                                    </button>
+                                                        Pay via Finance
+                                                    </span>
                                                 )}
                                             </div>
                                         </td>
@@ -344,17 +338,6 @@ export const VendorBillList: React.FC = () => {
                     onClose={() => setSelectedInvoiceId(null)}
                     invoiceId={selectedInvoiceId}
                     onInvoiceUpdated={fetchInvoices}
-                />
-            )}
-
-            {/* Record Payment Modal */}
-            {selectedInvoiceForPayment && (
-                <VendorPaymentModal
-                    isOpen={Boolean(selectedInvoiceForPayment)}
-                    onClose={() => setSelectedInvoiceForPayment(null)}
-                    onPaymentCreated={fetchInvoices}
-                    defaultVendorId={selectedInvoiceForPayment.vendor || undefined}
-                    defaultInvoiceId={selectedInvoiceForPayment.id}
                 />
             )}
         </div>

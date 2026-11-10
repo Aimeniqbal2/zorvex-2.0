@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
-  fetchCRMEntities,
-  fetchOperationalSites,
-  fetchServiceContracts,
+  fetchCRMBillingPreview,
   generateClientInvoiceFromCRM
 } from '../api';
-import type { CRMInvoiceServiceItem } from '../api';
-import { getMonthlyMusterGrid, getTemporaryServices } from '../../../../modules/security-operations/api';
+import type { CRMInvoiceServiceItem, CRMBillingPreviewResponse } from '../api';
 
 interface CRMInvoicingModalProps {
   isOpen: boolean;
@@ -24,6 +21,8 @@ interface SiteServiceConfig {
   contractMonthlyRate: number;
   fulfilledShifts: number;
   guardDailyBillRate: number;
+  existingInvoiceNumber?: string | null;
+  existingInvoiceStatus?: string | null;
   loadingAttendance: boolean;
 }
 
@@ -34,6 +33,7 @@ interface TempServiceConfig {
   dateStr: string;
   amount: number;
   included: boolean;
+  existingInvoiceNumber?: string | null;
 }
 
 export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
@@ -41,20 +41,21 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  // Setup Form State
   const now = new Date();
   const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const todayStr = now.toISOString().split('T')[0];
   const defaultDueDate = new Date(now.getTime() + 15 * 86400000).toISOString().split('T')[0];
 
+  const [previewData, setPreviewData] = useState<CRMBillingPreviewResponse | null>(null);
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [billingMonth, setBillingMonth] = useState<string>(currentMonthStr);
+  const [billingMonth, setBillingMonth] = useState<string>('');
   const [invoiceDate, setInvoiceDate] = useState<string>(todayStr);
   const [dueDate, setDueDate] = useState<string>(defaultDueDate);
-  const [paymentTerms, setPaymentTerms] = useState<string>('NET_15');
+  const [paymentTerms, setPaymentTerms] = useState<string>('NET_30');
   const [taxRate, setTaxRate] = useState<number>(0);
   const [groupBy, setGroupBy] = useState<'PER_LOCATION' | 'CONSOLIDATED'>('PER_LOCATION');
+  const [initialStatus, setInitialStatus] = useState<'DRAFT' | 'ISSUED'>('DRAFT');
 
   // Loaded Services State
   const [siteConfigs, setSiteConfigs] = useState<SiteServiceConfig[]>([]);
@@ -63,169 +64,87 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Load clients on mount
+  // Fetch full CRM + Operations preview whenever modal opens or billingMonth changes
   useEffect(() => {
     if (!isOpen) return;
-    const loadClients = async () => {
-      try {
-        const data = await fetchCRMEntities();
-        // Filter or use entities that are clients
-        const clientList = Array.isArray(data) ? data : ((data as any)?.results || []);
-        setClients(clientList);
-        if (clientList.length > 0 && !selectedClientId) {
-          setSelectedClientId(clientList[0].id);
-        }
-      } catch (err: any) {
-        console.error('Failed to load CRM clients:', err);
-      }
-    };
-    loadClients();
-  }, [isOpen]);
-
-  // When Client or Billing Month changes, load sites and temporary services
-  useEffect(() => {
-    if (!isOpen || !selectedClientId) return;
-
     let isMounted = true;
-    const loadClientSitesAndAttendance = async () => {
+    const loadPreview = async () => {
       setLoadingServices(true);
       setErrorMessage(null);
       try {
-        const [yearStr, monthStr] = billingMonth.split('-');
-        const year = parseInt(yearStr, 10);
-        const month = parseInt(monthStr, 10);
-
-        // Fetch sites and contracts
-        const [allSitesRes, contractsRes, tempRes] = await Promise.all([
-          fetchOperationalSites().catch(() => []),
-          fetchServiceContracts().catch(() => []),
-          getTemporaryServices({ crm_entity: selectedClientId }).catch(() => ({ results: [] }))
-        ]);
-
+        const res = await fetchCRMBillingPreview(billingMonth || 'AUTO');
         if (!isMounted) return;
-
-        const allSites = Array.isArray(allSitesRes) ? allSitesRes : ((allSitesRes as any)?.results || []);
-        const allContracts = Array.isArray(contractsRes) ? contractsRes : ((contractsRes as any)?.results || []);
-        const allTemp = Array.isArray(tempRes) ? tempRes : ((tempRes as any)?.results || []);
-
-        // Filter permanent sites for this client
-        const clientSites = allSites.filter((s: any) =>
-          String(s.crm_entity) === String(selectedClientId) ||
-          String(s.client) === String(selectedClientId) ||
-          String(s.client_id) === String(selectedClientId) ||
-          String(s.customer) === String(selectedClientId)
-        );
-
-        // Match with contracts to get rates
-        const configs: SiteServiceConfig[] = clientSites.map((site: any) => {
-          const contract = allContracts.find((c: any) =>
-            (String(c.crm_entity) === String(selectedClientId) || String(c.client) === String(selectedClientId)) &&
-            (c.site === site.id || (Array.isArray(c.sites) && c.sites.includes(site.id)))
-          );
-
-          const monthlyRate = Number(site.contract_amount || site.monthly_billing_rate || (contract ? contract.monthly_rate || contract.total_amount : 0)) || 0;
-          const defaultDailyBill = monthlyRate > 0 ? Math.round(monthlyRate / 30) : 1200;
-
-          return {
-            siteId: site.id,
-            siteName: site.name || 'Unnamed Location',
-            contractId: contract?.id,
-            contractCode: contract?.contract_code || contract?.contract_number || contract?.code || 'CONTRACT',
-            included: true,
-            calcMode: 'CONTRACT_RATE',
-            contractMonthlyRate: monthlyRate,
-            fulfilledShifts: 0,
-            guardDailyBillRate: defaultDailyBill,
-            loadingAttendance: true
-          };
-        });
-
-        setSiteConfigs(configs);
-
-        // Map Temporary Services for this client in the month
-        const matchedTemp: TempServiceConfig[] = allTemp
-          .filter((t: any) => {
-            const clientMatch =
-              String(t.crm_entity || t.client || '') === String(selectedClientId);
-            const rawDate = t.start_datetime || t.start_date;
-            const dateMatch = !rawDate || String(rawDate).startsWith(billingMonth);
-            return clientMatch && dateMatch;
-          })
-          .map((t: any) => {
-            const rawDate = t.start_datetime || t.start_date;
-            return {
-              id: t.id,
-              title: t.title || t.service_name || 'Event Security Service',
-              venue: t.site_name || t.operational_site_name || t.venue_name || t.address || 'Event Venue',
-              dateStr: rawDate ? String(rawDate).split('T')[0] : 'N/A',
-              amount: Number(t.grand_total || t.total_amount || t.commercial_value || 0),
-              included: true
-            };
-          });
-
-        setTempConfigs(matchedTemp);
-        setLoadingServices(false);
-
-        // Fetch muster shifts asynchronously for each site
-        configs.forEach(async (cfg, idx) => {
-          try {
-            const muster = await getMonthlyMusterGrid(year, month, cfg.siteId);
-            let totalFulfilled = 0;
-            if (muster && Array.isArray(muster.sites)) {
-              const matchedSite = muster.sites.find((s: any) => s.site_id === cfg.siteId);
-              if (matchedSite && matchedSite.duty_matrix) {
-                matchedSite.duty_matrix.forEach((g: any) => {
-                  if (g.days) {
-                    Object.values(g.days).forEach((statusVal: any) => {
-                      const code = String(statusVal).toUpperCase();
-                      if (code === 'P' || code === 'O' || code === 'WP') totalFulfilled += 1;
-                      else if (code === 'PO' || code === 'POD') totalFulfilled += 2;
-                    });
-                  }
-                });
-              }
-            } else if (muster && typeof muster.total_shifts_fulfilled === 'number') {
-              totalFulfilled = muster.total_shifts_fulfilled;
-            }
-
-            if (isMounted) {
-              setSiteConfigs((prev) => {
-                const copy = [...prev];
-                if (copy[idx]) {
-                  copy[idx] = {
-                    ...copy[idx],
-                    fulfilledShifts: totalFulfilled,
-                    loadingAttendance: false
-                  };
-                }
-                return copy;
-              });
-            }
-          } catch {
-            if (isMounted) {
-              setSiteConfigs((prev) => {
-                const copy = [...prev];
-                if (copy[idx]) {
-                  copy[idx] = { ...copy[idx], loadingAttendance: false };
-                }
-                return copy;
-              });
-            }
+        setPreviewData(res);
+        setClients(res.clients || []);
+        if (!billingMonth && res.billing_month) {
+          setBillingMonth(res.billing_month);
+        }
+        if (res.clients && res.clients.length > 0) {
+          const validSelected = res.clients.some((c) => c.id === selectedClientId);
+          if (!selectedClientId || !validSelected) {
+            setSelectedClientId(res.clients[0].id);
           }
-        });
+        }
       } catch (err: any) {
         if (isMounted) {
-          setErrorMessage(err.message || 'Failed to load client sites');
-          setLoadingServices(false);
+          setErrorMessage(err?.response?.data?.error || err.message || 'Failed to load CRM & Operations billing data.');
         }
+      } finally {
+        if (isMounted) setLoadingServices(false);
       }
     };
-
-    loadClientSitesAndAttendance();
+    loadPreview();
     return () => {
       isMounted = false;
     };
-  }, [isOpen, selectedClientId, billingMonth]);
+  }, [isOpen, billingMonth]);
+
+  // Filter sites & temporary services from preview when selectedClientId or previewData changes
+  useEffect(() => {
+    if (!previewData || !selectedClientId) {
+      setSiteConfigs([]);
+      setTempConfigs([]);
+      return;
+    }
+
+    const clientPermSites = (previewData.permanent_services || []).filter(
+      (s) => String(s.client_id) === String(selectedClientId)
+    );
+
+    const configs: SiteServiceConfig[] = clientPermSites.map((s) => ({
+      siteId: s.site_id,
+      siteName: s.site_name,
+      contractId: s.contract_id || undefined,
+      contractCode: s.contract_code || 'CRM-CONTRACT',
+      included: !s.existing_invoice_id,
+      calcMode: 'CONTRACT_RATE',
+      contractMonthlyRate: Number(s.contract_monthly_rate || 0),
+      fulfilledShifts: Number(s.fulfilled_shifts || 0),
+      guardDailyBillRate: Number(s.guard_daily_bill_rate || 0),
+      existingInvoiceNumber: s.existing_invoice_number,
+      existingInvoiceStatus: s.existing_invoice_status,
+      loadingAttendance: false
+    }));
+    setSiteConfigs(configs);
+
+    if (clientPermSites.length > 0) {
+      if (clientPermSites[0].tax_rate > 0) setTaxRate(clientPermSites[0].tax_rate);
+      if (clientPermSites[0].payment_terms) setPaymentTerms(clientPermSites[0].payment_terms);
+    }
+
+    const clientTemp = (previewData.temporary_services || [])
+      .filter((t) => String(t.client_id) === String(selectedClientId))
+      .map((t) => ({
+        id: t.temporary_service_id,
+        title: t.title,
+        venue: t.venue,
+        dateStr: t.date_str,
+        amount: Number(t.amount || 0),
+        included: !t.existing_invoice_id && ['APPROVED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'].includes(t.status),
+        existingInvoiceNumber: t.existing_invoice_number
+      }));
+    setTempConfigs(clientTemp);
+  }, [previewData, selectedClientId]);
 
   // Update a site configuration
   const handleUpdateSite = (idx: number, updates: Partial<SiteServiceConfig>) => {
@@ -305,18 +224,20 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
     setSubmitting(true);
     setErrorMessage(null);
     try {
+      const effectiveMonth = billingMonth || currentMonthStr;
       const res = await generateClientInvoiceFromCRM({
         client_id: selectedClientId,
-        billing_month: billingMonth,
+        billing_month: effectiveMonth,
         invoice_date: invoiceDate,
         due_date: dueDate,
         payment_terms: paymentTerms,
         tax_rate: taxRate,
         group_by: groupBy,
+        initial_status: initialStatus,
         services: servicesToInvoice
       });
 
-      alert(`Success! Generated ${res.count} invoice(s) for ${billingMonth}.`);
+      alert(`Success! Generated ${res.count} ${initialStatus === 'DRAFT' ? 'Draft' : 'Issued'} invoice(s) for ${effectiveMonth}.`);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -477,7 +398,7 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
               </label>
               <input
                 type="month"
-                value={billingMonth}
+                value={billingMonth || currentMonthStr}
                 onChange={(e) => setBillingMonth(e.target.value)}
                 style={{
                   width: '100%',
@@ -489,6 +410,29 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
                   color: 'inherit'
                 }}
               />
+            </div>
+
+            {/* Workflow Status Choice */}
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                Approval Workflow Stage
+              </label>
+              <select
+                value={initialStatus}
+                onChange={(e) => setInitialStatus(e.target.value as 'DRAFT' | 'ISSUED')}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border, #cbd5e1)',
+                  fontSize: '13px',
+                  background: 'var(--color-surface, #ffffff)',
+                  color: 'inherit'
+                }}
+              >
+                <option value="DRAFT">Save as Draft (Approve in Finance → AR)</option>
+                <option value="ISSUED">Approve & Issue Immediately (Post to AR)</option>
+              </select>
             </div>
 
             {/* Invoice Date */}
@@ -705,6 +649,11 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
                             <div style={{ fontWeight: 600 }}>{site.siteName}</div>
                             <div style={{ fontSize: '11px', color: 'var(--color-text-muted, #64748b)' }}>
                               Contract: {site.contractCode}
+                              {site.existingInvoiceNumber && (
+                                <span style={{ marginLeft: '6px', color: '#0284c7', fontWeight: 600 }}>
+                                  • Already Invoiced ({site.existingInvoiceNumber} - {site.existingInvoiceStatus})
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td style={{ padding: '10px 14px' }}>

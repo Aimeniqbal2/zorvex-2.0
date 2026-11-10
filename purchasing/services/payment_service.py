@@ -13,11 +13,11 @@ from purchasing.models import (
 
 def get_invoice_payment_summary(invoice: ProcurementDocument) -> dict:
     """
-    Computes authoritative financial settlement figures for a posted Vendor Invoice.
+    Computes authoritative financial settlement figures for a posted Vendor Invoice or Purchase Order.
     Deducts return credit notes from total billed liability before computing outstanding payable.
     Guarantees no negative liabilities when bill is already paid.
     """
-    if invoice.document_type != 'VENDOR_INVOICE':
+    if invoice.document_type not in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
         return {
             'total_amount': invoice.total_amount,
             'original_amount': invoice.total_amount,
@@ -103,6 +103,7 @@ def create_vendor_payment(
     amount,
     payment_method='BANK_TRANSFER',
     bank_cash_account='',
+    bank_account_id=None,
     account_id=None,
     reference_number='',
     cheque_number='',
@@ -113,26 +114,53 @@ def create_vendor_payment(
     auto_post=False
 ) -> VendorPayment:
     """
-    Creates a new VendorPayment and its bill allocations with atomic overpayment protection.
+    Creates a new VendorPayment and its bill/PO allocations with atomic overpayment protection.
+    Automatically maps Treasury BankAccount -> ChartOfAccount so treasury deductions work cleanly.
     """
+    from finance.models import BankAccount, ChartOfAccount
+
     vendor = Vendor.objects.get(id=vendor_id, company_id=company_id)
     pay_amount = Decimal(str(amount)).quantize(Decimal('0.01'))
     if pay_amount <= Decimal('0.00'):
         raise ValidationError("Payment amount must be greater than zero.")
+
+    # Resolve Treasury BankAccount and GL ChartOfAccount safely
+    treasury_bank = None
+    if bank_account_id:
+        treasury_bank = BankAccount.objects.filter(id=bank_account_id, company_id=company_id, is_deleted=False).first()
+
+    resolved_gl_account_id = None
+    if account_id:
+        if ChartOfAccount.objects.filter(id=account_id, company_id=company_id, is_deleted=False).exists():
+            resolved_gl_account_id = account_id
+        elif not treasury_bank:
+            # Handle legacy UI sending BankAccount UUID in account field
+            treasury_bank = BankAccount.objects.filter(id=account_id, company_id=company_id, is_deleted=False).first()
+
+    if treasury_bank and not resolved_gl_account_id and treasury_bank.chart_of_account_id:
+        resolved_gl_account_id = treasury_bank.chart_of_account_id
+
+    clean_bank_label = (bank_cash_account or '').strip()
+    if treasury_bank and not clean_bank_label:
+        clean_bank_label = f"{treasury_bank.bank_name or treasury_bank.account_type} - {treasury_bank.account_title}".strip(' -')
+
+    clean_notes = (notes or '').strip()
+    if treasury_bank and f"[TREASURY:{treasury_bank.id}]" not in clean_notes:
+        clean_notes = f"{clean_notes} [TREASURY:{treasury_bank.id}]".strip()
 
     payment = VendorPayment(
         company_id=company_id,
         vendor=vendor,
         payment_date=payment_date,
         payment_method=payment_method,
-        bank_cash_account=bank_cash_account.strip(),
-        account_id=account_id,
+        bank_cash_account=clean_bank_label,
+        account_id=resolved_gl_account_id,
         amount=pay_amount,
         currency=getattr(vendor, 'currency', None) or 'PKR',
-        reference_number=reference_number.strip(),
-        cheque_number=cheque_number.strip(),
+        reference_number=(reference_number or '').strip(),
+        cheque_number=(cheque_number or '').strip(),
         cheque_date=cheque_date,
-        notes=notes.strip(),
+        notes=clean_notes,
         created_by=user,
         paid_by=user,
         status='DRAFT'
@@ -143,22 +171,24 @@ def create_vendor_payment(
 
     if allocations_data:
         for alloc in allocations_data:
-            inv_id = alloc.get('invoice_id')
+            inv_id = alloc.get('invoice_id') or alloc.get('invoice')
             alloc_amt = Decimal(str(alloc.get('amount', 0))).quantize(Decimal('0.01'))
-            alloc_notes = alloc.get('notes', '').strip()
+            alloc_notes = (alloc.get('notes', '') or '').strip()
 
-            if alloc_amt <= Decimal('0.00'):
+            if alloc_amt <= Decimal('0.00') or not inv_id:
                 continue
 
             invoice = ProcurementDocument.objects.get(
                 id=inv_id,
                 company_id=company_id,
                 vendor_id=vendor_id,
-                document_type='VENDOR_INVOICE'
+                document_type__in=['VENDOR_INVOICE', 'PURCHASE_ORDER']
             )
 
-            if invoice.status != 'POSTED':
+            if invoice.document_type == 'VENDOR_INVOICE' and invoice.status != 'POSTED':
                 raise ValidationError(f"Cannot allocate payment to invoice {invoice.number} because its status is {invoice.status} (must be POSTED).")
+            if invoice.document_type == 'PURCHASE_ORDER' and invoice.status not in ['APPROVED', 'SENT', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED']:
+                raise ValidationError(f"Cannot allocate payment to Purchase Order {invoice.number} in status {invoice.status}.")
 
             # Check current outstanding balance
             inv_summary = get_invoice_payment_summary(invoice)
@@ -167,7 +197,7 @@ def create_vendor_payment(
             if alloc_amt > current_outstanding:
                 raise ValidationError(
                     f"Overpayment blocked: Allocation of {invoice.currency} {alloc_amt} exceeds "
-                    f"the outstanding balance of {invoice.currency} {current_outstanding} on invoice {invoice.number}."
+                    f"the outstanding balance of {invoice.currency} {current_outstanding} on {invoice.number}."
                 )
 
             VendorPaymentAllocation.objects.create(
@@ -181,7 +211,7 @@ def create_vendor_payment(
 
     if allocated_total > pay_amount:
         raise ValidationError(
-            f"Total invoice allocations ({allocated_total}) exceed the payment amount ({pay_amount})."
+            f"Total invoice/PO allocations ({allocated_total}) exceed the payment amount ({pay_amount})."
         )
 
     if auto_post:
@@ -190,26 +220,58 @@ def create_vendor_payment(
     return payment
 
 
+def _resolve_bank_account_for_payment(payment: VendorPayment):
+    import re
+    from finance.models import BankAccount
+
+    m = re.search(r'\[TREASURY:([^\]]+)\]', payment.notes or '')
+    if m:
+        ba = BankAccount.objects.filter(id=m.group(1), company_id=payment.company_id, is_deleted=False).first()
+        if ba:
+            return ba
+    if payment.account_id:
+        ba = BankAccount.objects.filter(chart_of_account_id=payment.account_id, company_id=payment.company_id, is_active=True, is_deleted=False).first()
+        if ba:
+            return ba
+    if payment.bank_cash_account:
+        for ba in BankAccount.objects.filter(company_id=payment.company_id, is_active=True, is_deleted=False):
+            if ba.account_title and ba.account_title.lower() in payment.bank_cash_account.lower():
+                return ba
+    return BankAccount.objects.filter(company_id=payment.company_id, is_active=True, is_deleted=False).first()
+
+
 @transaction.atomic
 def post_vendor_payment(payment_id, user=None) -> VendorPayment:
     """
-    Posts a DRAFT payment, applying the allocations to reduce invoice outstanding balances.
+    Posts a DRAFT payment, applying the allocations to reduce invoice/PO outstanding balances
+    and recording Treasury MONEY_OUT movement & Payment Voucher in Finance.
     """
+    from finance.models import (
+        FinancialVoucher, VoucherType, VoucherStatus,
+        TreasuryTransactionType, PaymentMethod as FinPaymentMethod
+    )
+    from finance.services.treasury_service import TreasuryService
+    from finance.services.period_service import ensure_open_period_and_foundation
+
     payment = VendorPayment.objects.select_for_update().get(id=payment_id)
     if payment.status != 'DRAFT':
         raise ValidationError(f"Only DRAFT payments can be posted. Current status: {payment.status}")
 
-    # Re-verify overpayment limits against all allocated invoices with row locks
+    ensure_open_period_and_foundation(payment.company, payment.payment_date)
+
+    # Re-verify overpayment limits against all allocated invoices/POs with row locks
     for alloc in payment.allocations.select_related('invoice').all():
         invoice = ProcurementDocument.objects.select_for_update().get(id=alloc.invoice_id)
-        if invoice.status != 'POSTED':
+        if invoice.document_type == 'VENDOR_INVOICE' and invoice.status != 'POSTED':
             raise ValidationError(f"Cannot post payment: Invoice {invoice.number} is in status {invoice.status}.")
+        if invoice.document_type == 'PURCHASE_ORDER' and invoice.status not in ['APPROVED', 'SENT', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED']:
+            raise ValidationError(f"Cannot post payment: Purchase Order {invoice.number} is in status {invoice.status}.")
 
         summary = get_invoice_payment_summary(invoice)
         if alloc.amount > summary['outstanding_amount']:
             raise ValidationError(
                 f"Overpayment blocked upon posting: Allocation of {alloc.amount} exceeds "
-                f"the current outstanding balance of {summary['outstanding_amount']} on invoice {invoice.number}."
+                f"the current outstanding balance of {summary['outstanding_amount']} on {invoice.number}."
             )
 
     payment.status = 'POSTED'
@@ -217,9 +279,59 @@ def post_vendor_payment(payment_id, user=None) -> VendorPayment:
     payment.posted_at = timezone.now()
     payment.save()
 
-    # Sync payment_status on all affected invoices
+    # Sync payment_status on all affected invoices/POs
     for alloc in payment.allocations.select_related('invoice').all():
         sync_invoice_payment_status(alloc.invoice)
+
+    # Record Financial Voucher & Treasury MONEY_OUT movement
+    treasury_bank = _resolve_bank_account_for_payment(payment)
+    if treasury_bank:
+        method_map = {
+            'BANK_TRANSFER': FinPaymentMethod.BANK_TRANSFER,
+            'ONLINE_TRANSFER': FinPaymentMethod.ONLINE if hasattr(FinPaymentMethod, 'ONLINE') else FinPaymentMethod.BANK_TRANSFER,
+            'CASH': FinPaymentMethod.CASH,
+            'CHEQUE': FinPaymentMethod.CHEQUE,
+        }
+        fin_method = method_map.get(payment.payment_method, FinPaymentMethod.BANK_TRANSFER)
+        existing_v = FinancialVoucher.objects.filter(
+            company_id=payment.company_id,
+            source_document_type='VENDOR_PAYMENT',
+            source_document_id=payment.id,
+            is_deleted=False
+        ).first()
+        voucher = existing_v or FinancialVoucher.objects.create(
+            company=payment.company,
+            voucher_type=VoucherType.PAYMENT_VOUCHER,
+            date=payment.payment_date,
+            amount=payment.amount,
+            total_amount=payment.amount,
+            currency=treasury_bank.currency,
+            payment_method=fin_method,
+            bank_account=treasury_bank,
+            payee_name=payment.vendor.name,
+            reference=payment.reference_number or payment.cheque_number or payment.payment_number,
+            description=f"Vendor Payment {payment.payment_number} to {payment.vendor.name}",
+            source_module='PURCHASING',
+            source_document_type='VENDOR_PAYMENT',
+            source_document_id=payment.id,
+            status=VoucherStatus.POSTED,
+            created_by=user,
+            approved_by=user,
+            approved_at=timezone.now(),
+            posted_by=user,
+            posted_at=timezone.now(),
+        )
+        TreasuryService.record_treasury_movement(
+            bank_account=treasury_bank,
+            voucher=voucher,
+            transaction_type=TreasuryTransactionType.MONEY_OUT,
+            money_in=Decimal('0.0000'),
+            money_out=payment.amount,
+            reference=payment.payment_number,
+            description=f"Vendor Disbursement to {payment.vendor.name} ({payment.payment_number})",
+            transaction_date=payment.payment_date,
+            user=user,
+        )
 
     return payment
 

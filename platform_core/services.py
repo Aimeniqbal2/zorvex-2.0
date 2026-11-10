@@ -46,11 +46,15 @@ def is_module_enabled(company, module_code: str) -> bool:
     company_id = getattr(company, 'pk', company)
     codes = [module_code]
     if module_code == 'billing':
-        codes.extend(['finance', 'security_ops'])
+        codes.extend(['finance', 'security_finance', 'security_ops', 'operations'])
     elif module_code == 'payroll':
-        codes.extend(['hr', 'finance'])
-    elif module_code == 'security_finance':
-        codes.extend(['finance', 'security_ops'])
+        codes.extend(['hr', 'finance', 'security_finance', 'security_ops', 'operations'])
+    elif module_code in ('finance', 'security_finance'):
+        codes.extend(['finance', 'security_finance', 'billing', 'security_ops', 'operations'])
+    elif module_code == 'purchasing':
+        codes.extend(['finance', 'security_finance', 'inventory', 'security_ops', 'operations'])
+    elif module_code in ('security_ops', 'operations'):
+        codes.extend(['operations', 'security_ops'])
 
     return CompanyModule.objects.filter(
         company_id=company_id,

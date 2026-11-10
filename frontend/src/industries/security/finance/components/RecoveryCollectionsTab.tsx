@@ -37,7 +37,7 @@ export const RecoveryCollectionsTab: React.FC = () => {
   // Follow-up Activity Modal
   const [activityModalOpen, setActivityModalOpen] = useState<boolean>(false);
   const [activityInvoice, setActivityInvoice] = useState<ClientInvoice | null>(null);
-  const [activityType, setActivityType] = useState<string>('CALL');
+  const [activityType, setActivityType] = useState<string>('PHONE_CALL');
   const [followUpDate, setFollowUpDate] = useState<string>('');
   const [promiseAmount, setPromiseAmount] = useState<string>('');
   const [activityNotes, setActivityNotes] = useState<string>('');
@@ -97,12 +97,12 @@ export const RecoveryCollectionsTab: React.FC = () => {
     }
   };
 
-  // Filter Invoices
+  // Filter Invoices: Only approved/issued receivables appear in AR Collections (exclude DRAFT until approved)
   const unpaidInvoices = invoices.filter((inv) => {
     const grand = Number(inv.grand_total) || 0;
     const paid = Number(inv.paid_amount) || 0;
     const balance = grand - paid;
-    return inv.status !== 'CANCELLED' && inv.status !== 'CREDITED' && balance > 0;
+    return ['ISSUED', 'SENT', 'PARTIALLY_PAID'].includes(inv.status) && balance > 0;
   });
 
   const filteredInvoices = unpaidInvoices.filter((inv) => {
@@ -191,7 +191,7 @@ export const RecoveryCollectionsTab: React.FC = () => {
   // Open Activity Modal
   const handleOpenActivityModal = (inv: ClientInvoice) => {
     setActivityInvoice(inv);
-    setActivityType('CALL');
+    setActivityType('PHONE_CALL');
     setFollowUpDate('');
     setPromiseAmount('');
     setActivityNotes('');
@@ -847,7 +847,7 @@ export const RecoveryCollectionsTab: React.FC = () => {
                     <option value="BANK_TRANSFER">Bank Transfer</option>
                     <option value="CHEQUE">Cheque</option>
                     <option value="CASH">Cash</option>
-                    <option value="ONLINE_TRANSFER">Online / Raast</option>
+                    <option value="ONLINE">Online / Raast</option>
                   </select>
                 </div>
 
@@ -1051,12 +1051,13 @@ export const RecoveryCollectionsTab: React.FC = () => {
                       fontSize: '13px'
                     }}
                   >
-                    <option value="CALL">Phone Call</option>
+                    <option value="PHONE_CALL">Phone Call</option>
                     <option value="EMAIL">Email Sent</option>
-                    <option value="VISIT">Client Site Visit</option>
+                    <option value="MEETING">Client Site Meeting / Visit</option>
+                    <option value="PAYMENT_REMINDER">Payment Reminder</option>
                     <option value="PROMISE_TO_PAY">Promise to Pay</option>
                     <option value="DISPUTE">Billing Dispute</option>
-                    <option value="LEGAL_NOTICE">Legal Notice</option>
+                    <option value="ESCALATION">Legal / Escalation</option>
                   </select>
                 </div>
 

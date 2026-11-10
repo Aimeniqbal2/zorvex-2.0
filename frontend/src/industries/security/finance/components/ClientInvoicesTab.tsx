@@ -1,23 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type {
   ClientInvoice,
   ClientInvoiceStatus,
-  InvoicePreviewContext
+  InvoicePreviewContext,
+  CRMBillingPreviewResponse
 } from '../api';
 import {
   fetchClientInvoices,
   issueClientInvoice,
   sendClientInvoiceEmail,
-  fetchClientInvoicePreviewContext
+  fetchClientInvoicePreviewContext,
+  fetchCRMBillingPreview,
+  autoSyncCRMInvoices,
+  switchInvoiceCalculationMode,
+  approveAllDraftInvoices
 } from '../api';
 import { CRMInvoicingModal } from './CRMInvoicingModal';
 
 export const ClientInvoicesTab: React.FC = () => {
   const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
+  const [crmPreview, setCrmPreview] = useState<CRMBillingPreviewResponse | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
   const [loading, setLoading] = useState<boolean>(true);
+  const [syncingCRM, setSyncingCRM] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const initialAutoSyncedRef = useRef<boolean>(false);
 
   // CRM Invoicing Modal
   const [isCRMModalOpen, setIsCRMModalOpen] = useState<boolean>(false);
@@ -37,30 +46,112 @@ export const ClientInvoicesTab: React.FC = () => {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
 
-  const loadInvoices = async () => {
+  const loadInvoices = async (runInitialAutoSync = false) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchClientInvoices();
-      setInvoices(data);
+      const previewMonthArg = selectedMonth !== 'ALL' ? selectedMonth : 'AUTO';
+      const [invData, prevData] = await Promise.all([
+        fetchClientInvoices(),
+        fetchCRMBillingPreview(previewMonthArg).catch(() => null)
+      ]);
+      let finalInvoices = invData;
+      let finalPreview = prevData;
+
+      // On first open, automatically draft unbilled last-month/current-month CRM & Attendance invoices
+      if (
+        runInitialAutoSync &&
+        !initialAutoSyncedRef.current &&
+        prevData &&
+        ((prevData.summary?.unbilled_locations_count || 0) > 0 || (prevData.summary?.unbilled_temp_count || 0) > 0)
+      ) {
+        initialAutoSyncedRef.current = true;
+        try {
+          const syncRes = await autoSyncCRMInvoices({
+            months: [prevData.previous_month, prevData.current_month].filter(Boolean),
+            calculation_mode: 'CONTRACT_RATE',
+            initial_status: 'DRAFT'
+          });
+          if (syncRes.created_count > 0) {
+            finalInvoices = await fetchClientInvoices();
+            finalPreview = await fetchCRMBillingPreview(previewMonthArg).catch(() => prevData);
+          }
+        } catch {
+          // Non-fatal: keep preview visible so user can trigger manual sync
+        }
+      }
+
+      setInvoices(finalInvoices);
+      if (finalPreview) setCrmPreview(finalPreview);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || 'Failed to load client invoices.');
+      setError(err?.response?.data?.error || err?.response?.data?.detail || err.message || 'Failed to load client invoices.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadInvoices();
-  }, []);
+    loadInvoices(true);
+  }, [selectedMonth]);
+
+  const handleSyncCRMMonth = async (mode: 'CONTRACT_RATE' | 'ATTENDANCE_RATE' = 'CONTRACT_RATE') => {
+    setSyncingCRM(true);
+    try {
+      const targetMonths = selectedMonth !== 'ALL'
+        ? [selectedMonth]
+        : [crmPreview?.previous_month, crmPreview?.current_month].filter((m): m is string => Boolean(m));
+      const res = await autoSyncCRMInvoices({
+        months: targetMonths.length > 0 ? targetMonths : undefined,
+        calculation_mode: mode,
+        initial_status: 'DRAFT'
+      });
+      await loadInvoices(false);
+      alert(
+        res.created_count > 0
+          ? `Prepared ${res.created_count} Draft invoice(s) from CRM & Operations for ${res.months_synced.join(', ')}. Review and click "Approve & Issue" to post to Receivables.`
+          : `All active client locations and approved temporary services for ${res.months_synced.join(', ')} are already invoiced.`
+      );
+    } catch (err: any) {
+      alert(err?.response?.data?.error || err?.response?.data?.detail || err.message || 'Failed to sync CRM invoices.');
+    } finally {
+      setSyncingCRM(false);
+    }
+  };
 
   const handleIssueInvoice = async (invoiceId: string) => {
     setActionLoading(true);
     try {
       await issueClientInvoice(invoiceId);
-      await loadInvoices();
+      await loadInvoices(false);
     } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || 'Failed to issue invoice.');
+      alert(err?.response?.data?.error || err.message || 'Failed to approve & issue invoice.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSwitchMode = async (inv: ClientInvoice, nextMode: 'CONTRACT_RATE' | 'ATTENDANCE_RATE') => {
+    setActionLoading(true);
+    try {
+      await switchInvoiceCalculationMode(inv.id, { calculation_mode: nextMode });
+      await loadInvoices(false);
+    } catch (err: any) {
+      alert(err?.response?.data?.error || err.message || 'Failed to recalculate invoice calculation mode.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApproveAllDrafts = async () => {
+    const draftIds = filteredInvoices.filter((i) => i.status === 'DRAFT').map((i) => i.id);
+    if (draftIds.length === 0) return;
+    setActionLoading(true);
+    try {
+      const res = await approveAllDraftInvoices({ invoice_ids: draftIds });
+      await loadInvoices(false);
+      alert(`Approved & Issued ${res.issued_count} invoice(s) into Accounts Receivable.`);
+    } catch (err: any) {
+      alert(err?.response?.data?.error || err.message || 'Failed to approve draft invoices.');
     } finally {
       setActionLoading(false);
     }
@@ -119,10 +210,20 @@ export const ClientInvoicesTab: React.FC = () => {
     const matchesSearch =
       (inv.invoice_number && inv.invoice_number.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (inv.client_name && inv.client_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (inv.contract_code && inv.contract_code.toLowerCase().includes(searchQuery.toLowerCase()));
+      (inv.contract_code && inv.contract_code.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (inv.notes && inv.notes.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesStatus = statusFilter === 'ALL' || inv.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesMonth = selectedMonth === 'ALL' || inv.billing_month === selectedMonth;
+    return matchesSearch && matchesStatus && matchesMonth;
   });
+
+  const draftInvoicesCount = filteredInvoices.filter((i) => i.status === 'DRAFT').length;
+  const availableMonths = Array.from(
+    new Set([
+      ...(crmPreview?.available_months || []),
+      ...invoices.map((i) => i.billing_month).filter(Boolean)
+    ])
+  ).sort((a, b) => b.localeCompare(a));
 
   const getStatusBadge = (status: ClientInvoiceStatus) => {
     switch (status) {
@@ -156,6 +257,48 @@ export const ClientInvoicesTab: React.FC = () => {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {draftInvoicesCount > 0 && (
+            <button
+              onClick={handleApproveAllDrafts}
+              disabled={actionLoading}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#16a34a',
+                color: '#ffffff',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <i className="bx bx-check-double" style={{ fontSize: '16px' }}></i>
+              <span>Approve & Issue All Drafts ({draftInvoicesCount})</span>
+            </button>
+          )}
+          <button
+            onClick={() => handleSyncCRMMonth('CONTRACT_RATE')}
+            disabled={syncingCRM}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '6px',
+              border: '1px solid #0284c7',
+              background: 'rgba(2, 132, 199, 0.1)',
+              color: '#0284c7',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <i className={`bx ${syncingCRM ? 'bx-loader-alt bx-spin' : 'bx-sync'}`}></i>
+            <span>{syncingCRM ? 'Syncing CRM...' : 'Sync CRM & Operations Drafts'}</span>
+          </button>
           <button
             onClick={() => setIsCRMModalOpen(true)}
             style={{
@@ -177,7 +320,7 @@ export const ClientInvoicesTab: React.FC = () => {
             <span>Generate from CRM & Attendance</span>
           </button>
           <button
-            onClick={loadInvoices}
+            onClick={() => loadInvoices(false)}
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
@@ -189,10 +332,58 @@ export const ClientInvoicesTab: React.FC = () => {
               fontWeight: 500
             }}
           >
-            Refresh Invoices
+            Refresh
           </button>
         </div>
       </div>
+
+      {/* Live CRM & Attendance Rate Comparison Banner */}
+      {crmPreview && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '12px',
+            padding: '14px 16px',
+            borderRadius: '10px',
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-border)'
+          }}
+        >
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+              Active CRM Locations ({crmPreview.billing_month})
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-text)', marginTop: '4px' }}>
+              {crmPreview.summary.total_locations} Sites • {crmPreview.summary.total_temp_services} Temp Events
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+              Option 1: CRM Contract Value
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 800, color: '#0284c7', marginTop: '4px' }}>
+              PKR {Number(crmPreview.summary.total_crm_contract_value || 0).toLocaleString()}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+              Option 2: Attendance-Delivered Value
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 800, color: '#7c3aed', marginTop: '4px' }}>
+              PKR {Number(crmPreview.summary.total_attendance_value || 0).toLocaleString()}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+              Temporary Services Value
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 800, color: '#16a34a', marginTop: '4px' }}>
+              PKR {Number(crmPreview.summary.total_temp_value || 0).toLocaleString()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters Bar */}
       <div
@@ -210,7 +401,7 @@ export const ClientInvoicesTab: React.FC = () => {
         <div style={{ flex: '1 1 240px' }}>
           <input
             type="text"
-            placeholder="Search by invoice #, client, contract..."
+            placeholder="Search by invoice #, client, location, contract..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
@@ -223,6 +414,28 @@ export const ClientInvoicesTab: React.FC = () => {
               fontSize: '13px'
             }}
           />
+        </div>
+
+        <div>
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              fontSize: '13px'
+            }}
+          >
+            <option value="ALL">All Months</option>
+            {availableMonths.map((m) => (
+              <option key={m} value={m}>
+                {m}{m === crmPreview?.previous_month ? ' (Last Month)' : m === crmPreview?.current_month ? ' (Current Month)' : ''}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>
@@ -286,14 +499,26 @@ export const ClientInvoicesTab: React.FC = () => {
             <tbody>
               {filteredInvoices.map((inv) => (
                 <tr key={inv.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--color-primary, #0284c7)' }}>
-                    {inv.invoice_number}
+                  <td style={{ padding: '14px 16px' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--color-primary, #0284c7)' }}>{inv.invoice_number}</div>
+                    {inv.lines && inv.lines[0]?.site_name && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                        Location: {inv.lines[0].site_name}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '14px 16px', fontWeight: 500, color: 'var(--color-text)' }}>
                     {inv.client_name || 'Client'}
                   </td>
                   <td style={{ padding: '14px 16px', color: 'var(--color-text-muted)' }}>
-                    {inv.contract_code || 'Contract'}
+                    <div>{inv.contract_code || 'CRM Contract'}</div>
+                    {inv.notes && inv.notes.includes('[MODE:ATTENDANCE_RATE]') ? (
+                      <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#7c3aed' }}>Option 2: Attendance Rate</span>
+                    ) : inv.notes && inv.notes.includes('[TSR:') ? (
+                      <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#16a34a' }}>Temporary Event</span>
+                    ) : (
+                      <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#0284c7' }}>Option 1: CRM Contract Rate</span>
+                    )}
                   </td>
                   <td style={{ padding: '14px 16px', color: 'var(--color-text-muted)' }}>
                     {inv.billing_month} ({inv.period_start} → {inv.period_end})
@@ -325,6 +550,31 @@ export const ClientInvoicesTab: React.FC = () => {
                         Preview / Print
                       </button>
 
+                      {inv.status === 'DRAFT' && inv.notes && inv.notes.includes('[SITE:') && (
+                        <button
+                          disabled={actionLoading}
+                          onClick={() =>
+                            handleSwitchMode(
+                              inv,
+                              inv.notes?.includes('[MODE:ATTENDANCE_RATE]') ? 'CONTRACT_RATE' : 'ATTENDANCE_RATE'
+                            )
+                          }
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            border: '1px solid #7c3aed',
+                            background: 'rgba(124, 58, 237, 0.1)',
+                            color: '#7c3aed',
+                            cursor: 'pointer',
+                            fontSize: '11.5px',
+                            fontWeight: 600
+                          }}
+                          title="Switch between CRM Monthly Contract Rate and Attendance-Delivered Client Rate"
+                        >
+                          {inv.notes?.includes('[MODE:ATTENDANCE_RATE]') ? 'Use CRM Rate' : 'Use Attendance Rate'}
+                        </button>
+                      )}
+
                       {inv.status === 'DRAFT' && (
                         <button
                           disabled={actionLoading}
@@ -332,15 +582,15 @@ export const ClientInvoicesTab: React.FC = () => {
                           style={{
                             padding: '4px 10px',
                             borderRadius: '4px',
-                            border: '1px solid #eab308',
-                            background: 'rgba(234, 179, 8, 0.1)',
-                            color: '#eab308',
+                            border: 'none',
+                            background: '#16a34a',
+                            color: '#ffffff',
                             cursor: 'pointer',
                             fontSize: '12px',
                             fontWeight: 600
                           }}
                         >
-                          Issue
+                          Approve & Issue
                         </button>
                       )}
 
@@ -681,7 +931,7 @@ export const ClientInvoicesTab: React.FC = () => {
       <CRMInvoicingModal
         isOpen={isCRMModalOpen}
         onClose={() => setIsCRMModalOpen(false)}
-        onSuccess={loadInvoices}
+        onSuccess={() => loadInvoices(false)}
       />
     </div>
   );

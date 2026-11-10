@@ -241,6 +241,14 @@ export const DesktopDashboard: React.FC = () => {
                         color="#092453"
                         onClick={() => openModule('hr')}
                     />
+                    {isSecurityIndustry && (
+                        <QuickAction
+                            icon="bx-calendar-check"
+                            label="Attendance Registry"
+                            color="#0284c7"
+                            onClick={() => openModule('attendance_register')}
+                        />
+                    )}
                     <QuickAction
                         icon="bx-shield-plus"
                         label="New Deployment"

@@ -2115,6 +2115,602 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @staticmethod
+    def _resolve_payroll_month(company, month_str=None):
+        import calendar
+        from datetime import date
+        from django.utils import timezone
+        from hrm.models import PayrollRun
+        from operations.models import DailyDutyPay
+
+        today = timezone.now().date()
+        current_month = f"{today.year}-{today.month:02d}"
+        previous_month = f"{today.year - 1}-12" if today.month == 1 else f"{today.year}-{today.month - 1:02d}"
+
+        month_set = {current_month, previous_month}
+        try:
+            for d in DailyDutyPay.objects.filter(company=company, is_deleted=False).dates('duty_date', 'month', order='DESC')[:12]:
+                month_set.add(f"{d.year}-{d.month:02d}")
+            for pr in PayrollRun.objects.filter(company=company, is_deleted=False).values_list('payroll_month', flat=True)[:12]:
+                if pr and len(str(pr)) == 7:
+                    month_set.add(str(pr))
+        except Exception:
+            pass
+        available_months = sorted(month_set, reverse=True)
+
+        chosen = (month_str or '').strip()
+        if not chosen or chosen.upper() == 'AUTO':
+            curr_yr, curr_mo = map(int, current_month.split('-'))
+            prev_yr, prev_mo = map(int, previous_month.split('-'))
+            has_curr = DailyDutyPay.objects.filter(
+                company=company, duty_date__year=curr_yr, duty_date__month=curr_mo, is_deleted=False
+            ).exists()
+            has_prev = DailyDutyPay.objects.filter(
+                company=company, duty_date__year=prev_yr, duty_date__month=prev_mo, is_deleted=False
+            ).exists()
+            chosen = previous_month if (has_prev and not has_curr) else current_month
+
+        try:
+            year, month = map(int, chosen.split('-'))
+            days_in_month = calendar.monthrange(year, month)[1]
+        except Exception:
+            year, month = today.year, today.month
+            days_in_month = calendar.monthrange(year, month)[1]
+            chosen = f"{year}-{month:02d}"
+
+        period_start = date(year, month, 1)
+        period_end = date(year, month, days_in_month)
+        return chosen, current_month, previous_month, available_months, period_start, period_end, days_in_month
+
+    @action(detail=False, methods=['get'], url_path='live-attendance-salaries')
+    def live_attendance_salaries(self, request):
+        """
+        GET /api/finance/payroll-integrations/live-attendance-salaries/?month=YYYY-MM
+        Automatically aggregates guard/employee attendance salaries from Operations
+        (DailyDutyPay + PayrollRulesService + additions/deductions/advances),
+        merging any already-finalized Finance snapshots & payment statuses.
+        """
+        from collections import defaultdict
+        from decimal import Decimal
+        from hrm.models import Employee, AttendanceStatus
+        from operations.models import (
+            DailyDutyPay, DutyType, Deployment,
+            EmployeePayrollCalculation, PayrollCalculationStatus
+        )
+        from operations.services.payroll_rules_service import PayrollRulesService
+        from finance.models import (
+            PayrollEmployeeFinanceSnapshot, SalaryPaymentBatchLine,
+            SalaryPaymentLineStatus, EmployeePaymentDestination, EmployeeAdvance,
+            AdvanceStatus
+        )
+        from finance.services.period_service import ensure_open_period_and_foundation
+
+        company = self.get_company()
+        month_param = request.query_params.get('month')
+        (
+            selected_month, current_month, previous_month, available_months,
+            period_start, period_end, _days_in_month
+        ) = self._resolve_payroll_month(company, month_param)
+
+        ensure_open_period_and_foundation(company, period_end)
+
+        # Fetch all DailyDutyPay records in this period
+        duty_pays = list(DailyDutyPay.objects.filter(
+            company=company, duty_date__gte=period_start, duty_date__lte=period_end, is_deleted=False
+        ).select_related('employee', 'employee__designation', 'site'))
+
+        dp_by_emp = defaultdict(list)
+        sites_by_emp = defaultdict(set)
+        for dp in duty_pays:
+            eid = str(dp.employee_id)
+            dp_by_emp[eid].append(dp)
+            if dp.site and dp.site.name:
+                sites_by_emp[eid].add(dp.site.name)
+
+        # Also include existing finalized PayrollAccountingIntegration snapshots covering this month
+        matching_integrations = list(PayrollAccountingIntegration.objects.filter(
+            company=company,
+            is_deleted=False,
+            payroll_run__period_start__lte=period_end,
+            payroll_run__period_end__gte=period_start,
+        ).select_related('payroll_run').order_by('-created_at'))
+
+        snaps_by_emp = {}
+        snap_ids = []
+        primary_integration = matching_integrations[0] if matching_integrations else None
+        for integ in matching_integrations:
+            for snap in integ.employee_snapshots.filter(is_deleted=False).select_related('employee', 'employee__designation', 'department', 'payslip'):
+                eid = str(snap.employee_id)
+                if eid not in snaps_by_emp:
+                    snaps_by_emp[eid] = (integ, snap)
+                    snap_ids.append(snap.id)
+
+        paid_lines_by_snap = {}
+        if snap_ids:
+            for bl in SalaryPaymentBatchLine.objects.filter(
+                company=company, employee_snapshot_id__in=snap_ids,
+                status=SalaryPaymentLineStatus.SUCCESS, is_deleted=False
+            ).select_related('batch'):
+                paid_lines_by_snap[str(bl.employee_snapshot_id)] = bl
+
+        # Active deployments for site fallback
+        active_deployments = Deployment.objects.filter(
+            company=company, is_deleted=False, status='ACTIVE'
+        ).select_related('site')
+        for dep in active_deployments:
+            if dep.site and dep.site.name:
+                sites_by_emp[str(dep.employee_id)].add(dep.site.name)
+
+        all_emp_ids = set(dp_by_emp.keys()) | set(snaps_by_emp.keys())
+        employees_map = {
+            str(e.id): e for e in Employee.objects.filter(
+                company=company, id__in=list(all_emp_ids), is_deleted=False
+            ).select_related('designation', 'department')
+        }
+
+        # Destinations & Outstanding Advances
+        dest_by_emp = {}
+        for d in EmployeePaymentDestination.objects.filter(
+            company=company, employee_id__in=list(all_emp_ids), is_active=True, is_deleted=False
+        ).order_by('-is_preferred'):
+            eid = str(d.employee_id)
+            if eid not in dest_by_emp:
+                dest_by_emp[eid] = d
+
+        adv_by_emp = defaultdict(Decimal)
+        for adv in EmployeeAdvance.objects.filter(
+            company=company, employee_id__in=list(all_emp_ids),
+            status=AdvanceStatus.PAID, is_deleted=False
+        ):
+            adv_by_emp[str(adv.employee_id)] += Decimal(str(adv.outstanding_balance or 0))
+
+        # Existing calculations map
+        existing_calcs = {
+            str(c.employee_id): c for c in EmployeePayrollCalculation.objects.filter(
+                company=company, employee_id__in=list(all_emp_ids),
+                period_start=period_start, period_end=period_end, is_deleted=False
+            )
+        }
+
+        rows = []
+        total_gross = Decimal('0.00')
+        total_deductions = Decimal('0.00')
+        total_net = Decimal('0.00')
+        total_paid = Decimal('0.00')
+        paid_count = 0
+        unpaid_count = 0
+        all_finalized = bool(snaps_by_emp) and len(snaps_by_emp) >= len(all_emp_ids)
+
+        for eid in sorted(all_emp_ids, key=lambda x: (employees_map[x].first_name if x in employees_map else '').lower()):
+            emp = employees_map.get(eid)
+            if not emp:
+                continue
+
+            emp_dps = dp_by_emp.get(eid, [])
+            present_days = 0
+            ot_shifts = 0
+            raw_duty_earnings = Decimal('0.00')
+            raw_ot_earnings = Decimal('0.00')
+            for dp in emp_dps:
+                amt = Decimal(str(dp.payable_amount or 0))
+                if dp.duty_type == DutyType.OVERTIME or str(dp.attendance_status or '').upper() in ['OVERTIME', 'O', 'OVERTIME_DOZING', 'OD']:
+                    ot_shifts += 1
+                    raw_ot_earnings += amt
+                else:
+                    if str(dp.attendance_status or '').upper() not in [AttendanceStatus.ABSENT, 'ABSENT', 'A', AttendanceStatus.UNPAID_LEAVE]:
+                        present_days += 1
+                    raw_duty_earnings += amt
+
+            snap_pair = snaps_by_emp.get(eid)
+            calc = existing_calcs.get(eid)
+
+            if snap_pair:
+                integ, snap = snap_pair
+                gross = Decimal(str(snap.gross_earnings or 0)).quantize(Decimal('0.01'))
+                ot_amt = Decimal(str(snap.overtime_pay or 0)).quantize(Decimal('0.01'))
+                allowances = Decimal(str(snap.allowances or 0)).quantize(Decimal('0.01'))
+                deductions = (Decimal(str(snap.deductions or 0)) + Decimal(str(snap.tax_amount or 0))).quantize(Decimal('0.01'))
+                adv_rec = Decimal(str(snap.advance_recovery or 0)).quantize(Decimal('0.01'))
+                net_salary = Decimal(str(snap.net_salary or 0)).quantize(Decimal('0.01'))
+                duty_earnings = max(Decimal('0.00'), gross - ot_amt - allowances).quantize(Decimal('0.01'))
+                payment_status = snap.payment_status
+                is_finalized_emp = True
+                snapshot_id = str(snap.id)
+                integ_id = str(integ.id)
+                bl = paid_lines_by_snap.get(snapshot_id)
+                pay_ref = bl.payment_reference if bl else ''
+                batch_no = bl.batch.batch_number if (bl and bl.batch) else ''
+                paid_at = bl.processed_at.isoformat() if (bl and bl.processed_at) else None
+                blockers = []
+            else:
+                all_finalized = False
+                is_finalized_emp = False
+                snapshot_id = None
+                integ_id = None
+                payment_status = 'UNPAID'
+                pay_ref = ''
+                batch_no = ''
+                paid_at = None
+
+                # Compute live authoritative calculation using PayrollRulesService (if not frozen)
+                if not calc or not calc.is_frozen:
+                    try:
+                        calc = PayrollRulesService.calculate_employee_payroll(
+                            company=company,
+                            employee=emp,
+                            period_start=period_start,
+                            period_end=period_end,
+                            user=request.user,
+                            force_recalculate=True
+                        )
+                    except Exception:
+                        calc = existing_calcs.get(eid)
+
+                if calc:
+                    duty_earnings = Decimal(str(calc.duty_earnings or 0)).quantize(Decimal('0.01'))
+                    ot_amt = Decimal(str(calc.total_ot_amount or 0)).quantize(Decimal('0.01'))
+                    allowances = (Decimal(str(calc.allowances_amount or 0)) + Decimal(str(calc.bonuses_amount or 0)) + Decimal(str(calc.other_additions_amount or 0))).quantize(Decimal('0.01'))
+                    gross = Decimal(str(calc.gross_earnings or 0)).quantize(Decimal('0.01'))
+                    deductions = Decimal(str(calc.total_deductions or 0)).quantize(Decimal('0.01'))
+                    adv_rec = Decimal(str(calc.advance_recovery_amount or 0)).quantize(Decimal('0.01'))
+                    net_salary = Decimal(str(calc.net_payable or 0)).quantize(Decimal('0.01'))
+                    present_days = calc.duty_days_count or present_days
+                    blockers = list(calc.blocking_reasons or []) if calc.has_blockers else []
+                else:
+                    duty_earnings = raw_duty_earnings.quantize(Decimal('0.01'))
+                    ot_amt = raw_ot_earnings.quantize(Decimal('0.01'))
+                    allowances = Decimal('0.00')
+                    gross = (duty_earnings + ot_amt).quantize(Decimal('0.01'))
+                    deductions = Decimal('0.00')
+                    adv_rec = Decimal('0.00')
+                    net_salary = gross
+                    blockers = []
+
+            total_gross += gross
+            total_deductions += deductions
+            total_net += net_salary
+            if payment_status == 'PAID':
+                total_paid += net_salary
+                paid_count += 1
+            else:
+                unpaid_count += 1
+
+            dest = dest_by_emp.get(eid)
+            emp_name = f"{emp.first_name} {emp.last_name}".strip()
+            rows.append({
+                'employee_id': eid,
+                'employee_code': getattr(emp, 'display_code', None) or emp.employee_code or eid[:8],
+                'employee_name': emp_name,
+                'designation_name': emp.designation.name if emp.designation else 'Security Guard',
+                'department_name': emp.department.name if emp.department else 'Security Operations',
+                'sites': sorted(list(sites_by_emp.get(eid, set()))),
+                'present_days': present_days,
+                'ot_shifts': ot_shifts,
+                'duty_earnings': float(duty_earnings),
+                'overtime_pay': float(ot_amt),
+                'allowances': float(allowances),
+                'gross_earnings': float(gross),
+                'deductions': float(deductions),
+                'advance_recovery': float(adv_rec),
+                'outstanding_advance': float(adv_by_emp.get(eid, Decimal('0.00'))),
+                'net_salary': float(net_salary),
+                'is_finalized': is_finalized_emp,
+                'payment_status': payment_status,
+                'snapshot_id': snapshot_id,
+                'integration_id': integ_id,
+                'calculation_id': str(calc.id) if calc else None,
+                'batch_number': batch_no,
+                'payment_reference': pay_ref,
+                'paid_at': paid_at,
+                'has_blockers': bool(blockers),
+                'blocking_reasons': blockers,
+                'payment_destination': {
+                    'method': dest.payment_method,
+                    'bank_name': dest.bank_name,
+                    'account_number': dest.account_number or dest.iban or dest.wallet_number,
+                    'wallet_provider': dest.wallet_provider,
+                } if dest else None,
+            })
+
+        return Response({
+            'month': selected_month,
+            'current_month': current_month,
+            'previous_month': previous_month,
+            'available_months': available_months,
+            'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(),
+            'is_finalized': all_finalized and len(rows) > 0,
+            'integration_id': str(primary_integration.id) if primary_integration else None,
+            'integration_status': primary_integration.status if primary_integration else ('LIVE_ATTENDANCE_READY' if rows else 'NO_ATTENDANCE'),
+            'summary': {
+                'employee_count': len(rows),
+                'total_gross': float(total_gross),
+                'total_deductions': float(total_deductions),
+                'total_net_payable': float(total_net),
+                'total_paid': float(total_paid),
+                'remaining_payable': float(max(Decimal('0.00'), total_net - total_paid)),
+                'paid_count': paid_count,
+                'unpaid_count': unpaid_count,
+            },
+            'employees': rows
+        })
+
+    @action(detail=False, methods=['post'], url_path='finalize-and-sync-month')
+    def finalize_and_sync_month(self, request):
+        """
+        POST /api/finance/payroll-integrations/finalize-and-sync-month/
+        One-click calculation -> mark READY -> PayrollRun -> Approve -> Finalize -> Finance Integration
+        so attendance salaries from Operations can be approved & paid directly inside Finance.
+        """
+        from decimal import Decimal
+        from datetime import date
+        from django.utils import timezone
+        from operations.models import DailyDutyPay, EmployeePayrollCalculation, PayrollCalculationStatus
+        from operations.services.payroll_rules_service import PayrollRulesService
+        from operations.services.payroll_run_service import PayrollRunService
+        from finance.services.period_service import ensure_open_period_and_foundation
+
+        company = self.get_company()
+        month_param = request.data.get('month')
+        target_emp_ids = request.data.get('employee_ids')
+
+        (
+            selected_month, _, _, _, period_start, period_end, _
+        ) = self._resolve_payroll_month(company, month_param)
+
+        ensure_open_period_and_foundation(company, period_end)
+
+        # Find employees with attendance in this month who don't yet have a FINALIZED PayrollRun
+        dp_emp_ids = set(
+            str(eid) for eid in DailyDutyPay.objects.filter(
+                company=company, duty_date__gte=period_start, duty_date__lte=period_end, is_deleted=False
+            ).values_list('employee_id', flat=True).distinct()
+        )
+        if target_emp_ids:
+            dp_emp_ids = dp_emp_ids & set(str(x) for x in target_emp_ids)
+
+        if not dp_emp_ids:
+            return Response(
+                {'detail': f'No attendance/duty pay records found for {selected_month}.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ready_calc_ids = []
+        skipped_reasons = []
+        already_integrated_ids = set()
+
+        # Check existing snapshots in finalized runs for this period
+        for snap in PayrollAccountingIntegration.objects.filter(
+            company=company, is_deleted=False,
+            payroll_run__period_start__lte=period_end, payroll_run__period_end__gte=period_start
+        ).values_list('employee_snapshots__employee_id', flat=True):
+            if snap:
+                already_integrated_ids.add(str(snap))
+
+        to_process = dp_emp_ids - already_integrated_ids
+        if not to_process:
+            existing_integ = PayrollAccountingIntegration.objects.filter(
+                company=company, is_deleted=False,
+                payroll_run__period_start__lte=period_end, payroll_run__period_end__gte=period_start
+            ).first()
+            return Response({
+                'success': True,
+                'already_finalized': True,
+                'finalized_count': len(already_integrated_ids),
+                'integration': self.get_serializer(existing_integ).data if existing_integ else None,
+                'message': f'Salaries for {selected_month} are already finalized and ready for payment.'
+            })
+
+        try:
+            with transaction.atomic():
+                for eid in to_process:
+                    calc = EmployeePayrollCalculation.objects.filter(
+                        company=company, employee_id=eid,
+                        period_start=period_start, period_end=period_end, is_deleted=False
+                    ).first()
+
+                    if calc and calc.is_frozen and calc.payroll_run_id and calc.payroll_run.status == 'FINALIZED':
+                        # Ensure finance integration ran on that run
+                        PayrollFinanceService.integrate_payroll_run(calc.payroll_run, user=request.user)
+                        continue
+
+                    if not calc or not calc.is_frozen:
+                        calc = PayrollRulesService.calculate_employee_payroll(
+                            company=company, employee=eid,
+                            period_start=period_start, period_end=period_end,
+                            user=request.user, force_recalculate=True
+                        )
+
+                    if calc.has_blockers or calc.status == PayrollCalculationStatus.BLOCKED:
+                        skipped_reasons.append(f"{calc.employee}: {'; '.join(calc.blocking_reasons or [])}")
+                        continue
+
+                    if calc.status != PayrollCalculationStatus.READY:
+                        calc = PayrollRulesService.mark_calculation_ready(company, calc.id, user=request.user)
+                    ready_calc_ids.append(str(calc.id))
+
+                integration = None
+                run_id = None
+                if ready_calc_ids:
+                    payroll_run = PayrollRunService.create_payroll_run_from_calculations(
+                        company=company,
+                        period_start=period_start,
+                        period_end=period_end,
+                        calculation_ids=ready_calc_ids,
+                        user=request.user,
+                        notes=f"Auto-finalized via Security Finance for {selected_month}"
+                    )
+                    payroll_run = PayrollRunService.approve_payroll_run(company, payroll_run, user=request.user)
+                    fin_res = PayrollRunService.finalize_payroll_run(company, payroll_run, user=request.user)
+                    run_id = fin_res.get('payroll_run_id')
+                    integ_id = fin_res.get('finance_integration_id')
+                    integration = PayrollAccountingIntegration.objects.filter(id=integ_id).first()
+
+                return Response({
+                    'success': True,
+                    'payroll_run_id': run_id,
+                    'finalized_count': len(ready_calc_ids),
+                    'skipped': skipped_reasons,
+                    'integration': self.get_serializer(integration).data if integration else None,
+                    'message': f'Finalized {len(ready_calc_ids)} employee salaries for {selected_month}.'
+                }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='pay-guard-salaries')
+    def pay_guard_salaries(self, request):
+        """
+        POST /api/finance/payroll-integrations/pay-guard-salaries/
+        Finalizes (if needed) and immediately pays selected (or all unpaid) guards for a month
+        from a Bank/Cash Treasury account, creating Payment Voucher + Treasury entry and marking PAID.
+        """
+        from decimal import Decimal
+        from datetime import date
+        from django.utils import timezone
+        from operations.models import DailyDutyPay, EmployeePayrollCalculation, PayrollCalculationStatus
+        from operations.services.payroll_rules_service import PayrollRulesService
+        from operations.services.payroll_run_service import PayrollRunService
+        from finance.models import (
+            BankAccount, PayrollEmployeeFinanceSnapshot, PayrollEmployeePaymentStatus
+        )
+        from finance.services.period_service import ensure_open_period_and_foundation
+
+        company = self.get_company()
+        month_param = request.data.get('month')
+        employee_ids = request.data.get('employee_ids')
+        treasury_account_id = request.data.get('treasury_account_id')
+        payment_date_str = request.data.get('payment_date')
+        payment_reference = request.data.get('payment_reference', '')
+        payment_provider = request.data.get('payment_provider', 'MANUAL')
+        notes = request.data.get('notes', '')
+
+        valid_providers = {'MANUAL', 'HBL', 'JS_BANK', 'DUBAI_ISLAMIC_BANK', 'EASYPAISA', 'JAZZCASH', 'OTHER'}
+        if payment_provider not in valid_providers:
+            payment_provider = 'MANUAL'
+
+        pay_date = date.fromisoformat(payment_date_str) if payment_date_str else timezone.now().date()
+        ensure_open_period_and_foundation(company, pay_date)
+
+        (
+            selected_month, _, _, _, period_start, period_end, _
+        ) = self._resolve_payroll_month(company, month_param)
+        ensure_open_period_and_foundation(company, period_end)
+
+        treasury_acc = None
+        if treasury_account_id:
+            treasury_acc = BankAccount.objects.filter(id=treasury_account_id, company=company, is_deleted=False).first()
+        if not treasury_acc:
+            treasury_acc = BankAccount.objects.filter(company=company, is_active=True, is_deleted=False).first()
+        if not treasury_acc:
+            return Response(
+                {'detail': 'No active Bank or Cash Treasury account found. Please create a Bank/Cash account in Vouchers & Treasury first.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # 1. Ensure all requested / active employees for this month are finalized into PayrollAccountingIntegration
+                target_set = set(str(x) for x in employee_ids) if employee_ids else set(
+                    str(eid) for eid in DailyDutyPay.objects.filter(
+                        company=company, duty_date__gte=period_start, duty_date__lte=period_end, is_deleted=False
+                    ).values_list('employee_id', flat=True).distinct()
+                )
+
+                # Also include anyone already in existing snapshot for this period
+                existing_snaps_qs = PayrollEmployeeFinanceSnapshot.objects.filter(
+                    company=company, is_deleted=False,
+                    integration__payroll_run__period_start__lte=period_end,
+                    integration__payroll_run__period_end__gte=period_start,
+                )
+                if target_set:
+                    existing_snaps_qs = existing_snaps_qs.filter(employee_id__in=list(target_set))
+                else:
+                    target_set = set(str(s.employee_id) for s in existing_snaps_qs)
+
+                finalized_emp_ids = set(str(eid) for eid in existing_snaps_qs.values_list('employee_id', flat=True))
+                missing_emp_ids = target_set - finalized_emp_ids
+
+                if missing_emp_ids:
+                    ready_calc_ids = []
+                    for eid in missing_emp_ids:
+                        calc = PayrollRulesService.calculate_employee_payroll(
+                            company=company, employee=eid,
+                            period_start=period_start, period_end=period_end,
+                            user=request.user, force_recalculate=True
+                        )
+                        if not calc.has_blockers and calc.status != PayrollCalculationStatus.BLOCKED and calc.net_payable > 0:
+                            if calc.status != PayrollCalculationStatus.READY:
+                                calc = PayrollRulesService.mark_calculation_ready(company, calc.id, user=request.user)
+                            ready_calc_ids.append(str(calc.id))
+                    if ready_calc_ids:
+                        payroll_run = PayrollRunService.create_payroll_run_from_calculations(
+                            company=company, period_start=period_start, period_end=period_end,
+                            calculation_ids=ready_calc_ids, user=request.user,
+                            notes=f"Finalized for direct salary payment ({selected_month})"
+                        )
+                        payroll_run = PayrollRunService.approve_payroll_run(company, payroll_run, user=request.user)
+                        PayrollRunService.finalize_payroll_run(company, payroll_run, user=request.user)
+
+                # 2. Gather unpaid snapshots grouped by integration
+                unpaid_snaps = list(PayrollEmployeeFinanceSnapshot.objects.filter(
+                    company=company, is_deleted=False,
+                    employee_id__in=list(target_set),
+                    integration__payroll_run__period_start__lte=period_end,
+                    integration__payroll_run__period_end__gte=period_start,
+                    payment_status__in=[PayrollEmployeePaymentStatus.UNPAID, PayrollEmployeePaymentStatus.FAILED]
+                ).select_related('integration'))
+
+                # Filter net_salary > 0
+                unpaid_snaps = [s for s in unpaid_snaps if (s.net_salary or 0) > 0]
+                if not unpaid_snaps:
+                    return Response(
+                        {'detail': 'All selected employees have zero net payable or are already marked PAID.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                snaps_by_integ = {}
+                for s in unpaid_snaps:
+                    snaps_by_integ.setdefault(s.integration, []).append(str(s.id))
+
+                created_batches = []
+                paid_count = 0
+                total_disbursed = Decimal('0.00')
+
+                for integ, s_ids in snaps_by_integ.items():
+                    batch = PayrollFinanceService.create_salary_payment_batch(
+                        payroll_integration=integ,
+                        treasury_account=treasury_acc,
+                        payment_date=pay_date,
+                        payment_mode='MANUAL',
+                        payment_provider=payment_provider,
+                        selected_snapshot_ids=s_ids,
+                        notes=notes or f"Salary payment for {selected_month}",
+                        user=request.user
+                    )
+                    batch = PayrollFinanceService.approve_batch(batch, user=request.user)
+                    line_results = [
+                        {
+                            'line_id': str(line.id),
+                            'status': 'SUCCESS',
+                            'payment_reference': payment_reference or f"SAL-{selected_month}-{idx + 1}"
+                        }
+                        for idx, line in enumerate(batch.lines.all())
+                    ]
+                    batch = PayrollFinanceService.confirm_manual_payments(batch, line_results=line_results, user=request.user)
+                    created_batches.append(batch)
+                    paid_count += len(line_results)
+                    total_disbursed += Decimal(str(batch.successful_amount or 0))
+
+                return Response({
+                    'success': True,
+                    'paid_count': paid_count,
+                    'total_disbursed': float(total_disbursed),
+                    'batch_numbers': [b.batch_number for b in created_batches],
+                    'message': f'Successfully disbursed PKR {total_disbursed:,.2f} to {paid_count} employee(s).'
+                }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class SalaryPaymentBatchViewSet(BaseFinanceViewSet):
     queryset = SalaryPaymentBatch.objects.all().select_related(

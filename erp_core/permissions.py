@@ -20,21 +20,32 @@ class RolePermission(BasePermission):
             return True
 
         role = getattr(request.user, 'role', None)
-
-        if role == 'super_admin':
-            return True
-
-        # Check granular permissions first
         company_role = getattr(request.user, 'company_role', None)
-        
+
+        if role in ('super_admin', 'admin'):
+            # Company Admin always has full company administration rights unless explicitly restricted by CUSTOM mode in ModulePermission
+            if role == 'super_admin' or not company_role:
+                return True
+            if '*' in (company_role.permissions or []):
+                return True
+
         if company_role:
+            perms_list = company_role.permissions or []
+            if '*' in perms_list:
+                return True
             if request.method in ('GET', 'HEAD', 'OPTIONS'):
                 req_perms = getattr(view, 'required_read_permissions', getattr(view, 'required_permissions', []))
             else:
                 req_perms = getattr(view, 'required_write_permissions', getattr(view, 'required_permissions', []))
                 
             if req_perms:
-                if any(perm in company_role.permissions for perm in req_perms):
+                # Match either explicit permission OR module wildcard (e.g. 'finance.*' matches 'finance.read')
+                for req in req_perms:
+                    mod_prefix = req.split('.')[0] + '.*' if '.' in req else req
+                    if req in perms_list or mod_prefix in perms_list:
+                        return True
+                # Company Admin ('admin') fallback unless view forbids admin
+                if role == 'admin' and 'admin' in getattr(view, 'allowed_roles', ['admin']):
                     return True
                 return False # strictly enforce if view has required_permissions defined
             # If no req_perms defined, allow fallback to legacy for now

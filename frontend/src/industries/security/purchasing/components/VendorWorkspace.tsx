@@ -16,8 +16,6 @@ import { VendorDocumentModal } from './VendorDocumentModal';
 import { PurchaseOrderModal } from './PurchaseOrderModal';
 import { GoodsReceiptList } from './GoodsReceiptList';
 import { VendorInvoiceDetailModal } from './VendorInvoiceDetailModal';
-import { VendorPaymentsTab } from './VendorPaymentsTab';
-import { VendorPaymentModal } from './VendorPaymentModal';
 import { VendorReturnsTab } from './VendorReturnsTab';
 import { VendorStatementTab } from './VendorStatementTab';
 
@@ -33,7 +31,7 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
     const [vendor, setVendor] = useState<Vendor | null>(null);
     const [activeTab, setActiveTab] = useState<
         'overview' | 'contacts' | 'items' | 'documents' | 
-        'orders' | 'receipts' | 'bills' | 'payments' | 'returns' | 'statement'
+        'orders' | 'receipts' | 'bills' | 'returns' | 'statement'
     >('overview');
     const [loading, setLoading] = useState(true);
 
@@ -56,8 +54,6 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
     const [showDocumentModal, setShowDocumentModal] = useState(false);
     const [showCreatePoModal, setShowCreatePoModal] = useState(false);
     const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<string | null>(null);
 
     useEffect(() => {
         loadVendorData();
@@ -153,7 +149,6 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
         { id: 'orders', label: 'Purchase Orders', icon: 'bx-cart' },
         { id: 'receipts', label: 'Receipts (GRN)', icon: 'bx-box' },
         { id: 'bills', label: 'Bills / Invoices', icon: 'bx-receipt' },
-        { id: 'payments', label: 'Payments', icon: 'bx-credit-card' },
         { id: 'returns', label: 'Returns', icon: 'bx-undo' },
         { id: 'statement', label: 'Statement', icon: 'bx-spreadsheet' },
     ];
@@ -862,13 +857,19 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
                                     Verified bills, 3-way match statuses, payable balances, and disbursement settlements.
                                 </p>
                             </div>
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => setShowPaymentModal(true)}
+                            <span
+                                style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    background: 'rgba(2, 132, 199, 0.12)',
+                                    border: '1px solid rgba(2, 132, 199, 0.3)',
+                                    color: '#0284c7',
+                                    fontSize: '12px',
+                                    fontWeight: 600
+                                }}
                             >
-                                <i className='bx bx-credit-card'></i> Record Payment
-                            </Button>
+                                Payments Settled Exclusively in Finance → Vendor & PO Payments
+                            </span>
                         </div>
 
                         {bills.length === 0 ? (
@@ -985,18 +986,6 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
                                                             >
                                                                 Inspect
                                                             </Button>
-                                                            {b.status === 'POSTED' && outstandingAmt > 0 && (
-                                                                <Button
-                                                                    variant="primary"
-                                                                    size="sm"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setSelectedInvoiceForPayment(b.id);
-                                                                    }}
-                                                                >
-                                                                    <i className='bx bx-credit-card'></i> Pay
-                                                                </Button>
-                                                            )}
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -1007,11 +996,6 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
                             </div>
                         )}
                     </Card>
-                )}
-
-
-                {activeTab === 'payments' && (
-                    <VendorPaymentsTab vendorId={vendorId} vendorName={vendor.name} />
                 )}
 
                 {activeTab === 'returns' && (
@@ -1092,19 +1076,6 @@ export const VendorWorkspace: React.FC<VendorWorkspaceProps> = ({ vendorId, onBa
                         setBills(bData);
                         loadVendorData();
                     }}
-                />
-            )}
-
-            {(showPaymentModal || selectedInvoiceForPayment) && (
-                <VendorPaymentModal
-                    isOpen={Boolean(showPaymentModal || selectedInvoiceForPayment)}
-                    onClose={() => {
-                        setShowPaymentModal(false);
-                        setSelectedInvoiceForPayment(null);
-                    }}
-                    onPaymentCreated={loadVendorData}
-                    defaultVendorId={vendorId}
-                    defaultInvoiceId={selectedInvoiceForPayment || undefined}
                 />
             )}
         </div>

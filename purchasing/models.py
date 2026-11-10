@@ -767,8 +767,8 @@ class VendorPaymentAllocation(BaseModel):
             raise ValidationError({'invoice': 'Invoice belongs to a different company.'})
         if self.invoice_id and self.payment_id and self.invoice.vendor_id != self.payment.vendor_id:
             raise ValidationError({'invoice': 'Invoice vendor does not match payment vendor.'})
-        if self.invoice_id and self.invoice.document_type != 'VENDOR_INVOICE':
-            raise ValidationError({'invoice': 'Payment allocation can only be applied to VENDOR_INVOICE documents.'})
+        if self.invoice_id and self.invoice.document_type not in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
+            raise ValidationError({'invoice': 'Payment allocation can only be applied to VENDOR_INVOICE or PURCHASE_ORDER documents.'})
 
     def save(self, *args, **kwargs):
         if self.payment_id and not self.company_id:

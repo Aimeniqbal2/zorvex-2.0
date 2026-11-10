@@ -41,8 +41,16 @@ class ExecutiveFinanceDashboardService:
         from finance.services.financial_statements_service import FinancialStatementsService
         from finance.services.subledger_reconciliation_service import SubledgerReconciliationService
         from finance.services.posting_service import AccountingPostingService
+        from finance.services.period_service import ensure_open_period_and_foundation
+        from purchasing.services.payment_service import get_invoice_payment_summary
+        from operations.models import DailyDutyPay
 
-        # 1. P&L Overview (from GL)
+        try:
+            ensure_open_period_and_foundation(company, date.today())
+        except Exception:
+            pass
+
+        # 1. P&L Overview (from GL, with live Billing/Operations fallback so Executive Dashboard is never blind)
         pnl = FinancialStatementsService.get_profit_and_loss(company, start_date=start_date, end_date=end_date)
         totals = pnl.get('totals', {})
         revenue_this_period = Decimal(str(totals.get('total_revenue', 0)))
@@ -52,10 +60,34 @@ class ExecutiveFinanceDashboardService:
         net_margin_pct = Decimal(str(totals.get('net_margin_pct', 0)))
         opex = Decimal(str(totals.get('total_operating_expenses', 0)))
 
-        # 2. Receivables Overview (from billing)
-        invoices = ClientInvoice.objects.filter(company=company, is_deleted=False)
+        # Live subledger fallback if GL journals haven't been posted yet
+        if revenue_this_period == Decimal('0.0000'):
+            invoiced_rev = ClientInvoice.objects.filter(
+                company=company,
+                is_deleted=False,
+                status__in=['ISSUED', 'SENT', 'PARTIALLY_PAID', 'PAID'],
+                invoice_date__gte=start_date,
+                invoice_date__lte=end_date
+            ).aggregate(s=Sum('subtotal'))['s'] or Decimal('0.0000')
+            if invoiced_rev == Decimal('0.0000'):
+                # Also check by billing_month (YYYY-MM)
+                bm = start_date.strftime('%Y-%m')
+                invoiced_rev = ClientInvoice.objects.filter(
+                    company=company,
+                    is_deleted=False,
+                    status__in=['ISSUED', 'SENT', 'PARTIALLY_PAID', 'PAID'],
+                    billing_month=bm
+                ).aggregate(s=Sum('subtotal'))['s'] or Decimal('0.0000')
+            revenue_this_period = invoiced_rev
+
+        # 2. Receivables Overview (from billing — issued/approved invoices only)
+        invoices = ClientInvoice.objects.filter(
+            company=company,
+            is_deleted=False,
+            status__in=['ISSUED', 'SENT', 'PARTIALLY_PAID']
+        )
         total_ar = invoices.aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
-        overdue_ar = invoices.filter(due_date__lt=date.today(), status__in=['ISSUED', 'PARTIALLY_PAID']).aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
+        overdue_ar = invoices.filter(due_date__lt=date.today()).aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
         
         receipts_period = ClientReceipt.objects.filter(
             company=company,
@@ -64,19 +96,20 @@ class ExecutiveFinanceDashboardService:
             is_deleted=False
         ).aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
 
-        # 3. Payables Overview (from purchasing)
+        # 3. Payables Overview (from purchasing — VENDOR_INVOICE + unpaid approved PURCHASE_ORDER)
         bills = ProcurementDocument.objects.filter(
             company=company,
-            document_type='VENDOR_BILL',
+            document_type='VENDOR_INVOICE',
             is_deleted=False
-        )
+        ).exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
         total_ap = Decimal('0.0000')
         overdue_ap = Decimal('0.0000')
         for b in bills:
-            bal = b.total_amount - (b.paid_amount or Decimal('0.0000'))
+            inv_sum = get_invoice_payment_summary(b)
+            bal = Decimal(str(inv_sum.get('outstanding_amount', 0)))
             if bal > 0:
                 total_ap += bal
-                if b.due_date and b.due_date < date.today():
+                if inv_sum.get('is_overdue'):
                     overdue_ap += bal
 
         vendor_payments_period = VendorPayment.objects.filter(
@@ -84,9 +117,9 @@ class ExecutiveFinanceDashboardService:
             payment_date__gte=start_date,
             payment_date__lte=end_date,
             is_deleted=False
-        ).aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
+        ).exclude(status__in=['CANCELLED', 'REVERSED']).aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
 
-        # 4. Payroll Overview (from S-4G Payroll accounting)
+        # 4. Payroll Overview (from S-4G Payroll accounting + live Operations attendance accrued fallback)
         integrations = PayrollAccountingIntegration.objects.filter(company=company)
         payroll_payable = integrations.exclude(status='POSTED').aggregate(s=Sum('net_payroll_payable'))['s'] or Decimal('0.0000')
         salary_disbursed_period = integrations.filter(
@@ -95,6 +128,24 @@ class ExecutiveFinanceDashboardService:
             created_at__date__lte=end_date
         ).aggregate(s=Sum('total_paid'))['s'] or Decimal('0.0000')
         outstanding_payroll_liability = integrations.aggregate(s=Sum('remaining_liability'))['s'] or Decimal('0.0000')
+
+        live_duty_wages = DailyDutyPay.objects.filter(
+            company=company,
+            duty_date__gte=start_date,
+            duty_date__lte=end_date,
+            is_deleted=False
+        ).aggregate(s=Sum('payable_amount'))['s'] or Decimal('0.0000')
+        if outstanding_payroll_liability == Decimal('0.0000') and live_duty_wages > Decimal('0.0000'):
+            outstanding_payroll_liability = live_duty_wages
+            payroll_payable = live_duty_wages
+
+        if gross_profit == Decimal('0.0000') and (revenue_this_period > Decimal('0.0000') or live_duty_wages > Decimal('0.0000')):
+            direct_cost = live_duty_wages
+            gross_profit = revenue_this_period - direct_cost
+            net_profit = gross_profit - opex
+            if revenue_this_period > Decimal('0.0000'):
+                gross_margin_pct = ((gross_profit / revenue_this_period) * Decimal('100')).quantize(Decimal('0.01'))
+                net_margin_pct = ((net_profit / revenue_this_period) * Decimal('100')).quantize(Decimal('0.01'))
 
         # 5. Treasury Overview (from finance BankAccount)
         bank_accounts = BankAccount.objects.filter(company=company, is_deleted=False)
@@ -197,14 +248,20 @@ class ExecutiveFinanceDashboardService:
             elif overdue_ratio > Decimal('0.15'):
                 ar_status = 'ATTENTION'
 
-        bills = ProcurementDocument.objects.filter(company=company, document_type='VENDOR_BILL', is_deleted=False)
+        from purchasing.services.payment_service import get_invoice_payment_summary
+        bills = ProcurementDocument.objects.filter(
+            company=company,
+            document_type='VENDOR_INVOICE',
+            is_deleted=False
+        ).exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
         total_ap = Decimal('0.0000')
         overdue_ap = Decimal('0.0000')
         for b in bills:
-            bal = b.total_amount - (b.paid_amount or Decimal('0.0000'))
+            inv_sum = get_invoice_payment_summary(b)
+            bal = Decimal(str(inv_sum.get('outstanding_amount', 0)))
             if bal > 0:
                 total_ap += bal
-                if b.due_date and b.due_date < date.today():
+                if inv_sum.get('is_overdue'):
                     overdue_ap += bal
 
         ap_status = 'HEALTHY'
@@ -370,7 +427,12 @@ class ExecutiveFinanceDashboardService:
         """
         Surfaces S-3/S-4F Payables snapshot.
         """
-        bills = ProcurementDocument.objects.filter(company=company, document_type='VENDOR_BILL', is_deleted=False)
+        from purchasing.services.payment_service import get_invoice_payment_summary
+        bills = ProcurementDocument.objects.filter(
+            company=company,
+            document_type='VENDOR_INVOICE',
+            is_deleted=False
+        ).exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
         today = date.today()
 
         total_ap = Decimal('0.0000')
@@ -379,7 +441,8 @@ class ExecutiveFinanceDashboardService:
         due_soon_ap = Decimal('0.0000')
 
         for b in bills:
-            bal = b.total_amount - (b.paid_amount or Decimal('0.0000'))
+            inv_sum = get_invoice_payment_summary(b)
+            bal = Decimal(str(inv_sum.get('outstanding_amount', 0)))
             if bal > 0:
                 total_ap += bal
                 if b.due_date:
@@ -599,7 +662,7 @@ class ExecutiveFinanceDashboardService:
                 'description': f"{followups_due} collection follow-up call(s) scheduled for today."
             })
 
-        blocked_bills = ProcurementDocument.objects.filter(company=company, document_type='VENDOR_BILL', status='REJECTED').count()
+        blocked_bills = ProcurementDocument.objects.filter(company=company, document_type='VENDOR_INVOICE', status='REJECTED').count()
         if blocked_bills > 0:
             actions.append({
                 'id': 'vendor_bills_blocked',
@@ -667,7 +730,7 @@ class ExecutiveFinanceDashboardService:
             if readiness['readiness_status'] == 'BLOCKED':
                 actions.append({
                     'id': 'period_close_blockers',
-                    'title': f"Period Close Blockers in {current_period.name}",
+                    'title': f"Period Close Blockers in {str(current_period)}",
                     'count': 1,
                     'severity': 'HIGH',
                     'category': 'CONTROLS',

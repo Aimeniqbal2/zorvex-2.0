@@ -369,7 +369,7 @@ export const SecurityPurchasingModule: React.FC = () => {
                         }}
                     >
                         <i className='bx bx-receipt' style={{ fontSize: '16px' }}></i>
-                        Vendor Bills & Payments
+                        Vendor Bills (3-Way Match)
                     </button>
                 </div>
 

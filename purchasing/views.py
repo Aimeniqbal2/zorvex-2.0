@@ -36,8 +36,10 @@ from .services.goods_receipt_service import (
 class BasePurchasingViewSet(TenantModelViewSet):
     required_module = 'purchasing'
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
-    allowed_roles = ['admin', 'manager']
+    allowed_roles = ['admin', 'manager', 'finance']
     allowed_reads = ['admin', 'manager', 'sales', 'hr', 'finance', 'staff']
+    required_read_permissions = ['purchasing.read', 'finance.read', 'security_finance.read']
+    required_write_permissions = ['purchasing.write', 'finance.write', 'security_finance.write']
 
     def perform_create(self, serializer):
         serializer.save(company_id=self.request.user.company_id)
@@ -867,6 +869,7 @@ class VendorPaymentViewSet(BasePurchasingViewSet):
         amount = request.data.get('amount')
         payment_method = request.data.get('payment_method', 'BANK_TRANSFER')
         bank_cash_account = request.data.get('bank_cash_account', '')
+        bank_account_id = request.data.get('bank_account_id') or request.data.get('treasury_account_id')
         account_id = request.data.get('account')
         reference_number = request.data.get('reference_number', '')
         cheque_number = request.data.get('cheque_number', '')
@@ -890,6 +893,7 @@ class VendorPaymentViewSet(BasePurchasingViewSet):
                 amount=amount,
                 payment_method=payment_method,
                 bank_cash_account=bank_cash_account,
+                bank_account_id=bank_account_id,
                 account_id=account_id,
                 reference_number=reference_number,
                 cheque_number=cheque_number,

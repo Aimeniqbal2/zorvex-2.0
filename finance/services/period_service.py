@@ -3,9 +3,78 @@ finance/services/period_service.py
 Validation service for Fiscal Years, Accounting Periods, and Account posting controls.
 """
 from typing import Tuple, Optional
-from datetime import date
+from datetime import date, timedelta
 from django.core.exceptions import ValidationError
-from finance.models import AccountingPeriod, ChartOfAccount, PeriodStatus
+from finance.models import AccountingPeriod, ChartOfAccount, PeriodStatus, FiscalYear
+
+
+def ensure_open_period_and_foundation(company, target_date: Optional[date] = None) -> Optional[AccountingPeriod]:
+    """
+    Idempotently ensures basic Security Finance foundation (Currency, COA, SecurityFinanceConfiguration,
+    FiscalYear, and an OPEN AccountingPeriod covering target_date) exists for the company.
+    Never re-opens a CLOSED/LOCKED/SOFT_CLOSED period.
+    """
+    if not company:
+        return None
+    if target_date is None:
+        target_date = date.today()
+
+    from finance.models import SecurityFinanceConfiguration
+    if not SecurityFinanceConfiguration.objects.filter(company=company, is_active=True).exists() or not ChartOfAccount.objects.filter(company=company, is_deleted=False).exists():
+        try:
+            from finance.services.security_coa_template import provision_security_chart_of_accounts
+            # Avoid UniqueConstraint error if another FY is already marked is_current=True
+            has_current_fy = FiscalYear.objects.filter(company=company, is_current=True).exists()
+            if not has_current_fy:
+                provision_security_chart_of_accounts(company)
+        except Exception:
+            pass
+
+    existing = AccountingPeriod.objects.filter(
+        company=company,
+        start_date__lte=target_date,
+        end_date__gte=target_date,
+        is_deleted=False
+    ).first()
+    if existing:
+        return existing
+
+    # Find FY covering target_date or create one safely
+    yr = target_date.year
+    fy = FiscalYear.objects.filter(
+        company=company,
+        start_date__lte=target_date,
+        end_date__gte=target_date,
+        is_deleted=False
+    ).first()
+    if not fy:
+        has_current = FiscalYear.objects.filter(company=company, is_current=True).exists()
+        fy, _ = FiscalYear.objects.get_or_create(
+            company=company,
+            name=f"FY-{yr}",
+            defaults={
+                'start_date': date(yr, 1, 1),
+                'end_date': date(yr, 12, 31),
+                'is_current': not has_current,
+                'is_closed': False,
+            }
+        )
+
+    m = target_date.month
+    start_d = date(yr, m, 1)
+    end_d = date(yr, 12, 31) if m == 12 else (date(yr, m + 1, 1) - timedelta(days=1))
+    period, _ = AccountingPeriod.objects.get_or_create(
+        company=company,
+        fiscal_year=fy,
+        month=m,
+        defaults={
+            'period_number': m,
+            'start_date': start_d,
+            'end_date': end_d,
+            'status': PeriodStatus.OPEN,
+        }
+    )
+    return period
 
 def can_post_transaction(
     company,

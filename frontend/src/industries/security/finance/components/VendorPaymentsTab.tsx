@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { BankAccount } from '../api';
 import {
   fetchVendorBills,
+  fetchPurchaseOrders,
   fetchVendorPayments,
   createVendorPayment,
   fetchVendors,
@@ -20,6 +21,7 @@ export const VendorPaymentsTab: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'PENDING_BILLS' | 'PAYMENTS_HISTORY'>('PENDING_BILLS');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedVendorFilter, setSelectedVendorFilter] = useState<string>('ALL');
+  const [docTypeFilter, setDocTypeFilter] = useState<'ALL' | 'VENDOR_INVOICE' | 'PURCHASE_ORDER'>('ALL');
 
   // Payment Modal
   const [payModalOpen, setPayModalOpen] = useState<boolean>(false);
@@ -38,24 +40,31 @@ export const VendorPaymentsTab: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [billsData, paymentsData, vendorsData, banksData] = await Promise.all([
-        fetchVendorBills().catch(() => []),
-        fetchVendorPayments().catch(() => []),
-        fetchVendors().catch(() => []),
-        fetchBankAccounts().catch(() => [])
+      const [billsData, posData, paymentsData, vendorsData, banksData] = await Promise.all([
+        fetchVendorBills(),
+        fetchPurchaseOrders(),
+        fetchVendorPayments(),
+        fetchVendors(),
+        fetchBankAccounts()
       ]);
 
-      setBills(Array.isArray(billsData) ? billsData : ((billsData as any)?.results || []));
+      const invList = Array.isArray(billsData) ? billsData : ((billsData as any)?.results || []);
+      const poList = (Array.isArray(posData) ? posData : ((posData as any)?.results || [])).filter(
+        (po: any) => ['APPROVED', 'SENT', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED'].includes(po.status)
+      );
+
+      setBills([...invList, ...poList]);
       setPayments(Array.isArray(paymentsData) ? paymentsData : ((paymentsData as any)?.results || []));
       setVendors(Array.isArray(vendorsData) ? vendorsData : ((vendorsData as any)?.results || []));
-      
-      const activeBanks = banksData.filter((b) => b.is_active);
-      setBankAccounts(activeBanks);
-      if (activeBanks.length > 0 && !selectedBankAccountId) {
-        setSelectedBankAccountId(activeBanks[0].id);
+
+      const bankList = Array.isArray(banksData) ? banksData : ((banksData as any)?.results || []);
+      const activeBanks = bankList.filter((b: BankAccount) => b.is_active);
+      setBankAccounts(activeBanks.length > 0 ? activeBanks : bankList);
+      if ((activeBanks.length > 0 ? activeBanks : bankList).length > 0 && !selectedBankAccountId) {
+        setSelectedBankAccountId((activeBanks.length > 0 ? activeBanks : bankList)[0].id);
       }
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || 'Failed to load purchasing & vendor payments data.');
+      setError(err?.response?.data?.detail || err?.response?.data?.error || err.message || 'Failed to load purchasing & vendor payments data.');
     } finally {
       setLoading(false);
     }
@@ -65,12 +74,13 @@ export const VendorPaymentsTab: React.FC = () => {
     loadData();
   }, []);
 
-  // Filter bills
+  // Filter payable bills & purchase orders
   const pendingBills = bills.filter((b) => {
     const total = Number(b.total_amount || b.amount || 0);
     const paid = Number(b.paid_amount || 0);
-    const balance = total - paid;
-    return b.status !== 'CANCELLED' && balance > 0;
+    const balance = b.outstanding_amount !== undefined ? Number(b.outstanding_amount) : (total - paid);
+    if (b.document_type === 'VENDOR_INVOICE' && b.status !== 'POSTED') return false;
+    return !['CANCELLED', 'REJECTED', 'DRAFT'].includes(b.status) && balance > 0;
   });
 
   const filteredBills = pendingBills.filter((b) => {
@@ -81,7 +91,8 @@ export const VendorPaymentsTab: React.FC = () => {
       docNum.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesVendor = selectedVendorFilter === 'ALL' || String(b.vendor?.id || b.vendor) === selectedVendorFilter;
-    return matchesSearch && matchesVendor;
+    const matchesDocType = docTypeFilter === 'ALL' || b.document_type === docTypeFilter;
+    return matchesSearch && matchesVendor && matchesDocType;
   });
 
   // Filter Payments
@@ -129,7 +140,8 @@ export const VendorPaymentsTab: React.FC = () => {
     setChequeNumber('');
     setChequeDate('');
     setPayDate(new Date().toISOString().split('T')[0]);
-    setPayNotes(`Payment for Vendor Bill ${bill.number || bill.reference_number || ''}`);
+    const docLabel = bill.document_type === 'PURCHASE_ORDER' ? 'Purchase Order' : 'Vendor Bill';
+    setPayNotes(`Payment for ${docLabel} ${bill.number || bill.reference_number || ''}`);
     setPayModalOpen(true);
   };
 
@@ -146,9 +158,11 @@ export const VendorPaymentsTab: React.FC = () => {
 
     const vendorId = selectedBill.vendor?.id || selectedBill.vendor;
     if (!vendorId) {
-      alert('Missing vendor information on this bill.');
+      alert('Missing vendor information on this bill/PO.');
       return;
     }
+
+    const chosenBank = bankAccounts.find((b) => b.id === selectedBankAccountId);
 
     setSubmittingPayment(true);
     try {
@@ -157,13 +171,13 @@ export const VendorPaymentsTab: React.FC = () => {
         payment_date: payDate,
         amount: amt,
         payment_method: payMethod,
-        bank_cash_account: selectedBankAccountId,
-        account: selectedBankAccountId,
+        bank_account_id: selectedBankAccountId || undefined,
+        bank_cash_account: chosenBank ? `${chosenBank.bank_name || ''} - ${chosenBank.account_title}` : undefined,
         reference_number: refNumber || undefined,
         cheque_number: chequeNumber || undefined,
         cheque_date: chequeDate || undefined,
         notes: payNotes || undefined,
-        allocations: [{ invoice: selectedBill.id, amount: amt }],
+        allocations: [{ invoice_id: selectedBill.id, amount: amt }],
         auto_post: true
       });
 
@@ -401,7 +415,24 @@ export const VendorPaymentsTab: React.FC = () => {
               />
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <select
+                value={docTypeFilter}
+                onChange={(e) => setDocTypeFilter(e.target.value as 'ALL' | 'VENDOR_INVOICE' | 'PURCHASE_ORDER')}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border, #cbd5e1)',
+                  fontSize: '13px',
+                  background: 'var(--color-surface, #ffffff)',
+                  color: 'inherit'
+                }}
+              >
+                <option value="ALL">All Bills & POs</option>
+                <option value="VENDOR_INVOICE">Vendor Invoices Only</option>
+                <option value="PURCHASE_ORDER">Purchase Orders Only</option>
+              </select>
+
               <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Vendor:</span>
               <select
                 value={selectedVendorFilter}
@@ -495,9 +526,23 @@ export const VendorPaymentsTab: React.FC = () => {
                           )}
                         </td>
                         <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontWeight: 600, color: '#0284c7' }}>
-                            {bill.number || bill.reference_number || 'BILL'}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 600, color: '#0284c7' }}>
+                              {bill.number || bill.reference_number || 'DOC'}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                background: bill.document_type === 'PURCHASE_ORDER' ? 'rgba(124, 58, 237, 0.12)' : 'rgba(2, 132, 199, 0.12)',
+                                color: bill.document_type === 'PURCHASE_ORDER' ? '#7c3aed' : '#0284c7'
+                              }}
+                            >
+                              {bill.document_type === 'PURCHASE_ORDER' ? 'PO' : 'INVOICE'}
+                            </span>
+                          </div>
                           {bill.parent_document && (
                             <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
                               PO: {bill.parent_document.number || bill.parent_document}
@@ -505,7 +550,9 @@ export const VendorPaymentsTab: React.FC = () => {
                           )}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          {bill.issue_date || bill.created_at ? new Date(bill.issue_date || bill.created_at).toLocaleDateString() : 'N/A'}
+                          {bill.document_date || bill.issue_date || bill.created_at
+                            ? new Date(bill.document_date || bill.issue_date || bill.created_at).toLocaleDateString()
+                            : 'N/A'}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                           <div style={{ color: isOverdue ? '#ef4444' : 'inherit', fontWeight: isOverdue ? 600 : 400 }}>
