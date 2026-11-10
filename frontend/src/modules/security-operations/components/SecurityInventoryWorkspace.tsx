@@ -59,7 +59,6 @@ export const SecurityInventoryWorkspace: React.FC = () => {
     const [selectedStore, setSelectedStore] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('');
     const [isControlledFilter, setIsControlledFilter] = useState('');
-    const [isSerializedFilter, setIsSerializedFilter] = useState('');
     const [custodyTypeFilter, setCustodyTypeFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
 
@@ -186,8 +185,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                     search: searchQuery || undefined,
                     warehouse_id: selectedStore || undefined,
                     category: selectedCategory || undefined,
-                    is_controlled: isControlledFilter || undefined,
-                    is_serialized: isSerializedFilter || undefined
+                    is_controlled: isControlledFilter || undefined
                 }).catch(() => []),
                 getEquipmentIssues({ search: searchQuery || undefined, status: statusFilter || undefined }).catch(() => ({ results: [] })),
                 getEquipmentIncidents().catch(() => []),
@@ -216,7 +214,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [searchQuery, selectedStore, selectedCategory, isControlledFilter, isSerializedFilter, statusFilter]);
+    }, [searchQuery, selectedStore, selectedCategory, isControlledFilter, statusFilter]);
 
     useEffect(() => {
         loadOverviewAndData();

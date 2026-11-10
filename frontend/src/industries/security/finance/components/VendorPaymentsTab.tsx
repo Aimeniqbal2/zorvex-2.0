@@ -45,9 +45,9 @@ export const VendorPaymentsTab: React.FC = () => {
         fetchBankAccounts().catch(() => [])
       ]);
 
-      setBills(Array.isArray(billsData) ? billsData : (billsData.results || []));
-      setPayments(Array.isArray(paymentsData) ? paymentsData : (paymentsData.results || []));
-      setVendors(Array.isArray(vendorsData) ? vendorsData : (vendorsData.results || []));
+      setBills(Array.isArray(billsData) ? billsData : ((billsData as any)?.results || []));
+      setPayments(Array.isArray(paymentsData) ? paymentsData : ((paymentsData as any)?.results || []));
+      setVendors(Array.isArray(vendorsData) ? vendorsData : ((vendorsData as any)?.results || []));
       
       const activeBanks = banksData.filter((b) => b.is_active);
       setBankAccounts(activeBanks);

@@ -6,7 +6,7 @@ import {
   generateClientInvoiceFromCRM
 } from '../api';
 import type { CRMInvoiceServiceItem } from '../api';
-import { getMonthlyMusterGrid, getTemporaryServices } from '../../../modules/security-operations/api';
+import { getMonthlyMusterGrid, getTemporaryServices } from '../../../../modules/security-operations/api';
 
 interface CRMInvoicingModalProps {
   isOpen: boolean;
@@ -70,7 +70,7 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
       try {
         const data = await fetchCRMEntities();
         // Filter or use entities that are clients
-        const clientList = Array.isArray(data) ? data : (data.results || []);
+        const clientList = Array.isArray(data) ? data : ((data as any)?.results || []);
         setClients(clientList);
         if (clientList.length > 0 && !selectedClientId) {
           setSelectedClientId(clientList[0].id);
@@ -99,17 +99,18 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
         const [allSitesRes, contractsRes, tempRes] = await Promise.all([
           fetchOperationalSites().catch(() => []),
           fetchServiceContracts().catch(() => []),
-          getTemporaryServices({ client: selectedClientId }).catch(() => ({ results: [] }))
+          getTemporaryServices({ crm_entity: selectedClientId }).catch(() => ({ results: [] }))
         ]);
 
         if (!isMounted) return;
 
-        const allSites = Array.isArray(allSitesRes) ? allSitesRes : (allSitesRes.results || []);
-        const allContracts = Array.isArray(contractsRes) ? contractsRes : (contractsRes.results || []);
-        const allTemp = Array.isArray(tempRes) ? tempRes : (tempRes.results || []);
+        const allSites = Array.isArray(allSitesRes) ? allSitesRes : ((allSitesRes as any)?.results || []);
+        const allContracts = Array.isArray(contractsRes) ? contractsRes : ((contractsRes as any)?.results || []);
+        const allTemp = Array.isArray(tempRes) ? tempRes : ((tempRes as any)?.results || []);
 
         // Filter permanent sites for this client
         const clientSites = allSites.filter((s: any) =>
+          String(s.crm_entity) === String(selectedClientId) ||
           String(s.client) === String(selectedClientId) ||
           String(s.client_id) === String(selectedClientId) ||
           String(s.customer) === String(selectedClientId)
@@ -118,7 +119,7 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
         // Match with contracts to get rates
         const configs: SiteServiceConfig[] = clientSites.map((site: any) => {
           const contract = allContracts.find((c: any) =>
-            String(c.client) === String(selectedClientId) &&
+            (String(c.crm_entity) === String(selectedClientId) || String(c.client) === String(selectedClientId)) &&
             (c.site === site.id || (Array.isArray(c.sites) && c.sites.includes(site.id)))
           );
 
@@ -129,7 +130,7 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
             siteId: site.id,
             siteName: site.name || 'Unnamed Location',
             contractId: contract?.id,
-            contractCode: contract?.contract_number || contract?.code || 'CONTRACT',
+            contractCode: contract?.contract_code || contract?.contract_number || contract?.code || 'CONTRACT',
             included: true,
             calcMode: 'CONTRACT_RATE',
             contractMonthlyRate: monthlyRate,
@@ -144,17 +145,23 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
         // Map Temporary Services for this client in the month
         const matchedTemp: TempServiceConfig[] = allTemp
           .filter((t: any) => {
-            const dateMatch = !t.start_date || t.start_date.startsWith(billingMonth);
-            return dateMatch;
+            const clientMatch =
+              String(t.crm_entity || t.client || '') === String(selectedClientId);
+            const rawDate = t.start_datetime || t.start_date;
+            const dateMatch = !rawDate || String(rawDate).startsWith(billingMonth);
+            return clientMatch && dateMatch;
           })
-          .map((t: any) => ({
-            id: t.id,
-            title: t.title || t.service_name || 'Event Security Service',
-            venue: t.venue_name || t.address || 'Event Venue',
-            dateStr: t.start_date ? t.start_date.split('T')[0] : 'N/A',
-            amount: Number(t.total_amount || t.commercial_value || 0),
-            included: true
-          }));
+          .map((t: any) => {
+            const rawDate = t.start_datetime || t.start_date;
+            return {
+              id: t.id,
+              title: t.title || t.service_name || 'Event Security Service',
+              venue: t.site_name || t.operational_site_name || t.venue_name || t.address || 'Event Venue',
+              dateStr: rawDate ? String(rawDate).split('T')[0] : 'N/A',
+              amount: Number(t.grand_total || t.total_amount || t.commercial_value || 0),
+              included: true
+            };
+          });
 
         setTempConfigs(matchedTemp);
         setLoadingServices(false);
