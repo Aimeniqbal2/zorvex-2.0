@@ -482,6 +482,303 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=['post'], url_path='generate-from-crm')
+    def generate_from_crm(self, request):
+        """
+        POST /api/billing/client-invoices/generate-from-crm/
+        Generates official ClientInvoice(s) from CRM & Operations data.
+        Supports both CONTRACT_RATE and ATTENDANCE_RATE calculations,
+        for Permanent and Temporary services, either grouped per location
+        or consolidated into a single invoice.
+        """
+        from datetime import datetime, date, timedelta
+        from decimal import Decimal
+        from django.db import transaction
+        from django.utils import timezone
+        from crm.models import CRMEntity
+        from operations.models import OperationalSite, ServiceContract
+        from finance.models import Currency, SecurityFinanceConfiguration
+
+        company_id = self._get_company_id(request)
+        client_id = request.data.get('client_id')
+        billing_month = request.data.get('billing_month')  # 'YYYY-MM'
+        invoice_date_str = request.data.get('invoice_date')
+        due_date_str = request.data.get('due_date')
+        payment_terms = request.data.get('payment_terms', 'Net 30')
+        group_by = request.data.get('group_by', 'PER_LOCATION')  # 'PER_LOCATION' | 'CONSOLIDATED'
+        tax_rate = Decimal(str(request.data.get('tax_rate', '0.00')))
+        services = request.data.get('services', [])
+
+        if not client_id:
+            return Response({'error': 'client_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not billing_month:
+            return Response({'error': 'billing_month is required (format YYYY-MM).'}, status=status.HTTP_400_BAD_REQUEST)
+        if not services:
+            return Response({'error': 'No services selected for invoicing.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        client = CRMEntity.objects.filter(id=client_id, company_id=company_id).first()
+        if not client:
+            return Response({'error': 'Client not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        inv_date = datetime.strptime(str(invoice_date_str).strip(), '%Y-%m-%d').date() if invoice_date_str else timezone.now().date()
+        due_date = datetime.strptime(str(due_date_str).strip(), '%Y-%m-%d').date() if due_date_str else (inv_date + timedelta(days=30))
+
+        try:
+            year, month = map(int, billing_month.split('-'))
+            import calendar
+            _, last_day = calendar.monthrange(year, month)
+            period_start = date(year, month, 1)
+            period_end = date(year, month, last_day)
+        except Exception:
+            period_start = inv_date
+            period_end = inv_date
+
+        currency = None
+        fin_cfg = SecurityFinanceConfiguration.objects.filter(company_id=company_id, is_active=True).first()
+        if fin_cfg and fin_cfg.default_currency:
+            currency = fin_cfg.default_currency
+
+        created_invoices = []
+
+        with transaction.atomic():
+            if group_by == 'PER_LOCATION':
+                grouped_services = {}
+                for svc in services:
+                    key = str(svc.get('site_id') or svc.get('reference') or 'general')
+                    grouped_services.setdefault(key, []).append(svc)
+
+                for grp_key, svc_list in grouped_services.items():
+                    subtotal = Decimal('0.00')
+                    lines_data = []
+                    site_obj = None
+
+                    for s in svc_list:
+                        qty = Decimal(str(s.get('quantity', 1)))
+                        rate = Decimal(str(s.get('unit_rate', 0)))
+                        line_sub = (qty * rate).quantize(Decimal('0.01'))
+                        subtotal += line_sub
+
+                        s_id = s.get('site_id')
+                        if s_id and not site_obj:
+                            site_obj = OperationalSite.objects.filter(id=s_id, company_id=company_id).first()
+
+                        line_tax = (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                        lines_data.append({
+                            'line_type': s.get('service_type', 'REGULAR_SERVICE'),
+                            'description': s.get('description', f"Guarding Services - {billing_month}"),
+                            'site': site_obj,
+                            'quantity': qty,
+                            'unit_rate': rate,
+                            'line_subtotal': line_sub,
+                            'tax_rate': tax_rate,
+                            'tax_amount': line_tax,
+                            'total_amount': line_sub + line_tax
+                        })
+
+                    tax_amount = (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                    grand_total = subtotal + tax_amount
+                    loc_name = site_obj.name if site_obj else 'General Services'
+                    invoice_number = ClientInvoice.generate_next_invoice_number(client.company)
+
+                    inv = ClientInvoice.objects.create(
+                        company_id=company_id,
+                        invoice_number=invoice_number,
+                        client=client,
+                        contract=ServiceContract.objects.filter(crm_entity=client, company_id=company_id, status='ACTIVE').first(),
+                        billing_month=billing_month,
+                        period_start=period_start,
+                        period_end=period_end,
+                        invoice_date=inv_date,
+                        due_date=due_date,
+                        currency=currency,
+                        payment_terms=payment_terms,
+                        subtotal=subtotal,
+                        tax_amount=tax_amount,
+                        grand_total=grand_total,
+                        paid_amount=Decimal('0.00'),
+                        status=ClientInvoiceStatus.ISSUED,
+                        issued_at=timezone.now(),
+                        issued_by=request.user,
+                        notes=f"Services for {loc_name} ({billing_month})"
+                    )
+
+                    for ld in lines_data:
+                        ClientInvoiceLine.objects.create(
+                            company_id=company_id,
+                            invoice=inv,
+                            line_type=ld['line_type'],
+                            description=ld['description'],
+                            site=ld['site'],
+                            quantity=ld['quantity'],
+                            unit_rate=ld['unit_rate'],
+                            line_subtotal=ld['line_subtotal'],
+                            tax_rate=ld['tax_rate'],
+                            tax_amount=ld['tax_amount'],
+                            total_amount=ld['total_amount']
+                        )
+
+                    created_invoices.append(inv)
+
+            else:
+                subtotal = Decimal('0.00')
+                lines_data = []
+
+                for s in services:
+                    qty = Decimal(str(s.get('quantity', 1)))
+                    rate = Decimal(str(s.get('unit_rate', 0)))
+                    line_sub = (qty * rate).quantize(Decimal('0.01'))
+                    subtotal += line_sub
+
+                    s_id = s.get('site_id')
+                    s_obj = OperationalSite.objects.filter(id=s_id, company_id=company_id).first() if s_id else None
+
+                    line_tax = (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                    lines_data.append({
+                        'line_type': s.get('service_type', 'REGULAR_SERVICE'),
+                        'description': s.get('description', f"Guarding Services - {billing_month}"),
+                        'site': s_obj,
+                        'quantity': qty,
+                        'unit_rate': rate,
+                        'line_subtotal': line_sub,
+                        'tax_rate': tax_rate,
+                        'tax_amount': line_tax,
+                        'total_amount': line_sub + line_tax
+                    })
+
+                tax_amount = (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                grand_total = subtotal + tax_amount
+                invoice_number = ClientInvoice.generate_next_invoice_number(client.company)
+
+                inv = ClientInvoice.objects.create(
+                    company_id=company_id,
+                    invoice_number=invoice_number,
+                    client=client,
+                    contract=ServiceContract.objects.filter(crm_entity=client, company_id=company_id, status='ACTIVE').first(),
+                    billing_month=billing_month,
+                    period_start=period_start,
+                    period_end=period_end,
+                    invoice_date=inv_date,
+                    due_date=due_date,
+                    currency=currency,
+                    payment_terms=payment_terms,
+                    subtotal=subtotal,
+                    tax_amount=tax_amount,
+                    grand_total=grand_total,
+                    paid_amount=Decimal('0.00'),
+                    status=ClientInvoiceStatus.ISSUED,
+                    issued_at=timezone.now(),
+                    issued_by=request.user,
+                    notes=f"Consolidated Security Services ({billing_month})"
+                )
+
+                for ld in lines_data:
+                    ClientInvoiceLine.objects.create(
+                        company_id=company_id,
+                        invoice=inv,
+                        line_type=ld['line_type'],
+                        description=ld['description'],
+                        site=ld['site'],
+                        quantity=ld['quantity'],
+                        unit_rate=ld['unit_rate'],
+                        line_subtotal=ld['line_subtotal'],
+                        tax_rate=ld['tax_rate'],
+                        tax_amount=ld['tax_amount'],
+                        total_amount=ld['total_amount']
+                    )
+
+                created_invoices.append(inv)
+
+        return Response(ClientInvoiceSerializer(created_invoices, many=True).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='record-payment')
+    def record_payment(self, request, pk=None):
+        """
+        POST /api/billing/client-invoices/{id}/record-payment/
+        Records client payment collection, updates invoice.paid_amount,
+        marks status to PAID or PARTIALLY_PAID, and logs recovery activity.
+        """
+        from datetime import datetime
+        from decimal import Decimal
+        from django.db import transaction
+        from django.utils import timezone
+        from finance.models import BankAccount
+        from .models import ClientReceipt, ClientReceiptAllocation, ReceiptStatus, RecoveryStatus, RecoveryActivity
+
+        invoice = self.get_object()
+        amount_val = request.data.get('amount')
+        payment_method = request.data.get('payment_method', 'BANK_TRANSFER')
+        bank_account_id = request.data.get('bank_account_id')
+        reference_number = request.data.get('reference_number', '')
+        cheque_number = request.data.get('cheque_number', '')
+        receipt_date_str = request.data.get('receipt_date')
+        notes = request.data.get('notes', '')
+
+        if not amount_val:
+            return Response({'error': 'amount is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        amount = Decimal(str(amount_val)).quantize(Decimal('0.01'))
+        if amount <= 0:
+            return Response({'error': 'amount must be greater than zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        receipt_date = timezone.now().date()
+        if receipt_date_str:
+            try:
+                receipt_date = datetime.strptime(str(receipt_date_str).strip(), '%Y-%m-%d').date()
+            except ValueError:
+                pass
+
+        bank_account = None
+        if bank_account_id:
+            bank_account = BankAccount.objects.filter(id=bank_account_id, company_id=invoice.company_id).first()
+        if not bank_account:
+            bank_account = BankAccount.objects.filter(company_id=invoice.company_id, is_active=True).first()
+
+        with transaction.atomic():
+            receipt = ClientReceipt.objects.create(
+                company=invoice.company,
+                client=invoice.client,
+                receipt_date=receipt_date,
+                amount=amount,
+                payment_method=payment_method,
+                bank_account=bank_account,
+                reference_number=reference_number,
+                cheque_number=cheque_number,
+                notes=notes or f"Recovery against invoice {invoice.invoice_number}",
+                received_by=request.user,
+                status=ReceiptStatus.POSTED,
+                posted_at=timezone.now(),
+                posted_by=request.user
+            )
+
+            ClientReceiptAllocation.objects.create(
+                company=invoice.company,
+                receipt=receipt,
+                invoice=invoice,
+                allocated_amount=amount
+            )
+
+            invoice.paid_amount = (invoice.paid_amount or Decimal('0.00')) + amount
+            if invoice.paid_amount >= invoice.grand_total:
+                invoice.status = ClientInvoiceStatus.PAID
+                invoice.recovery_status = RecoveryStatus.RECOVERED
+            else:
+                invoice.status = ClientInvoiceStatus.PARTIALLY_PAID
+                invoice.recovery_status = RecoveryStatus.PARTIALLY_RECOVERED
+            invoice.save()
+
+            RecoveryActivity.objects.create(
+                company=invoice.company,
+                client=invoice.client,
+                invoice=invoice,
+                activity_type='PAYMENT_COLLECTION',
+                activity_date=receipt_date,
+                notes=f"Collected PKR {amount:,.2f} via {payment_method}. Ref: {reference_number or cheque_number}",
+                recovery_status_outcome=invoice.recovery_status,
+                created_by=request.user
+            )
+
+        return Response(self.get_serializer(invoice).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='send-email')
     def send_email(self, request, pk=None):
         invoice = self.get_object()

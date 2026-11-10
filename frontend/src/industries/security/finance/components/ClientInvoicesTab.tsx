@@ -10,6 +10,7 @@ import {
   sendClientInvoiceEmail,
   fetchClientInvoicePreviewContext
 } from '../api';
+import { CRMInvoicingModal } from './CRMInvoicingModal';
 
 export const ClientInvoicesTab: React.FC = () => {
   const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
@@ -17,6 +18,9 @@ export const ClientInvoicesTab: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // CRM Invoicing Modal
+  const [isCRMModalOpen, setIsCRMModalOpen] = useState<boolean>(false);
 
   // Action Loading
   const [actionLoading, setActionLoading] = useState<boolean>(false);
@@ -151,21 +155,43 @@ export const ClientInvoicesTab: React.FC = () => {
             Official billing invoices generated from approved Billing Sheets with rate snapshot immutability.
           </p>
         </div>
-        <button
-          onClick={loadInvoices}
-          style={{
-            padding: '8px 16px',
-            borderRadius: '6px',
-            border: '1px solid var(--color-border)',
-            background: 'var(--color-surface)',
-            color: 'var(--color-text)',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 500
-          }}
-        >
-          Refresh Invoices
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setIsCRMModalOpen(true)}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'var(--color-primary, #0284c7)',
+              color: '#ffffff',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 6px rgba(2, 132, 199, 0.35)'
+            }}
+          >
+            <i className="bx bx-plus-circle" style={{ fontSize: '16px' }}></i>
+            <span>Generate from CRM & Attendance</span>
+          </button>
+          <button
+            onClick={loadInvoices}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 500
+            }}
+          >
+            Refresh Invoices
+          </button>
+        </div>
       </div>
 
       {/* Filters Bar */}
@@ -650,6 +676,13 @@ export const ClientInvoicesTab: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* CRM Invoicing Modal */}
+      <CRMInvoicingModal
+        isOpen={isCRMModalOpen}
+        onClose={() => setIsCRMModalOpen(false)}
+        onSuccess={loadInvoices}
+      />
     </div>
   );
 };

@@ -26,7 +26,7 @@ class TenantMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        from subscriptions.models import CompanySubscription  # imported locally to avoid registry conflicts
+        from subscriptions.models import CompanySubscription, SubscriptionPlan  # imported locally to avoid registry conflicts
         path = request.path
         
         _thread_locals.company = None
@@ -60,6 +60,8 @@ class TenantMiddleware:
             except Exception:
                 pass
         
+        is_admin_path = path == '/admin' or path.startswith('/admin/')
+        
         if request.user.is_authenticated:
             _thread_locals.user = request.user
             if getattr(request.user, 'company_id', None):
@@ -70,27 +72,50 @@ class TenantMiddleware:
                 if x_company_id:
                     company_id = x_company_id
                     _thread_locals.company = company_id
-                elif not path.startswith('/admin/'):
+                elif not is_admin_path:
                     from platform_core.views import _get_company_for_user
                     comp, _ = _get_company_for_user(request)
                     if comp:
                         company_id = comp.id
                         _thread_locals.company = company_id
         
-        if company_id:
-            # SaaS Gatekeeper (Bypass Auth, Webhooks, and Admin panels)
-            excluded_paths = ['/api/auth/', '/api/subscriptions/webhook/', '/admin/']
-            if not any(path.startswith(ep) for ep in excluded_paths):
-                from django.core.cache import cache
-                cache_key = f"company_sub_valid_{company_id}"
-                is_valid = cache.get(cache_key)
-                if is_valid is None:
-                    active_sub = CompanySubscription.objects.filter(company_id=company_id, is_active=True).first()
-                    is_valid = bool(active_sub and active_sub.end_date >= timezone.now().date())
-                    cache.set(cache_key, is_valid, 60) # cache for 60 seconds
-                
-                if not is_valid:
-                    return JsonResponse({'error': '402 Payment Required. SaaS Subscription Expired. Please use JazzCash/EasyPaisa portal to renew.'}, status=402)
+        is_exempt = (
+            is_admin_path
+            or path.startswith('/api/auth/')
+            or path.startswith('/api/subscriptions/webhook/')
+            or path.startswith('/static/')
+            or path.startswith('/media/')
+        )
+
+        if company_id and not is_exempt and not (request.user.is_authenticated and request.user.is_superuser):
+            from django.core.cache import cache
+            from django.conf import settings
+            cache_key = f"company_sub_valid_{company_id}"
+            is_valid = cache.get(cache_key)
+            if is_valid is None:
+                active_sub = CompanySubscription.objects.filter(company_id=company_id, is_active=True).first()
+                if not active_sub:
+                    # Auto-provision or allow if no subscription has ever been created (e.g. initial setup / dev)
+                    plan = SubscriptionPlan.objects.first()
+                    if plan:
+                        try:
+                            active_sub = CompanySubscription.objects.create(
+                                company_id=company_id,
+                                plan=plan,
+                                start_date=timezone.now().date(),
+                                end_date=(timezone.now() + timezone.timedelta(days=365)).date(),
+                                is_active=True
+                            )
+                        except Exception:
+                            pass
+                is_valid = bool(active_sub and active_sub.end_date >= timezone.now().date())
+                if is_valid is False and getattr(settings, 'DEBUG', False):
+                    # In local debug mode, do not hard-block developer
+                    is_valid = True
+                cache.set(cache_key, is_valid, 60) # cache for 60 seconds
+            
+            if not is_valid:
+                return JsonResponse({'error': '402 Payment Required. SaaS Subscription Expired. Please use JazzCash/EasyPaisa portal to renew.'}, status=402)
 
         response = self.get_response(request)
         

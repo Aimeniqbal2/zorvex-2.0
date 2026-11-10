@@ -660,6 +660,140 @@ export async function fetchCRMEntities(params?: Record<string, any>): Promise<an
   return resp.data.results || resp.data;
 }
 
+export interface CRMInvoiceServiceItem {
+  type: 'PERMANENT' | 'TEMPORARY';
+  site_id?: string;
+  site_name?: string;
+  contract_id?: string;
+  calculation_mode: 'CONTRACT_RATE' | 'ATTENDANCE_RATE';
+  contract_monthly_rate?: number;
+  fulfilled_shifts?: number;
+  guard_daily_bill_rate?: number;
+  temporary_service_id?: string;
+  temporary_title?: string;
+  temporary_amount?: number;
+}
+
+export interface GenerateFromCRMPayload {
+  client_id: string;
+  billing_month: string;
+  invoice_date?: string;
+  due_date?: string;
+  payment_terms?: string;
+  tax_rate?: number;
+  group_by?: 'PER_LOCATION' | 'CONSOLIDATED';
+  services: CRMInvoiceServiceItem[];
+}
+
+export async function generateClientInvoiceFromCRM(data: GenerateFromCRMPayload): Promise<{
+  success: boolean;
+  count: number;
+  invoices: ClientInvoice[];
+}> {
+  const resp = await axios.post(`${BILLING_API_BASE}/client-invoices/generate-from-crm/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function recordClientInvoicePayment(invoiceId: string, data: {
+  amount: number | string;
+  payment_method?: string;
+  bank_account_id?: string;
+  reference_number?: string;
+  cheque_number?: string;
+  receipt_date?: string;
+  notes?: string;
+}): Promise<any> {
+  const resp = await axios.post(`${BILLING_API_BASE}/client-invoices/${invoiceId}/record-payment/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export interface ARSummaryData {
+  total_invoiced: number;
+  total_paid: number;
+  total_outstanding: number;
+  overdue_amount: number;
+  aging: {
+    current: number;
+    days_1_30: number;
+    days_31_60: number;
+    days_61_90: number;
+    days_90_plus: number;
+  };
+}
+
+export async function fetchARSummary(): Promise<ARSummaryData> {
+  const resp = await axios.get(`${BILLING_API_BASE}/client-invoices/ar-summary/`, getAuthHeaders());
+  return resp.data;
+}
+
+export async function fetchARAgingReport(): Promise<any> {
+  const resp = await axios.get(`${BILLING_API_BASE}/client-invoices/aging-report/`, getAuthHeaders());
+  return resp.data;
+}
+
+export async function recordRecoveryActivity(data: {
+  invoice?: string;
+  client?: string;
+  activity_type: string;
+  follow_up_date?: string;
+  notes: string;
+  promise_amount?: number | string;
+}): Promise<any> {
+  const resp = await axios.post(`${BILLING_API_BASE}/recovery-activities/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function fetchRecoveryActivities(params?: Record<string, any>): Promise<any[]> {
+  const resp = await axios.get(`${BILLING_API_BASE}/recovery-activities/`, {
+    ...getAuthHeaders(),
+    params
+  });
+  return resp.data.results || resp.data;
+}
+
+// Vendor Payments from Purchasing
+export async function fetchVendorBills(params?: Record<string, any>): Promise<any[]> {
+  const resp = await axios.get(`${getApiBaseUrl()}/api/purchasing/documents/`, {
+    ...getAuthHeaders(),
+    params: { document_type: 'VENDOR_BILL', ...params }
+  });
+  return resp.data.results || resp.data;
+}
+
+export async function fetchVendorPayments(params?: Record<string, any>): Promise<any[]> {
+  const resp = await axios.get(`${getApiBaseUrl()}/api/purchasing/payments/`, {
+    ...getAuthHeaders(),
+    params
+  });
+  return resp.data.results || resp.data;
+}
+
+export async function createVendorPayment(data: {
+  vendor: string;
+  payment_date: string;
+  amount: number | string;
+  payment_method?: string;
+  bank_cash_account?: string;
+  account?: string;
+  reference_number?: string;
+  cheque_number?: string;
+  cheque_date?: string;
+  notes?: string;
+  allocations?: Array<{ invoice: string; amount: number | string }>;
+  auto_post?: boolean;
+}): Promise<any> {
+  const resp = await axios.post(`${getApiBaseUrl()}/api/purchasing/payments/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function fetchVendors(params?: Record<string, any>): Promise<any[]> {
+  const resp = await axios.get(`${getApiBaseUrl()}/api/purchasing/vendors/`, {
+    ...getAuthHeaders(),
+    params
+  });
+  return resp.data.results || resp.data;
+}
+
 // ----------------------------------------------------------------------
 // Phase S-4D: Cash, Bank, Treasury & Financial Vouchers
 // ----------------------------------------------------------------------

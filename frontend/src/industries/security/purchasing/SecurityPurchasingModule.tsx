@@ -1,27 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../../../components/ui/Card';
+import { Button } from '../../../components/ui/Button';
 import { useAuthStore } from '../../../auth/authStore';
-import { PurchasingDashboard } from './components/PurchasingDashboard';
 import { VendorList } from './components/VendorList';
 import { VendorWorkspace } from './components/VendorWorkspace';
 import { PurchaseOrderList } from './components/PurchaseOrderList';
 import { PurchaseOrderWorkspace } from './components/PurchaseOrderWorkspace';
 import { GoodsReceiptList } from './components/GoodsReceiptList';
 import { VendorBillList } from './components/VendorBillList';
-import { AccountsPayableList } from './components/AccountsPayableList';
 import { PurchasingReportsTab } from './components/PurchasingReportsTab';
-import { VendorPerformanceTab } from './components/VendorPerformanceTab';
-import { CRMProcurementDemandView } from './components/CRMProcurementDemandView';
+import { PurchaseOrderModal } from './components/PurchaseOrderModal';
+import { VendorModal } from './components/VendorModal';
+import { getPurchasingDashboardKPIs, type PurchasingDashboardKPIs } from './api';
 
 export const SecurityPurchasingModule: React.FC = () => {
     const { user } = useAuthStore();
     const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
     const [selectedPoId, setSelectedPoId] = useState<string | null>(null);
-    const [activeSection, setActiveSection] = useState<
-        'dashboard' | 'vendors' | 'orders' | 'requests' | 'receipts' | 'bills' | 'payables' | 'reports' | 'performance' | 'crm_demand'
-    >('dashboard');
+    const [activeSection, setActiveSection] = useState<'orders' | 'vendors' | 'receipts' | 'bills' | 'reports'>('orders');
+
+    // Quick Modals from Header
+    const [isCreatePoOpen, setIsCreatePoOpen] = useState(false);
+    const [isCreateVendorOpen, setIsCreateVendorOpen] = useState(false);
+
+    // KPI Metrics
+    const [kpis, setKpis] = useState<PurchasingDashboardKPIs | null>(null);
+    const [loadingKpis, setLoadingKpis] = useState(false);
 
     const canViewPurchasing = user?.permissions?.includes('purchasing.read') || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'manager';
+
+    const loadKPIs = async () => {
+        setLoadingKpis(true);
+        try {
+            const data = await getPurchasingDashboardKPIs();
+            setKpis(data);
+        } catch {
+            // Silently fall back to default or empty
+        } finally {
+            setLoadingKpis(false);
+        }
+    };
+
+    useEffect(() => {
+        if (canViewPurchasing) {
+            loadKPIs();
+        }
+    }, [canViewPurchasing]);
 
     if (!canViewPurchasing) {
         return (
@@ -41,7 +65,10 @@ export const SecurityPurchasingModule: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: '20px' }}>
                 <PurchaseOrderWorkspace 
                     poId={selectedPoId} 
-                    onBack={() => setSelectedPoId(null)}
+                    onBack={() => {
+                        setSelectedPoId(null);
+                        loadKPIs();
+                    }}
                     onOpenVendor={(vId) => {
                         setSelectedPoId(null);
                         setSelectedVendorId(vId);
@@ -57,201 +84,318 @@ export const SecurityPurchasingModule: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: '20px' }}>
                 <VendorWorkspace 
                     vendorId={selectedVendorId} 
-                    onBack={() => setSelectedVendorId(null)}
+                    onBack={() => {
+                        setSelectedVendorId(null);
+                        loadKPIs();
+                    }}
                     onSelectPo={(poId) => setSelectedPoId(poId)}
                 />
             </div>
         );
     }
 
+    const formatCurrency = (val?: string | number) => {
+        const num = Number(val || 0);
+        return `PKR ${num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    };
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: '20px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {/* Navigation Pills */}
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: '20px', gap: '20px' }}>
+            {/* Top Header & Fast Actions */}
+            <div style={{
+                background: 'var(--color-surface, #ffffff)',
+                border: '1px solid var(--color-border, #e5e7eb)',
+                borderRadius: '12px',
+                padding: '20px 24px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                    <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                                width: '42px', height: '42px', borderRadius: '10px',
+                                background: 'rgba(99, 102, 241, 0.12)', color: 'var(--color-primary, #6366f1)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px'
+                            }}>
+                                <i className="bx bx-cart-alt"></i>
+                            </div>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: 'var(--color-text, #111827)' }}>
+                                    Purchasing & Vendor Management
+                                </h2>
+                                <p style={{ margin: '2px 0 0', color: 'var(--color-text-muted, #6b7280)', fontSize: '0.875rem' }}>
+                                    Manage suppliers, purchase orders, store goods receipts (GRN), and vendor bills.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Button 
+                            variant="secondary" 
+                            onClick={() => setIsCreateVendorOpen(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                            <i className="bx bx-user-plus"></i> + Add Supplier
+                        </Button>
+                        <Button 
+                            variant="primary" 
+                            onClick={() => setIsCreatePoOpen(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                            <i className="bx bx-plus-circle"></i> + New Purchase Order
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Workflow Helper Strip */}
                 <div style={{
+                    marginTop: '16px',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'var(--color-surface-subtle, #f9fafb)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
                     display: 'flex',
-                    gap: '8px',
-                    borderBottom: '1px solid var(--color-border)',
-                    paddingBottom: '12px',
-                    overflowX: 'auto'
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    fontSize: '12.5px'
                 }}>
-                    <button
-                        onClick={() => setActiveSection('dashboard')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: activeSection === 'dashboard' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'dashboard' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'dashboard' ? 'var(--color-primary)' : 'var(--color-text)',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                    >
-                        <i className='bx bx-pie-chart-alt-2'></i> Dashboard & KPIs
-                    </button>
-                    <button
-                        onClick={() => setActiveSection('vendors')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: activeSection === 'vendors' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'vendors' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'vendors' ? 'var(--color-primary)' : 'var(--color-text)',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                    >
-                        <i className='bx bx-buildings'></i> Vendors & Suppliers
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted, #6b7280)' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text, #111827)' }}>
+                            <i className="bx bx-git-commit" style={{ marginRight: '4px', color: 'var(--color-primary)' }}></i>
+                            Purchasing Flow:
+                        </span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <strong>1.</strong> Create Purchase Order
+                        </span>
+                        <span>➔</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <strong>2.</strong> Receive Goods to Store (GRN)
+                        </span>
+                        <span>➔</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <strong>3.</strong> Process Bill & Payment
+                        </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11.5px', color: '#10b981', fontWeight: 600, background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                            <i className="bx bx-check-circle" style={{ marginRight: '3px' }}></i> GRN auto-updates Store Inventory
+                        </span>
+                    </div>
+                </div>
+
+                {/* KPI Metrics */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '14px',
+                    marginTop: '16px'
+                }}>
+                    <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        background: 'var(--color-surface-subtle, #f9fafb)',
+                        border: '1px solid var(--color-border, #e5e7eb)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                    }}>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted, #6b7280)', textTransform: 'uppercase' }}>
+                            Open Purchase Orders
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--color-primary, #6366f1)' }}>
+                                {loadingKpis ? '...' : (kpis?.open_purchase_orders_count ?? 0)}
+                            </span>
+                            <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                {kpis?.open_purchase_orders_value ? formatCurrency(kpis.open_purchase_orders_value) : ''}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        background: 'var(--color-surface-subtle, #f9fafb)',
+                        border: '1px solid var(--color-border, #e5e7eb)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                    }}>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted, #6b7280)', textTransform: 'uppercase' }}>
+                            Pending Store Deliveries
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f59e0b' }}>
+                                {loadingKpis ? '...' : (kpis?.pending_deliveries_count ?? 0)}
+                            </span>
+                            <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                awaiting GRN intake
+                            </span>
+                        </div>
+                    </div>
+
+                    <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        background: 'var(--color-surface-subtle, #f9fafb)',
+                        border: '1px solid var(--color-border, #e5e7eb)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                    }}>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted, #6b7280)', textTransform: 'uppercase' }}>
+                            Approved / Posted Bills
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#10b981' }}>
+                                {loadingKpis ? '...' : (kpis?.posted_bills_count ?? 0)}
+                            </span>
+                            <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                supplier bills
+                            </span>
+                        </div>
+                    </div>
+
+                    <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        background: 'var(--color-surface-subtle, #f9fafb)',
+                        border: '1px solid var(--color-border, #e5e7eb)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                    }}>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted, #6b7280)', textTransform: 'uppercase' }}>
+                            Outstanding Payables
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#ef4444' }}>
+                                {loadingKpis ? '...' : formatCurrency(kpis?.outstanding_payables || 0)}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Streamlined Navigation Tabs */}
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottom: '1px solid var(--color-border, #e5e7eb)',
+                paddingBottom: '4px',
+                flexWrap: 'wrap',
+                gap: '8px'
+            }}>
+                <div style={{ display: 'flex', gap: '8px', overflowX: 'auto' }}>
                     <button
                         onClick={() => setActiveSection('orders')}
                         style={{
-                            padding: '8px 16px',
+                            padding: '9px 18px',
                             borderRadius: '8px',
                             border: '1px solid',
-                            borderColor: activeSection === 'orders' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'orders' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'orders' ? 'var(--color-primary)' : 'var(--color-text)',
-                            fontWeight: 700,
-                            fontSize: '13px',
+                            borderColor: activeSection === 'orders' ? 'var(--color-primary, #6366f1)' : 'var(--color-border, #e5e7eb)',
+                            background: activeSection === 'orders' ? 'rgba(99, 102, 241, 0.12)' : 'var(--color-surface, #ffffff)',
+                            color: activeSection === 'orders' ? 'var(--color-primary, #6366f1)' : 'var(--color-text, #374151)',
+                            fontWeight: activeSection === 'orders' ? 700 : 500,
+                            fontSize: '13.5px',
                             cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
+                            display: 'flex', alignItems: 'center', gap: '7px',
+                            transition: 'all 0.15s ease'
                         }}
                     >
-                        <i className='bx bx-cart'></i> Purchase Orders
+                        <i className='bx bx-cart' style={{ fontSize: '16px' }}></i>
+                        Purchase Orders
                     </button>
+
+                    <button
+                        onClick={() => setActiveSection('vendors')}
+                        style={{
+                            padding: '9px 18px',
+                            borderRadius: '8px',
+                            border: '1px solid',
+                            borderColor: activeSection === 'vendors' ? 'var(--color-primary, #6366f1)' : 'var(--color-border, #e5e7eb)',
+                            background: activeSection === 'vendors' ? 'rgba(99, 102, 241, 0.12)' : 'var(--color-surface, #ffffff)',
+                            color: activeSection === 'vendors' ? 'var(--color-primary, #6366f1)' : 'var(--color-text, #374151)',
+                            fontWeight: activeSection === 'vendors' ? 700 : 500,
+                            fontSize: '13.5px',
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '7px',
+                            transition: 'all 0.15s ease'
+                        }}
+                    >
+                        <i className='bx bx-buildings' style={{ fontSize: '16px' }}></i>
+                        Suppliers & Vendors
+                    </button>
+
                     <button
                         onClick={() => setActiveSection('receipts')}
                         style={{
-                            padding: '8px 16px',
+                            padding: '9px 18px',
                             borderRadius: '8px',
                             border: '1px solid',
-                            borderColor: activeSection === 'receipts' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'receipts' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'receipts' ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: 700,
-                            fontSize: '13px',
+                            borderColor: activeSection === 'receipts' ? 'var(--color-primary, #6366f1)' : 'var(--color-border, #e5e7eb)',
+                            background: activeSection === 'receipts' ? 'rgba(99, 102, 241, 0.12)' : 'var(--color-surface, #ffffff)',
+                            color: activeSection === 'receipts' ? 'var(--color-primary, #6366f1)' : 'var(--color-text, #374151)',
+                            fontWeight: activeSection === 'receipts' ? 700 : 500,
+                            fontSize: '13.5px',
                             cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
+                            display: 'flex', alignItems: 'center', gap: '7px',
+                            transition: 'all 0.15s ease'
                         }}
                     >
-                        <i className='bx bx-box'></i> Goods Receipts (GRN)
+                        <i className='bx bx-box' style={{ fontSize: '16px' }}></i>
+                        Goods Receipts (GRN)
                     </button>
+
                     <button
                         onClick={() => setActiveSection('bills')}
                         style={{
-                            padding: '8px 16px',
+                            padding: '9px 18px',
                             borderRadius: '8px',
                             border: '1px solid',
-                            borderColor: activeSection === 'bills' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'bills' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'bills' ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: 700,
-                            fontSize: '13px',
+                            borderColor: activeSection === 'bills' ? 'var(--color-primary, #6366f1)' : 'var(--color-border, #e5e7eb)',
+                            background: activeSection === 'bills' ? 'rgba(99, 102, 241, 0.12)' : 'var(--color-surface, #ffffff)',
+                            color: activeSection === 'bills' ? 'var(--color-primary, #6366f1)' : 'var(--color-text, #374151)',
+                            fontWeight: activeSection === 'bills' ? 700 : 500,
+                            fontSize: '13.5px',
                             cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
+                            display: 'flex', alignItems: 'center', gap: '7px',
+                            transition: 'all 0.15s ease'
                         }}
                     >
-                        <i className='bx bx-receipt'></i> Vendor Bills
-                    </button>
-                    <button
-                        onClick={() => setActiveSection('payables')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: activeSection === 'payables' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'payables' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'payables' ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                    >
-                        <i className='bx bx-credit-card'></i> Accounts Payable
-                    </button>
-                    <button
-                        onClick={() => setActiveSection('reports')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: activeSection === 'reports' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'reports' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'reports' ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                    >
-                        <i className='bx bx-bar-chart-alt-2'></i> Reports
-                    </button>
-                    <button
-                        onClick={() => setActiveSection('performance')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: activeSection === 'performance' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'performance' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'performance' ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                    >
-                        <i className='bx bx-award'></i> Performance & Comparison
-                    </button>
-                    <button
-                        onClick={() => setActiveSection('crm_demand')}
-                        style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: '1px solid',
-                            borderColor: activeSection === 'crm_demand' ? 'var(--color-primary)' : 'var(--color-border)',
-                            background: activeSection === 'crm_demand' ? 'rgba(99, 102, 241, 0.15)' : 'var(--color-surface)',
-                            color: activeSection === 'crm_demand' ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            display: 'flex', alignItems: 'center', gap: '6px'
-                        }}
-                    >
-                        <i className='bx bx-git-pull-request'></i> CRM Demand
+                        <i className='bx bx-receipt' style={{ fontSize: '16px' }}></i>
+                        Vendor Bills & Payments
                     </button>
                 </div>
 
-                {/* Section Render */}
-                {activeSection === 'dashboard' && (
-                    <PurchasingDashboard 
-                        onNavigate={(sec) => setActiveSection(sec)}
-                        onSelectPo={(id) => setSelectedPoId(id)}
-                        onSelectVendor={(id) => setSelectedVendorId(id)}
-                    />
-                )}
+                <div>
+                    <button
+                        onClick={() => setActiveSection(activeSection === 'reports' ? 'orders' : 'reports')}
+                        style={{
+                            padding: '7px 14px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--color-border, #e5e7eb)',
+                            background: activeSection === 'reports' ? 'var(--color-surface-secondary, #f1f5f9)' : 'transparent',
+                            color: 'var(--color-text-muted, #6b7280)',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '5px'
+                        }}
+                    >
+                        <i className='bx bx-bar-chart-alt-2'></i>
+                        {activeSection === 'reports' ? 'Close Reports' : 'Purchasing Reports'}
+                    </button>
+                </div>
+            </div>
 
-                {activeSection === 'vendors' && (
-                    <VendorList onSelectVendor={(id) => setSelectedVendorId(id)} />
-                )}
-
+            {/* Active Content Rendering */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {activeSection === 'orders' && (
                     <PurchaseOrderList 
                         onSelectPo={(id) => setSelectedPoId(id)}
@@ -259,14 +403,8 @@ export const SecurityPurchasingModule: React.FC = () => {
                     />
                 )}
 
-                {activeSection === 'requests' && (
-                    <Card style={{ padding: '36px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                        <i className='bx bx-git-pull-request' style={{ fontSize: '36px', marginBottom: '8px', opacity: 0.5 }}></i>
-                        <h4 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>Purchase Requests</h4>
-                        <p style={{ margin: 0, fontSize: '13px' }}>
-                            Internal store requisition and departmental equipment purchase requests.
-                        </p>
-                    </Card>
+                {activeSection === 'vendors' && (
+                    <VendorList onSelectVendor={(id) => setSelectedVendorId(id)} />
                 )}
 
                 {activeSection === 'receipts' && (
@@ -279,25 +417,35 @@ export const SecurityPurchasingModule: React.FC = () => {
                     <VendorBillList />
                 )}
 
-                {activeSection === 'payables' && (
-                    <AccountsPayableList />
-                )}
-
                 {activeSection === 'reports' && (
                     <PurchasingReportsTab />
                 )}
-
-                {activeSection === 'performance' && (
-                    <VendorPerformanceTab />
-                )}
-
-                {activeSection === 'crm_demand' && (
-                    <CRMProcurementDemandView />
-                )}
-
             </div>
+
+            {/* Global Header Modals */}
+            {isCreatePoOpen && (
+                <PurchaseOrderModal
+                    isOpen={isCreatePoOpen}
+                    onClose={() => setIsCreatePoOpen(false)}
+                    onSaved={(po) => {
+                        setIsCreatePoOpen(false);
+                        setSelectedPoId(po.id);
+                        loadKPIs();
+                    }}
+                />
+            )}
+
+            {isCreateVendorOpen && (
+                <VendorModal
+                    isOpen={isCreateVendorOpen}
+                    onClose={() => setIsCreateVendorOpen(false)}
+                    onSaved={(vendor) => {
+                        setIsCreateVendorOpen(false);
+                        setSelectedVendorId(vendor.id);
+                        loadKPIs();
+                    }}
+                />
+            )}
         </div>
     );
 };
-
-
