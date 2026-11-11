@@ -59,7 +59,7 @@ class PayrollRunService:
         return comp
 
     @classmethod
-    def _get_or_create_period(cls, company: Company, period_start, period_end) -> PayrollPeriod:
+    def _get_or_create_period(cls, company: Company, period_start, period_end) -> Optional[PayrollPeriod]:
         period = PayrollPeriod.objects.filter(
             company=company,
             start_date=period_start,
@@ -67,14 +67,24 @@ class PayrollRunService:
             is_deleted=False
         ).first()
         if not period:
-            p_name = f"{period_start.strftime('%B %Y')} ({period_start} to {period_end})"
-            period = PayrollPeriod.objects.create(
+            period = PayrollPeriod.objects.filter(
                 company=company,
-                name=p_name,
-                start_date=period_start,
-                end_date=period_end,
-                payment_date=period_end,
-            )
+                start_date__lte=period_end,
+                end_date__gte=period_start,
+                is_deleted=False
+            ).order_by('-start_date').first()
+        if not period:
+            try:
+                p_name = f"{period_start.strftime('%B %Y')} ({period_start} to {period_end})"
+                period = PayrollPeriod.objects.create(
+                    company=company,
+                    name=p_name,
+                    start_date=period_start,
+                    end_date=period_end,
+                    payment_date=period_end,
+                )
+            except ValidationError:
+                return None
         return period
 
     @classmethod
@@ -266,12 +276,12 @@ class PayrollRunService:
                 )
                 seq += 1
 
-            total_ot = calc.single_ot_amount + calc.double_ot_amount
+            total_ot = calc.total_ot_amount if calc.total_ot_amount else (calc.single_ot_amount + calc.double_ot_amount)
             if total_ot > Decimal('0.00'):
                 PayslipLine.objects.create(
                     company=company, payslip=payslip, salary_component=comp_ot,
                     component_type=ComponentType.EARNING, amount=total_ot,
-                    description="Overtime Pay (Single & Double)", sequence=seq
+                    description="Overtime Pay (Muster & OT)", sequence=seq
                 )
                 seq += 1
 

@@ -2154,7 +2154,7 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             from django.db.models import Q
             curr_yr, curr_mo = map(int, current_month.split('-'))
             prev_yr, prev_mo = map(int, previous_month.split('-'))
-            worked_q = Q(daily_pay_amount__gt=0) | Q(
+            worked_q = Q(payable_amount__gt=0) | Q(daily_payable_rate__gt=0) | Q(
                 attendance_status__in=[
                     'PRESENT', 'P', 'OVERTIME', 'O', 'OVERTIME_DOZING', 'OD',
                     'WORKED_WEEKLY_OFF', 'WP', 'HALF_DAY', 'HD', 'DOUBLE_SHIFT', 'PO', 'POD'
@@ -2166,7 +2166,19 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             has_prev = DailyDutyPay.objects.filter(
                 company=company, duty_date__year=prev_yr, duty_date__month=prev_mo, is_deleted=False
             ).filter(worked_q).exists()
-            chosen = previous_month if (has_prev and not has_curr) else current_month
+            if has_curr:
+                chosen = current_month
+            elif has_prev:
+                chosen = previous_month
+            else:
+                latest_dp_date = (
+                    DailyDutyPay.objects.filter(company=company, is_deleted=False)
+                    .filter(worked_q)
+                    .order_by('-duty_date')
+                    .values_list('duty_date', flat=True)
+                    .first()
+                )
+                chosen = f"{latest_dp_date.year}-{latest_dp_date.month:02d}" if latest_dp_date else current_month
 
         try:
             year, month = map(int, chosen.split('-'))
@@ -2216,14 +2228,25 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         company = self.get_company()
-        month_param = request.query_params.get('month')
-        (
-            selected_month, current_month, previous_month, available_months,
-            period_start, period_end, _days_in_month
-        ) = self._resolve_payroll_month(company, month_param)
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        ensure_open_period_and_foundation(company, period_end)
-        ensure_open_period_and_foundation(company, timezone.now().date())
+        month_param = request.query_params.get('month')
+        try:
+            (
+                selected_month, current_month, previous_month, available_months,
+                period_start, period_end, _days_in_month
+            ) = self._resolve_payroll_month(company, month_param)
+
+            for pd_target in (period_end, timezone.now().date()):
+                try:
+                    ensure_open_period_and_foundation(company, pd_target)
+                except Exception:
+                    pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("Error resolving payroll month: %s", exc)
+            return Response({'detail': str(exc), 'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         # 1. Fetch lightweight values from DailyDutyPay (no heavy model hydration)
         ot_statuses = {'OVERTIME', 'O', 'OVERTIME_DOZING', 'OD'}
@@ -2715,6 +2738,9 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         from finance.services.period_service import ensure_open_period_and_foundation
 
         company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+
         month_param = request.data.get('month')
         target_emp_ids = request.data.get('employee_ids')
 
@@ -2722,8 +2748,11 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             selected_month, _, _, _, period_start, period_end, _
         ) = self._resolve_payroll_month(company, month_param)
 
-        ensure_open_period_and_foundation(company, period_end)
-        ensure_open_period_and_foundation(company, timezone.now().date())
+        try:
+            ensure_open_period_and_foundation(company, period_end)
+            ensure_open_period_and_foundation(company, timezone.now().date())
+        except Exception as exc:
+            return Response({'detail': f'Accounting period setup failed: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Find employees with attendance in this month who don't yet have a FINALIZED PayrollRun
         dp_emp_ids = set(
@@ -2811,13 +2840,19 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                     integ_id = fin_res.get('finance_integration_id')
                     integration = PayrollAccountingIntegration.objects.filter(id=integ_id).first()
 
+                finalized_msg = f'Finalized {len(ready_calc_ids)} employee salaries for {selected_month}.'
+                if skipped_reasons and len(ready_calc_ids) == 0:
+                    finalized_msg = f"No eligible salaries finalized for {selected_month}. Skipped ({len(skipped_reasons)}): {'; '.join(skipped_reasons[:3])}"
+                elif skipped_reasons:
+                    finalized_msg = f"{finalized_msg} ({len(skipped_reasons)} skipped due to blockers)"
+
                 return Response({
                     'success': True,
                     'payroll_run_id': run_id,
                     'finalized_count': len(ready_calc_ids),
                     'skipped': skipped_reasons,
                     'integration': self.get_serializer(integration).data if integration else None,
-                    'message': f'Finalized {len(ready_calc_ids)} employee salaries for {selected_month}.'
+                    'message': finalized_msg
                 }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -2841,6 +2876,9 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         from finance.services.period_service import ensure_open_period_and_foundation
 
         company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+
         month_param = request.data.get('month')
         employee_ids = request.data.get('employee_ids')
         treasury_account_id = request.data.get('treasury_account_id')
@@ -2854,13 +2892,16 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             payment_provider = 'MANUAL'
 
         pay_date = date.fromisoformat(payment_date_str) if payment_date_str else timezone.now().date()
-        ensure_open_period_and_foundation(company, pay_date)
+        try:
+            ensure_open_period_and_foundation(company, pay_date)
 
-        (
-            selected_month, _, _, _, period_start, period_end, _
-        ) = self._resolve_payroll_month(company, month_param)
-        ensure_open_period_and_foundation(company, period_end)
-        ensure_open_period_and_foundation(company, timezone.now().date())
+            (
+                selected_month, _, _, _, period_start, period_end, _
+            ) = self._resolve_payroll_month(company, month_param)
+            ensure_open_period_and_foundation(company, period_end)
+            ensure_open_period_and_foundation(company, timezone.now().date())
+        except Exception as exc:
+            return Response({'detail': f'Accounting period validation failed: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
 
         treasury_acc = None
         if treasury_account_id:
@@ -2896,6 +2937,7 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                 finalized_emp_ids = set(str(eid) for eid in existing_snaps_qs.values_list('employee_id', flat=True))
                 missing_emp_ids = target_set - finalized_emp_ids
 
+                blocked_msgs = []
                 if missing_emp_ids:
                     ready_calc_ids = []
                     for eid in missing_emp_ids:
@@ -2904,7 +2946,9 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                             period_start=period_start, period_end=period_end,
                             user=request.user, force_recalculate=True
                         )
-                        if not calc.has_blockers and calc.status != PayrollCalculationStatus.BLOCKED and calc.net_payable > 0:
+                        if calc.has_blockers or calc.status == PayrollCalculationStatus.BLOCKED:
+                            blocked_msgs.append(f"{calc.employee}: {'; '.join(calc.blocking_reasons or [])}")
+                        elif calc.net_payable > 0:
                             if calc.status != PayrollCalculationStatus.READY:
                                 calc = PayrollRulesService.mark_calculation_ready(company, calc.id, user=request.user)
                             ready_calc_ids.append(str(calc.id))
@@ -2917,20 +2961,29 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                         payroll_run = PayrollRunService.approve_payroll_run(company, payroll_run, user=request.user)
                         PayrollRunService.finalize_payroll_run(company, payroll_run, user=request.user)
 
-                # 2. Gather unpaid snapshots grouped by integration
+                # 2. Gather unpaid/reversed snapshots grouped by integration
                 unpaid_snaps = list(PayrollEmployeeFinanceSnapshot.objects.filter(
                     company=company, is_deleted=False,
                     employee_id__in=list(target_set),
                     integration__payroll_run__period_start__lte=period_end,
                     integration__payroll_run__period_end__gte=period_start,
-                    payment_status__in=[PayrollEmployeePaymentStatus.UNPAID, PayrollEmployeePaymentStatus.FAILED]
+                    payment_status__in=[
+                        PayrollEmployeePaymentStatus.UNPAID,
+                        PayrollEmployeePaymentStatus.FAILED,
+                        PayrollEmployeePaymentStatus.REVERSED,
+                    ]
                 ).select_related('integration'))
 
                 # Filter net_salary > 0
                 unpaid_snaps = [s for s in unpaid_snaps if (s.net_salary or 0) > 0]
                 if not unpaid_snaps:
+                    err_detail = (
+                        f"Cannot pay selected employees due to blockers: {'; '.join(blocked_msgs[:3])}"
+                        if blocked_msgs
+                        else 'All selected employees have zero net payable or are already marked PAID.'
+                    )
                     return Response(
-                        {'detail': 'All selected employees have zero net payable or are already marked PAID.'},
+                        {'detail': err_detail},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 

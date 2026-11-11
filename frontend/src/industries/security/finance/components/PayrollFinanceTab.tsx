@@ -156,9 +156,10 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
       setSyncing(true);
       const res = await finalizeAndSyncPayrollMonth({ month: monthToFinalize });
       await loadData(monthToFinalize);
-      alert(res.message || `Finalized ${res.finalized_count} employee salaries for ${monthToFinalize}.`);
+      const skippedNotice = res.skipped && res.skipped.length > 0 ? `\n\nSkipped (${res.skipped.length}):\n• ${res.skipped.slice(0, 5).join('\n• ')}` : '';
+      alert(`${res.message || `Finalized ${res.finalized_count} employee salaries for ${monthToFinalize}.`}${skippedNotice}`);
     } catch (err: any) {
-      alert(err?.response?.data?.detail || err.message || 'Failed to finalize monthly attendance payroll.');
+      alert(err?.response?.data?.detail || err?.response?.data?.error || err.message || 'Failed to finalize monthly attendance payroll.');
     } finally {
       setSyncing(false);
     }
@@ -214,7 +215,7 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
       await loadData(monthToPay);
       alert(res.message || 'Salary disbursement recorded and marked PAID.');
     } catch (err: any) {
-      alert(err?.response?.data?.detail || err.message || 'Failed to disburse employee salaries.');
+      alert(err?.response?.data?.detail || err?.response?.data?.error || err.message || 'Failed to disburse employee salaries.');
     } finally {
       setPayingSaving(false);
     }
@@ -328,7 +329,7 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <select
-            value={liveData?.month || (selectedMonth !== 'AUTO' ? selectedMonth : '')}
+            value={liveData?.month || selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
             style={{
               padding: '8px 12px',
@@ -340,6 +341,9 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
               fontWeight: 600,
             }}
           >
+            {(!liveData?.available_months || liveData.available_months.length === 0) && (
+              <option value={selectedMonth}>{selectedMonth === 'AUTO' ? 'Auto-Detect Month' : selectedMonth}</option>
+            )}
             {(liveData?.available_months || []).map((m) => (
               <option key={m} value={m}>
                 {m}
