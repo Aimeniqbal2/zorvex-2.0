@@ -822,7 +822,7 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
                 designation: l.line_type === 'MANPOWER' ? (l.designation || null) : null,
                 required_headcount: Number(l.required_headcount) || 1,
                 days_count: Number(l.days_count) || daysSpan,
-                billing_rate: Number(l.billing_rate) || 0,
+                billing_rate: l.line_type === 'MANPOWER' ? (Number(l.billing_rate) || 0) : (Number(l.daily_rate ?? l.billing_rate) || 0),
                 pay_rate: Number(l.pay_rate) || 0,
                 shift_start: l.shift_start || null,
                 shift_end: l.shift_end || null,
@@ -853,13 +853,21 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             onClose();
         } catch (error: any) {
             console.error('Failed saving temporary service', error);
-            if (error.response?.data) {
-                const msg = typeof error.response.data === 'string'
-                    ? error.response.data
-                    : error.response.data.error || 'Please review validation errors in the form.';
+            const data = error.response?.data;
+            if (data) {
+                const msg = typeof data === 'string'
+                    ? data
+                    : data.error
+                        || data.detail
+                        || (typeof data === 'object'
+                            ? Object.entries(data)
+                                .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : v}`)
+                                .join(' | ')
+                            : '')
+                        || 'Please review validation errors in the form.';
                 useToastStore.getState().error(msg);
             } else {
-                useToastStore.getState().error('An unexpected error occurred while saving.');
+                useToastStore.getState().error(error?.message || 'An unexpected error occurred while saving.');
             }
         } finally {
             setIsSubmitting(false);

@@ -32,21 +32,38 @@ def get_invoice_payment_summary(invoice: ProcurementDocument) -> dict:
         }
 
     original_amount = Decimal(str(invoice.total_amount or 0)).quantize(Decimal('0.01'))
-    
-    # Sum credit notes linked to this invoice
-    credit_notes = getattr(invoice, 'credit_notes', None)
-    if credit_notes is not None:
-        credit_sum = credit_notes.filter(status='POSTED').aggregate(tot=models.Sum('amount'))['tot'] or Decimal('0.00')
+    prefetched = getattr(invoice, '_prefetched_objects_cache', {})
+
+    # Sum credit notes linked to this invoice (respect prefetch cache to avoid N+1)
+    if 'credit_notes' in prefetched:
+        credit_sum = sum(
+            (Decimal(str(cn.amount or 0)) for cn in invoice.credit_notes.all() if cn.status == 'POSTED' and not getattr(cn, 'is_deleted', False)),
+            Decimal('0.00'),
+        )
     else:
-        credit_sum = Decimal('0.00')
+        credit_notes = getattr(invoice, 'credit_notes', None)
+        if credit_notes is not None:
+            credit_sum = credit_notes.filter(status='POSTED').aggregate(tot=models.Sum('amount'))['tot'] or Decimal('0.00')
+        else:
+            credit_sum = Decimal('0.00')
     return_credit = Decimal(str(credit_sum)).quantize(Decimal('0.01'))
-    
+
     # Net billed liability after returns
     net_amount = max(Decimal('0.00'), original_amount - return_credit).quantize(Decimal('0.01'))
 
-    # Sum only from POSTED payments
-    allocations = invoice.payment_allocations.filter(payment__status='POSTED')
-    paid_sum = sum((Decimal(str(a.amount)) for a in allocations), Decimal('0.00'))
+    # Sum only from POSTED payments (respect prefetch cache to avoid N+1)
+    if 'payment_allocations' in prefetched:
+        paid_sum = sum(
+            (
+                Decimal(str(a.amount or 0))
+                for a in invoice.payment_allocations.all()
+                if not getattr(a, 'is_deleted', False) and getattr(a.payment, 'status', None) == 'POSTED'
+            ),
+            Decimal('0.00'),
+        )
+    else:
+        allocations = invoice.payment_allocations.filter(payment__status='POSTED')
+        paid_sum = sum((Decimal(str(a.amount)) for a in allocations), Decimal('0.00'))
     paid_amount = paid_sum.quantize(Decimal('0.01'))
     
     # Outstanding payable: net amount minus paid amount, minimum 0.00 (NO negative balance!)
@@ -435,13 +452,16 @@ def get_vendor_payable_summary(vendor_id, company_id) -> dict:
 
 def get_accounts_payable_list(company_id, vendor_id=None, status_filter=None, search=None) -> list:
     """
-    Returns the comprehensive Accounts Payable items list with live paid and outstanding amounts.
+    Returns the comprehensive Accounts Payable items list with live paid and outstanding amounts
+    computed via 3 bulk SQL queries instead of per-invoice N+1 lookups.
     """
+    from purchasing.models import VendorCreditNote
+
     qs = ProcurementDocument.objects.filter(
         company_id=company_id,
         document_type='VENDOR_INVOICE',
         status='POSTED'
-    ).select_related('vendor', 'parent_document').prefetch_related('payment_allocations__payment')
+    ).select_related('vendor', 'parent_document')
 
     if vendor_id:
         qs = qs.filter(vendor_id=vendor_id)
@@ -455,13 +475,45 @@ def get_accounts_payable_list(company_id, vendor_id=None, status_filter=None, se
             models.Q(parent_document__number__icontains=q)
         )
 
+    docs = list(qs)
+    if not docs:
+        return []
+
+    inv_ids = [d.id for d in docs]
+    paid_by_inv = {
+        r['invoice_id']: Decimal(str(r['tot'] or 0)).quantize(Decimal('0.01'))
+        for r in VendorPaymentAllocation.objects.filter(
+            invoice_id__in=inv_ids, payment__status='POSTED', is_deleted=False
+        ).values('invoice_id').annotate(tot=models.Sum('amount'))
+    }
+    credit_by_inv = {
+        r['vendor_invoice_id']: Decimal(str(r['tot'] or 0)).quantize(Decimal('0.01'))
+        for r in VendorCreditNote.objects.filter(
+            vendor_invoice_id__in=inv_ids, status='POSTED', is_deleted=False
+        ).values('vendor_invoice_id').annotate(tot=models.Sum('amount'))
+    }
+
+    today = timezone.now().date()
     results = []
-    for inv in qs:
-        summary = get_invoice_payment_summary(inv)
-        current_status = summary['payment_status']
+    for inv in docs:
+        original_amount = Decimal(str(inv.total_amount or 0)).quantize(Decimal('0.01'))
+        return_credit = credit_by_inv.get(inv.id, Decimal('0.00'))
+        net_amount = max(Decimal('0.00'), original_amount - return_credit).quantize(Decimal('0.01'))
+        paid_amount = paid_by_inv.get(inv.id, Decimal('0.00'))
+        outstanding = max(Decimal('0.00'), net_amount - paid_amount).quantize(Decimal('0.01'))
+        total_credits = paid_amount + return_credit
+        unallocated_credit = (total_credits - original_amount).quantize(Decimal('0.01')) if total_credits > original_amount else Decimal('0.00')
+
+        is_overdue = bool(inv.due_date and inv.due_date < today and outstanding > Decimal('0.00'))
+        if outstanding == Decimal('0.00') and (paid_amount > Decimal('0.00') or return_credit >= original_amount):
+            current_status = 'PAID'
+        elif paid_amount > Decimal('0.00') or return_credit > Decimal('0.00'):
+            current_status = 'OVERDUE' if is_overdue else 'PARTIALLY_PAID'
+        else:
+            current_status = 'OVERDUE' if is_overdue else 'UNPAID'
 
         if status_filter and status_filter != 'ALL':
-            if status_filter == 'OVERDUE' and not summary['is_overdue']:
+            if status_filter == 'OVERDUE' and not is_overdue:
                 continue
             elif status_filter != 'OVERDUE' and current_status != status_filter:
                 continue
@@ -478,15 +530,15 @@ def get_accounts_payable_list(company_id, vendor_id=None, status_filter=None, se
             'document_date': str(inv.document_date),
             'due_date': str(inv.due_date) if inv.due_date else None,
             'currency': inv.currency,
-            'total_amount': summary['total_amount'],
-            'original_amount': summary['original_amount'],
-            'return_credit': summary['return_credit'],
-            'net_amount': summary['net_amount'],
-            'paid_amount': summary['paid_amount'],
-            'outstanding_amount': summary['outstanding_amount'],
-            'unallocated_credit': summary['unallocated_credit'],
+            'total_amount': original_amount,
+            'original_amount': original_amount,
+            'return_credit': return_credit,
+            'net_amount': net_amount,
+            'paid_amount': paid_amount,
+            'outstanding_amount': outstanding,
+            'unallocated_credit': unallocated_credit,
             'payment_status': current_status,
-            'is_overdue': summary['is_overdue'],
+            'is_overdue': is_overdue,
             'created_at': inv.created_at.isoformat()
         })
 

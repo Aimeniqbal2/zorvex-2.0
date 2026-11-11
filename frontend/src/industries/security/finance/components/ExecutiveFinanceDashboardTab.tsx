@@ -5,17 +5,7 @@ import type {
   FinanceActionItem
 } from '../api';
 import {
-  fetchExecutiveOverview,
-  fetchFinancialHealth,
-  fetchRevenueExpenseTrends,
-  fetchReceivablesSnapshot,
-  fetchPayablesSnapshot,
-  fetchPayrollSnapshot,
-  fetchTaxSnapshot,
-  fetchTreasurySnapshot,
-  fetchProfitabilitySnapshot,
-  fetchAccountingHealth,
-  fetchFinanceActionCenter
+  fetchExecutiveDashboardBundle
 } from '../api';
 
 interface ExecutiveFinanceDashboardTabProps {
@@ -43,33 +33,18 @@ export const ExecutiveFinanceDashboardTab: React.FC<ExecutiveFinanceDashboardTab
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [
-        dashRes, healthRes, trendRes, arRes, apRes, payRes, taxRes, tresRes, profRes, acctRes, actRes
-      ] = await Promise.all([
-        fetchExecutiveOverview(),
-        fetchFinancialHealth(),
-        fetchRevenueExpenseTrends(),
-        fetchReceivablesSnapshot(),
-        fetchPayablesSnapshot(),
-        fetchPayrollSnapshot(),
-        fetchTaxSnapshot(),
-        fetchTreasurySnapshot(),
-        fetchProfitabilitySnapshot(),
-        fetchAccountingHealth(),
-        fetchFinanceActionCenter()
-      ]);
-
-      setDashboard(dashRes);
-      setHealth(healthRes);
-      setTrends(trendRes || []);
-      setArSnapshot(arRes);
-      setApSnapshot(apRes);
-      setPayrollSnapshot(payRes);
-      setTaxSnapshot(taxRes);
-      setTreasurySnapshot(tresRes);
-      setProfitabilitySnapshot(profRes);
-      setAcctHealth(acctRes);
-      setActionQueue(actRes || []);
+      const bundle = await fetchExecutiveDashboardBundle();
+      setDashboard(bundle.overview);
+      setHealth(bundle.financial_health);
+      setTrends(bundle.trends || []);
+      setArSnapshot(bundle.receivables_snapshot);
+      setApSnapshot(bundle.payables_snapshot);
+      setPayrollSnapshot(bundle.payroll_snapshot);
+      setTaxSnapshot(bundle.tax_snapshot);
+      setTreasurySnapshot(bundle.treasury_snapshot);
+      setProfitabilitySnapshot(bundle.profitability_snapshot);
+      setAcctHealth(bundle.accounting_health);
+      setActionQueue(bundle.action_center || []);
     } catch (err) {
       console.error("Error loading Executive Finance Dashboard:", err);
     } finally {

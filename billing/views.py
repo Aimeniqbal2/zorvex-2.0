@@ -8,8 +8,10 @@ ViewSets for billing models, plus explicit @action endpoints for:
   - Syncing a DutyAssignment to WorkforceAttendance
 """
 import logging
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from erp_core.views import TenantModelViewSet
@@ -300,7 +302,7 @@ from datetime import datetime
 
 
 class BillingPeriodViewSet(TenantModelViewSet):
-    queryset = BillingPeriod.objects.all()
+    queryset = BillingPeriod.objects.select_related('client', 'contract').all()
     serializer_class = BillingPeriodSerializer
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     required_module = 'billing'
@@ -311,7 +313,12 @@ class BillingPeriodViewSet(TenantModelViewSet):
 
 
 class BillingSheetViewSet(TenantModelViewSet):
-    queryset = BillingSheet.objects.all()
+    queryset = BillingSheet.objects.select_related(
+        'client', 'contract', 'prepared_by', 'reviewed_by', 'approved_by', 'generated_invoice'
+    ).prefetch_related(
+        'lines', 'lines__site', 'lines__designation', 'lines__profit_center', 'lines__cost_center',
+        'adjustments', 'adjustments__created_by', 'adjustments__site'
+    ).all()
     serializer_class = BillingSheetSerializer
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     required_module = 'billing'
@@ -464,15 +471,176 @@ class BillingSheetViewSet(TenantModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+class ClientInvoicePagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 2000
+
+
 class ClientInvoiceViewSet(TenantModelViewSet):
-    queryset = ClientInvoice.objects.all()
+    queryset = ClientInvoice.objects.select_related(
+        'client', 'contract', 'billing_sheet', 'issued_by', 'sent_by', 'currency'
+    ).prefetch_related(
+        'lines', 'lines__site', 'lines__designation', 'lines__profit_center', 'lines__cost_center'
+    ).all()
     serializer_class = ClientInvoiceSerializer
+    pagination_class = ClientInvoicePagination
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     required_module = 'billing'
     allowed_roles = ['admin', 'manager']
     allowed_reads = ['admin', 'manager', 'staff']
     required_read_permissions = ['billing.read', 'finance.read', 'security_finance.read', 'operations.read']
     required_write_permissions = ['billing.write', 'finance.write', 'security_finance.write']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        billing_month = params.get('billing_month')
+        if billing_month and billing_month.upper() != 'ALL':
+            qs = qs.filter(billing_month=billing_month)
+        status_param = params.get('status')
+        if status_param and status_param.upper() != 'ALL':
+            qs = qs.filter(status=status_param.upper())
+        client_id = params.get('client')
+        if client_id:
+            qs = qs.filter(client_id=client_id)
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(invoice_number__icontains=search) |
+                Q(client__name__icontains=search) |
+                Q(notes__icontains=search) |
+                Q(contract__contract_code__icontains=search)
+            )
+        return qs.order_by('-billing_month', '-invoice_date', '-created_at')
+
+    @staticmethod
+    def _compute_crm_site_tax(
+        sales_tax_basis: str,
+        nominal_tax_rate,
+        sales_tax_override,
+        service_charges_per_guard,
+        contract_heads: int,
+        contract_subtotal,
+        calc_mode: str = 'CONTRACT_RATE',
+        subtotal_for_mode=None,
+    ):
+        """
+        Mirrors CRM Fast Costing Grid tax rules (MANUAL | SERVICE_CHARGES | TOTAL_SALE)
+        so Finance invoices match CRM Total Invoice Amount to the exact rupee.
+        Returns (tax_amount, effective_tax_rate, total_service_charges).
+        """
+        from decimal import Decimal
+        sub_base = Decimal(str(subtotal_for_mode if subtotal_for_mode is not None else contract_subtotal or 0)).quantize(Decimal('0.01'))
+        contract_sub = Decimal(str(contract_subtotal or 0)).quantize(Decimal('0.01'))
+        basis = str(sales_tax_basis or 'MANUAL').upper()
+        nom_rate = Decimal(str(nominal_tax_rate or 0))
+        sc_per_guard = Decimal(str(service_charges_per_guard or 0))
+        total_sc = (
+            (sc_per_guard * Decimal(str(contract_heads))).quantize(Decimal('0.01'))
+            if (sc_per_guard > 0 and contract_heads > 0)
+            else Decimal('0.00')
+        )
+
+        if basis == 'MANUAL':
+            tax_amt = Decimal(str(sales_tax_override or 0)).quantize(Decimal('0.01'))
+            if calc_mode == 'ATTENDANCE_RATE' and contract_sub > 0 and tax_amt > 0:
+                tax_amt = (tax_amt * (sub_base / contract_sub)).quantize(Decimal('0.01'))
+        elif basis == 'SERVICE_CHARGES':
+            if calc_mode == 'ATTENDANCE_RATE' and contract_sub > 0:
+                sc_base = (total_sc * (sub_base / contract_sub)).quantize(Decimal('0.01'))
+            else:
+                sc_base = total_sc
+            tax_amt = (sc_base * (nom_rate / Decimal('100.00'))).quantize(Decimal('0.01')) if sc_base > 0 and nom_rate > 0 else Decimal('0.00')
+        else:
+            # TOTAL_SALE / INVOICE_AMOUNT
+            tax_amt = (sub_base * (nom_rate / Decimal('100.00'))).quantize(Decimal('0.01')) if sub_base > 0 and nom_rate > 0 else Decimal('0.00')
+
+        eff_rate = (
+            ((tax_amt / sub_base) * Decimal('100.00')).quantize(Decimal('0.01'))
+            if (sub_base > 0 and tax_amt > 0)
+            else Decimal('0.00')
+        )
+        return tax_amt, eff_rate, total_sc
+
+    @staticmethod
+    def _write_permanent_invoice_lines(
+        company,
+        invoice,
+        item: dict,
+        calc_mode: str,
+        billing_month: str,
+        subtotal,
+        tax_amt,
+        tax_rate,
+        grand_total,
+    ):
+        """
+        Creates ClientInvoiceLine rows for either ATTENDANCE_RATE or CONTRACT_RATE,
+        allocating exact CRM tax_amt across lines without rounding drift.
+        """
+        from decimal import Decimal
+        sid = item['site_id']
+        site_name = item['site_name']
+        if calc_mode == 'ATTENDANCE_RATE':
+            shifts = Decimal(str(item.get('fulfilled_shifts') or 0))
+            daily_rate = Decimal(str(item.get('guard_daily_bill_rate') or 0))
+            ClientInvoiceLine.objects.create(
+                company=company,
+                invoice=invoice,
+                line_type='REGULAR_SERVICE',
+                description=f"Attendance-Delivered Security @ {site_name} ({int(shifts)} Shifts x Rs {daily_rate:,.2f}/shift)",
+                site_id=sid,
+                quantity=shifts if shifts > 0 else Decimal('1.00'),
+                unit_rate=daily_rate,
+                line_subtotal=subtotal,
+                tax_rate=tax_rate,
+                tax_amount=tax_amt,
+                total_amount=grand_total
+            )
+            return
+
+        breakdown = item.get('line_breakdown') or []
+        if breakdown:
+            remaining_tax = Decimal(str(tax_amt))
+            last_idx = len(breakdown) - 1
+            for idx, lb in enumerate(breakdown):
+                l_sub = Decimal(str(lb['monthly_subtotal'])).quantize(Decimal('0.01'))
+                if idx == last_idx:
+                    l_tax = remaining_tax
+                elif subtotal > 0:
+                    l_tax = (Decimal(str(tax_amt)) * (l_sub / subtotal)).quantize(Decimal('0.01'))
+                    remaining_tax -= l_tax
+                else:
+                    l_tax = Decimal('0.00')
+                l_rate = ((l_tax / l_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if l_sub > 0 and l_tax > 0 else Decimal('0.00')
+                ClientInvoiceLine.objects.create(
+                    company=company,
+                    invoice=invoice,
+                    line_type='REGULAR_SERVICE',
+                    description=f"{lb['service_type']} @ {site_name} (CRM Rate - {billing_month})",
+                    site_id=sid,
+                    quantity=Decimal(str(lb['quantity'] or 1)),
+                    unit_rate=Decimal(str(lb['client_rate'] or 0)),
+                    line_subtotal=l_sub,
+                    tax_rate=l_rate,
+                    tax_amount=l_tax,
+                    total_amount=l_sub + l_tax
+                )
+        else:
+            ClientInvoiceLine.objects.create(
+                company=company,
+                invoice=invoice,
+                line_type='REGULAR_SERVICE',
+                description=f"CRM Retainer Security @ {site_name} ({billing_month})",
+                site_id=sid,
+                quantity=Decimal('1.00'),
+                unit_rate=subtotal,
+                line_subtotal=subtotal,
+                tax_rate=tax_rate,
+                tax_amount=tax_amt,
+                total_amount=grand_total
+            )
 
     @staticmethod
     def _parse_billing_month(company, billing_month_str=None):
@@ -531,16 +699,16 @@ class ClientInvoiceViewSet(TenantModelViewSet):
 
     @staticmethod
     def _build_crm_billing_preview(company, billing_month_str=None):
+        import re
         from decimal import Decimal
         from collections import defaultdict
-        from django.db.models import Q
+        from django.db.models import Q, Count
         from crm.models import CRMEntity
         from security_crm.models import SecurityProposal, ProposalServiceLine
         from operations.models import (
             OperationalSite, ServiceContract, ContractRate, SecurityPost,
             DailyDutyPay, DutyType, TemporaryServiceRequest
         )
-        from operations.services.monthly_muster_service import MonthlyMusterService
         from hrm.models import AttendanceStatus
 
         (
@@ -631,40 +799,48 @@ class ClientInvoiceViewSet(TenantModelViewSet):
             else:
                 lines_by_client_unscoped[cid].append(sl)
 
-        # Fetch muster grid once for exact Attendance-Delivered Fulfilled Shifts across all sites
-        muster_by_site = {}
-        try:
-            muster = MonthlyMusterService.get_monthly_muster_grid(company, year, month)
-            for sb in muster.get('sites', []):
-                muster_by_site[str(sb.get('site_id'))] = sb
-        except Exception:
-            pass
-
-        # Fallback: direct DailyDutyPay shift count & designation-level shifts per site
-        duty_pays = list(DailyDutyPay.objects.filter(
-            company=company, duty_date__gte=period_start, duty_date__lte=period_end, is_deleted=False
-        ).select_related('site', 'post__required_designation', 'employee__designation'))
+        # SQL-level shift aggregation by site & designation (replaces slow full-month Muster Grid hydration)
         dp_shifts_by_site = defaultdict(int)
         dp_shifts_by_site_desig = defaultdict(lambda: defaultdict(int))
         active_att_statuses = {
             AttendanceStatus.PRESENT, 'PRESENT', 'P',
             AttendanceStatus.OVERTIME, 'OVERTIME', 'O',
             getattr(AttendanceStatus, 'OVERTIME_DOZING', 'OVERTIME_DOZING'), 'OVERTIME_DOZING', 'OD',
-            AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP', 'DOUBLE_SHIFT',
+            AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP',
+            'DOUBLE_SHIFT', 'PO', 'POD',
         }
-        for dp in duty_pays:
-            if not dp.site_id:
-                continue
-            st = str(dp.attendance_status or '').upper()
-            if st in active_att_statuses or dp.duty_type == DutyType.OVERTIME:
-                sid = str(dp.site_id)
-                dp_shifts_by_site[sid] += 1
-                desig_name = ''
-                if dp.post and dp.post.required_designation:
-                    desig_name = dp.post.required_designation.name.strip().lower()
-                elif dp.employee and dp.employee.designation:
-                    desig_name = dp.employee.designation.name.strip().lower()
-                dp_shifts_by_site_desig[sid][desig_name] += 1
+        dp_aggs = DailyDutyPay.objects.filter(
+            company=company, duty_date__gte=period_start, duty_date__lte=period_end,
+            is_deleted=False, site_id__isnull=False
+        ).filter(
+            Q(attendance_status__in=active_att_statuses) | Q(duty_type=DutyType.OVERTIME)
+        ).values(
+            'site_id',
+            'attendance_status',
+            'duty_type',
+            'post__required_designation__name',
+            'employee__designation__name',
+        ).annotate(shift_count=Count('id'))
+
+        for row in dp_aggs:
+            sid = str(row['site_id'])
+            cnt = int(row['shift_count'] or 0)
+            att_st = str(row['attendance_status'] or '').upper()
+            if row['duty_type'] != DutyType.OVERTIME and att_st in ('DOUBLE_SHIFT', 'PO', 'POD'):
+                cnt *= 2
+            dp_shifts_by_site[sid] += cnt
+            d_raw = row['post__required_designation__name'] or row['employee__designation__name'] or ''
+            desig_name = d_raw.strip().lower()
+            dp_shifts_by_site_desig[sid][desig_name] += cnt
+
+        # Precompute contract -> site IDs & client lookup in memory (avoids M2M N+1 queries)
+        contract_site_ids = {
+            str(c.id): {str(s_obj.id) for s_obj in c.sites.all() if not s_obj.is_deleted}
+            for c in contracts
+        }
+        contracts_by_client = defaultdict(list)
+        for c in contracts:
+            contracts_by_client[str(c.crm_entity_id)].append(c)
 
         # Existing non-cancelled ClientInvoices for this month
         existing_invs = list(ClientInvoice.objects.filter(
@@ -673,11 +849,10 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         inv_by_site = {}
         inv_by_tsr = {}
         for inv in existing_invs:
-            for ln in inv.lines.filter(is_deleted=False):
-                if ln.site_id and str(ln.site_id) not in inv_by_site:
+            for ln in inv.lines.all():
+                if not ln.is_deleted and ln.site_id and str(ln.site_id) not in inv_by_site:
                     inv_by_site[str(ln.site_id)] = inv
             notes_txt = inv.notes or ''
-            import re
             for m in re.finditer(r'\[TSR:([^\]]+)\]', notes_txt):
                 inv_by_tsr[m.group(1)] = inv
             for m in re.finditer(r'\[SITE:([^\]]+)\]', notes_txt):
@@ -688,6 +863,10 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         for p in SecurityPost.objects.filter(company=company, is_active=True, is_deleted=False).select_related('required_designation'):
             posts_by_site[str(p.site_id)].append(p)
 
+        site_count_by_client = defaultdict(int)
+        for s_item in sites:
+            site_count_by_client[str(s_item.crm_entity_id)] += 1
+
         permanent_items = []
         for site in sites:
             cid = str(site.crm_entity_id)
@@ -695,10 +874,11 @@ class ClientInvoiceViewSet(TenantModelViewSet):
             loc_key = (cid, ' '.join((site.name or '').lower().split()))
             site_lines = lines_by_client_loc.get(loc_key, [])
 
-            # Find matching contract for site
+            # Find matching contract for site from prefetched M2M map
             contract = None
-            for c in contracts:
-                if str(c.crm_entity_id) == cid and (c.sites.filter(id=site.id).exists() or not c.sites.exists()):
+            for c in contracts_by_client.get(cid, ()):
+                c_sids = contract_site_ids.get(str(c.id), set())
+                if sid in c_sids or not c_sids:
                     contract = c
                     break
 
@@ -706,7 +886,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
             prop_ver = prop_pair[1] if prop_pair else None
             if not site_lines and not lines_by_client_loc and prop_ver:
                 site_lines = lines_by_client_unscoped.get(cid, [])
-            elif not site_lines and cid in lines_by_client_unscoped and len([s2 for s2 in sites if str(s2.crm_entity_id) == cid]) == 1:
+            elif not site_lines and cid in lines_by_client_unscoped and site_count_by_client.get(cid, 0) == 1:
                 site_lines = lines_by_client_unscoped.get(cid, [])
 
             if site_lines:
@@ -730,9 +910,9 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                         'monthly_subtotal': float(amt),
                     })
 
-            # Fallback to ServiceContract -> ContractRate if no ProposalServiceLine
+            # Fallback to ServiceContract -> ContractRate if no ProposalServiceLine (in-memory prefetch)
             if contract_monthly_rate <= Decimal('0.00') and contract:
-                rates_map = {str(r.designation_id): Decimal(str(r.billing_rate or 0)) for r in contract.rates.filter(is_deleted=False)}
+                rates_map = {str(r.designation_id): Decimal(str(r.billing_rate or 0)) for r in contract.rates.all() if not r.is_deleted}
                 for p in posts_by_site.get(sid, []):
                     b_rate = rates_map.get(str(p.required_designation_id), Decimal('0.00'))
                     if b_rate > 0 and p.required_headcount > 0:
@@ -748,12 +928,8 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                             'monthly_subtotal': float(amt),
                         })
 
-            # Fulfilled shifts from Monthly Muster (fallback to DailyDutyPay count)
-            muster_sb = muster_by_site.get(sid)
-            if muster_sb and isinstance(muster_sb.get('daily_totals'), dict):
-                fulfilled_shifts = sum(int(v or 0) for v in muster_sb['daily_totals'].values())
-            else:
-                fulfilled_shifts = dp_shifts_by_site.get(sid, 0)
+            # Exact fulfilled shifts from SQL DailyDutyPay aggregation
+            fulfilled_shifts = dp_shifts_by_site.get(sid, 0)
 
             # Calculate Option 2: Attendance-Delivered Client Rate (NEVER guard salary)
             if total_contract_heads > 0 and contract_monthly_rate > 0 and days_in_month > 0:
@@ -785,8 +961,33 @@ class ClientInvoiceViewSet(TenantModelViewSet):
             else:
                 effective_daily_bill_rate = avg_daily_bill_rate
 
-            tax_rate = Decimal(str(getattr(prop_ver, 'tax_rate', 0) or 0))
-            payment_terms = getattr(prop_ver, 'payment_terms', None) or 'NET_30'
+            st_basis = str(getattr(prop_ver, 'sales_tax_basis', 'MANUAL') or 'MANUAL').upper() if prop_ver else 'MANUAL'
+            nominal_tax_rate = Decimal(str(getattr(prop_ver, 'tax_rate', 0) or 0)) if prop_ver else Decimal('0.00')
+            st_override = getattr(prop_ver, 'sales_tax_override', None) if prop_ver else None
+            sc_per_guard = Decimal(str(getattr(prop_ver, 'service_charges_per_guard', 0) or 0)) if prop_ver else Decimal('0.00')
+
+            crm_tax_amt, eff_tax_rate, total_sc = ClientInvoiceViewSet._compute_crm_site_tax(
+                sales_tax_basis=st_basis,
+                nominal_tax_rate=nominal_tax_rate,
+                sales_tax_override=st_override,
+                service_charges_per_guard=sc_per_guard,
+                contract_heads=total_contract_heads,
+                contract_subtotal=contract_monthly_rate,
+                calc_mode='CONTRACT_RATE',
+                subtotal_for_mode=contract_monthly_rate,
+            )
+            att_tax_amt, _, _ = ClientInvoiceViewSet._compute_crm_site_tax(
+                sales_tax_basis=st_basis,
+                nominal_tax_rate=nominal_tax_rate,
+                sales_tax_override=st_override,
+                service_charges_per_guard=sc_per_guard,
+                contract_heads=total_contract_heads,
+                contract_subtotal=contract_monthly_rate,
+                calc_mode='ATTENDANCE_RATE',
+                subtotal_for_mode=attendance_amount,
+            )
+
+            payment_terms = (getattr(prop_ver, 'payment_terms', None) if prop_ver else None) or 'NET_30'
             existing_inv = inv_by_site.get(sid)
 
             permanent_items.append({
@@ -801,7 +1002,16 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 'fulfilled_shifts': fulfilled_shifts,
                 'guard_daily_bill_rate': float(effective_daily_bill_rate),
                 'attendance_monthly_amount': float(attendance_amount),
-                'tax_rate': float(tax_rate),
+                'tax_rate': float(eff_tax_rate),
+                'nominal_tax_rate': float(nominal_tax_rate),
+                'sales_tax_basis': st_basis,
+                'sales_tax_override': float(st_override) if st_override is not None else None,
+                'service_charges_per_guard': float(sc_per_guard),
+                'total_service_charges': float(total_sc),
+                'sales_tax_amount': float(crm_tax_amt),
+                'crm_total_invoice_amount': float((contract_monthly_rate + crm_tax_amt).quantize(Decimal('0.01'))),
+                'attendance_tax_amount': float(att_tax_amt),
+                'attendance_total_invoice_amount': float((attendance_amount + att_tax_amt).quantize(Decimal('0.01'))),
                 'payment_terms': payment_terms,
                 'line_breakdown': line_breakdown,
                 'existing_invoice_id': str(existing_inv.id) if existing_inv else None,
@@ -859,8 +1069,8 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 'total_temp_services': len(temporary_items),
                 'unbilled_locations_count': len(unbilled_perm),
                 'unbilled_temp_count': len(unbilled_temp),
-                'total_crm_contract_value': sum(p['contract_monthly_rate'] for p in permanent_items),
-                'total_attendance_value': sum(p['attendance_monthly_amount'] for p in permanent_items),
+                'total_crm_contract_value': sum(p['crm_total_invoice_amount'] for p in permanent_items),
+                'total_attendance_value': sum(p['attendance_total_invoice_amount'] for p in permanent_items),
                 'total_temp_value': sum(t['amount'] for t in temporary_items),
             }
         }
@@ -939,9 +1149,30 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         due_date = inv_date + timedelta(days=30)
 
         created_invoices = []
+        updated_invoices = []
         skipped_count = 0
 
         try:
+          client_lookup = {
+              str(c.id): c
+              for c in CRMEntity.objects.filter(company=company, is_deleted=False)
+          }
+          contract_lookup = {
+              str(c.id): c
+              for c in ServiceContract.objects.filter(company=company, is_deleted=False)
+          }
+          site_lookup = {
+              str(s.id): s
+              for s in OperationalSite.objects.filter(company=company, is_deleted=False)
+          }
+          existing_inv_lookup = {
+              str(inv.id): inv
+              for inv in ClientInvoice.objects.filter(
+                  company=company, billing_month__in=months_to_sync, is_deleted=False
+              )
+          }
+
+          import re as _re
           with transaction.atomic():
             for bm in months_to_sync:
                 preview = self._build_crm_billing_preview(company, bm)
@@ -952,11 +1183,48 @@ class ClientInvoiceViewSet(TenantModelViewSet):
 
                 # 1. Permanent locations
                 for item in preview['permanent_services']:
-                    if item.get('existing_invoice_id'):
-                        skipped_count += 1
-                        continue
+                    existing_id = item.get('existing_invoice_id')
                     crm_val = Decimal(str(item.get('contract_monthly_rate') or 0))
                     att_val = Decimal(str(item.get('attendance_monthly_amount') or 0))
+
+                    if existing_id:
+                        existing_inv = existing_inv_lookup.get(str(existing_id))
+                        if existing_inv and existing_inv.status == ClientInvoiceStatus.DRAFT:
+                            inv_mode_match = _re.search(r'\[MODE:(CONTRACT_RATE|ATTENDANCE_RATE)\]', existing_inv.notes or '', _re.IGNORECASE)
+                            inv_mode = inv_mode_match.group(1).upper() if inv_mode_match else 'CONTRACT_RATE'
+                            exp_sub = att_val.quantize(Decimal('0.01')) if (inv_mode == 'ATTENDANCE_RATE' and att_val > 0) else crm_val.quantize(Decimal('0.01'))
+                            exp_tax = Decimal(str(
+                                item.get('attendance_tax_amount' if inv_mode == 'ATTENDANCE_RATE' else 'sales_tax_amount') or 0
+                            )).quantize(Decimal('0.01'))
+                            exp_rate = ((exp_tax / exp_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (exp_sub > 0 and exp_tax > 0) else Decimal('0.00')
+                            exp_total = (exp_sub + exp_tax).quantize(Decimal('0.01'))
+
+                            if exp_sub > 0 and (
+                                existing_inv.subtotal != exp_sub
+                                or existing_inv.tax_amount != exp_tax
+                                or existing_inv.grand_total != exp_total
+                            ):
+                                existing_inv.lines.filter(is_deleted=False).delete()
+                                ClientInvoiceViewSet._write_permanent_invoice_lines(
+                                    company=company,
+                                    invoice=existing_inv,
+                                    item=item,
+                                    calc_mode=inv_mode,
+                                    billing_month=preview['billing_month'],
+                                    subtotal=exp_sub,
+                                    tax_amt=exp_tax,
+                                    tax_rate=exp_rate,
+                                    grand_total=exp_total,
+                                )
+                                existing_inv.subtotal = exp_sub
+                                existing_inv.tax_amount = exp_tax
+                                existing_inv.grand_total = exp_total
+                                existing_inv.save(update_fields=['subtotal', 'tax_amount', 'grand_total', 'updated_at'])
+                                updated_invoices.append(existing_inv)
+                                continue
+                        skipped_count += 1
+                        continue
+
                     if crm_val <= 0 and att_val <= 0 and (item.get('fulfilled_shifts') or 0) <= 0:
                         continue
 
@@ -975,16 +1243,19 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     if subtotal <= 0:
                         continue
 
-                    tax_rate = Decimal(str(item.get('tax_rate') or 0))
-                    tax_amt = (subtotal * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
-                    grand_total = subtotal + tax_amt
-                    client = CRMEntity.objects.filter(id=item['client_id'], company=company).first()
-                    site_obj = OperationalSite.objects.filter(id=item['site_id'], company=company).first()
-                    contract_obj = ServiceContract.objects.filter(id=item['contract_id'], company=company).first() if item.get('contract_id') else None
+                    tax_amt = Decimal(str(
+                        item.get('attendance_tax_amount' if use_mode == 'ATTENDANCE_RATE' else 'sales_tax_amount') or 0
+                    )).quantize(Decimal('0.01'))
+                    tax_rate = ((tax_amt / subtotal) * Decimal('100.00')).quantize(Decimal('0.01')) if (subtotal > 0 and tax_amt > 0) else Decimal('0.00')
+                    grand_total = (subtotal + tax_amt).quantize(Decimal('0.01'))
+                    client = client_lookup.get(str(item['client_id']))
+                    site_obj = site_lookup.get(str(item['site_id']))
+                    contract_obj = contract_lookup.get(str(item['contract_id'])) if item.get('contract_id') else None
                     if not client or not site_obj:
                         continue
 
-                    mode_tag = f"[MODE:{use_mode}] [SITE:{site_obj.id}]"
+                    fmt_tag = '[FMT:CHEQUE]' if tax_amt > 0 else '[FMT:CASH]'
+                    mode_tag = f"[MODE:{use_mode}] [SITE:{site_obj.id}] {fmt_tag}"
                     inv = ClientInvoice.objects.create(
                         company=company,
                         invoice_number=ClientInvoice.generate_next_invoice_number(company),
@@ -1007,44 +1278,17 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                         notes=f"Security Services - {site_obj.name} ({preview['billing_month']}) {mode_tag}"
                     )
 
-                    if use_mode == 'CONTRACT_RATE' and item.get('line_breakdown'):
-                        for lb in item['line_breakdown']:
-                            l_sub = Decimal(str(lb['monthly_subtotal'])).quantize(Decimal('0.01'))
-                            l_tax = (l_sub * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
-                            ClientInvoiceLine.objects.create(
-                                company=company,
-                                invoice=inv,
-                                line_type='REGULAR_SERVICE',
-                                description=f"{lb['service_type']} @ {site_obj.name} (CRM Rate - {preview['billing_month']})",
-                                site=site_obj,
-                                quantity=Decimal(str(lb['quantity'] or 1)),
-                                unit_rate=Decimal(str(lb['client_rate'] or 0)),
-                                line_subtotal=l_sub,
-                                tax_rate=tax_rate,
-                                tax_amount=l_tax,
-                                total_amount=l_sub + l_tax
-                            )
-                    else:
-                        shifts = Decimal(str(item.get('fulfilled_shifts') or 1))
-                        d_rate = Decimal(str(item.get('guard_daily_bill_rate') or 0))
-                        desc_lbl = (
-                            f"Attendance-Delivered Security @ {site_obj.name} ({int(shifts)} Shifts x Rs {d_rate:,.2f}/shift)"
-                            if use_mode == 'ATTENDANCE_RATE'
-                            else f"CRM Retainer Security @ {site_obj.name} ({preview['billing_month']})"
-                        )
-                        ClientInvoiceLine.objects.create(
-                            company=company,
-                            invoice=inv,
-                            line_type='REGULAR_SERVICE',
-                            description=desc_lbl,
-                            site=site_obj,
-                            quantity=shifts if use_mode == 'ATTENDANCE_RATE' else Decimal('1.00'),
-                            unit_rate=d_rate if use_mode == 'ATTENDANCE_RATE' else subtotal,
-                            line_subtotal=subtotal,
-                            tax_rate=tax_rate,
-                            tax_amount=tax_amt,
-                            total_amount=grand_total
-                        )
+                    ClientInvoiceViewSet._write_permanent_invoice_lines(
+                        company=company,
+                        invoice=inv,
+                        item=item,
+                        calc_mode=use_mode,
+                        billing_month=preview['billing_month'],
+                        subtotal=subtotal,
+                        tax_amt=tax_amt,
+                        tax_rate=tax_rate,
+                        grand_total=grand_total,
+                    )
                     created_invoices.append(inv)
 
                 # 2. Temporary Services
@@ -1061,10 +1305,12 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                         continue
                     if t_sub <= 0:
                         t_sub = t_total - t_tax
-                    client = CRMEntity.objects.filter(id=t['client_id'], company=company).first()
+                    client = client_lookup.get(str(t['client_id']))
                     if not client:
                         continue
-                    site_obj = OperationalSite.objects.filter(id=t['site_id'], company=company).first() if t.get('site_id') else None
+                    site_obj = site_lookup.get(str(t['site_id'])) if t.get('site_id') else None
+                    t_rate = ((t_tax / t_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (t_sub > 0 and t_tax > 0) else Decimal('0.00')
+                    fmt_tag = '[FMT:CHEQUE]' if t_tax > 0 else '[FMT:CASH]'
 
                     inv = ClientInvoice.objects.create(
                         company=company,
@@ -1084,7 +1330,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                         status=initial_status,
                         issued_at=timezone.now() if initial_status == ClientInvoiceStatus.ISSUED else None,
                         issued_by=request.user if initial_status == ClientInvoiceStatus.ISSUED else None,
-                        notes=f"Temporary Event Service: {t['title']} ({t['venue']}) [TSR:{t['temporary_service_id']}]"
+                        notes=f"Temporary Event Service: {t['title']} ({t['venue']}) [TSR:{t['temporary_service_id']}] {fmt_tag}"
                     )
                     ClientInvoiceLine.objects.create(
                         company=company,
@@ -1095,7 +1341,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                         quantity=Decimal('1.00'),
                         unit_rate=t_sub,
                         line_subtotal=t_sub,
-                        tax_rate=Decimal('0.00'),
+                        tax_rate=t_rate,
                         tax_amount=t_tax,
                         total_amount=t_total
                     )
@@ -1104,9 +1350,10 @@ class ClientInvoiceViewSet(TenantModelViewSet):
           return Response({
               'success': True,
               'created_count': len(created_invoices),
+              'updated_count': len(updated_invoices),
               'skipped_count': skipped_count,
               'months_synced': months_to_sync,
-              'invoices': ClientInvoiceSerializer(created_invoices, many=True).data
+              'invoices': ClientInvoiceSerializer(created_invoices + updated_invoices, many=True).data
           }, status=status.HTTP_200_OK)
         except Exception as e:
           logger.exception("Error inside auto_sync_month: %s", e)
@@ -1152,68 +1399,47 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         if not matched:
             return Response({'error': 'Site commercial details could not be found in CRM/Operations.'}, status=status.HTTP_404_NOT_FOUND)
 
-        tax_rate = Decimal(str(request.data.get('tax_rate', matched.get('tax_rate') or 0)))
+        if calc_mode == 'ATTENDANCE_RATE':
+            shifts = Decimal(str(request.data.get('fulfilled_shifts', matched['fulfilled_shifts'] or 0)))
+            daily_rate = Decimal(str(request.data.get('guard_daily_bill_rate', matched['guard_daily_bill_rate'] or 0)))
+            if 'fulfilled_shifts' not in request.data and 'guard_daily_bill_rate' not in request.data and matched.get('attendance_monthly_amount'):
+                subtotal = Decimal(str(matched['attendance_monthly_amount'])).quantize(Decimal('0.01'))
+            else:
+                subtotal = (shifts * daily_rate).quantize(Decimal('0.01'))
+            matched_for_write = {**matched, 'fulfilled_shifts': int(shifts), 'guard_daily_bill_rate': float(daily_rate)}
+        else:
+            subtotal = Decimal(str(matched['contract_monthly_rate'] or 0)).quantize(Decimal('0.01'))
+            matched_for_write = matched
+
+        if 'tax_rate' in request.data:
+            tax_rate = Decimal(str(request.data.get('tax_rate') or 0))
+            tax_amt = (subtotal * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
+        else:
+            tax_amt, tax_rate, _ = ClientInvoiceViewSet._compute_crm_site_tax(
+                sales_tax_basis=matched.get('sales_tax_basis', 'MANUAL'),
+                nominal_tax_rate=matched.get('nominal_tax_rate', 0),
+                sales_tax_override=matched.get('sales_tax_override'),
+                service_charges_per_guard=matched.get('service_charges_per_guard', 0),
+                contract_heads=matched.get('contract_heads', 0),
+                contract_subtotal=matched.get('contract_monthly_rate', 0),
+                calc_mode=calc_mode,
+                subtotal_for_mode=subtotal,
+            )
+        grand_total = (subtotal + tax_amt).quantize(Decimal('0.01'))
 
         with transaction.atomic():
             invoice.lines.filter(is_deleted=False).delete()
-
-            if calc_mode == 'ATTENDANCE_RATE':
-                shifts = Decimal(str(request.data.get('fulfilled_shifts', matched['fulfilled_shifts'] or 0)))
-                daily_rate = Decimal(str(request.data.get('guard_daily_bill_rate', matched['guard_daily_bill_rate'] or 0)))
-                if 'fulfilled_shifts' not in request.data and 'guard_daily_bill_rate' not in request.data and matched.get('attendance_monthly_amount'):
-                    subtotal = Decimal(str(matched['attendance_monthly_amount'])).quantize(Decimal('0.01'))
-                else:
-                    subtotal = (shifts * daily_rate).quantize(Decimal('0.01'))
-                tax_amt = (subtotal * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
-                grand_total = subtotal + tax_amt
-                ClientInvoiceLine.objects.create(
-                    company=invoice.company,
-                    invoice=invoice,
-                    line_type='REGULAR_SERVICE',
-                    description=f"Attendance-Delivered Security @ {matched['site_name']} ({int(shifts)} Shifts x Rs {daily_rate:,.2f}/shift)",
-                    site_id=site_id,
-                    quantity=shifts if shifts > 0 else Decimal('1.00'),
-                    unit_rate=daily_rate,
-                    line_subtotal=subtotal,
-                    tax_rate=tax_rate,
-                    tax_amount=tax_amt,
-                    total_amount=grand_total
-                )
-            else:
-                subtotal = Decimal(str(matched['contract_monthly_rate'] or 0)).quantize(Decimal('0.01'))
-                tax_amt = (subtotal * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
-                grand_total = subtotal + tax_amt
-                if matched.get('line_breakdown'):
-                    for lb in matched['line_breakdown']:
-                        l_sub = Decimal(str(lb['monthly_subtotal'])).quantize(Decimal('0.01'))
-                        l_tax = (l_sub * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
-                        ClientInvoiceLine.objects.create(
-                            company=invoice.company,
-                            invoice=invoice,
-                            line_type='REGULAR_SERVICE',
-                            description=f"{lb['service_type']} @ {matched['site_name']} (CRM Rate - {invoice.billing_month})",
-                            site_id=site_id,
-                            quantity=Decimal(str(lb['quantity'] or 1)),
-                            unit_rate=Decimal(str(lb['client_rate'] or 0)),
-                            line_subtotal=l_sub,
-                            tax_rate=tax_rate,
-                            tax_amount=l_tax,
-                            total_amount=l_sub + l_tax
-                        )
-                else:
-                    ClientInvoiceLine.objects.create(
-                        company=invoice.company,
-                        invoice=invoice,
-                        line_type='REGULAR_SERVICE',
-                        description=f"CRM Retainer Security @ {matched['site_name']} ({invoice.billing_month})",
-                        site_id=site_id,
-                        quantity=Decimal('1.00'),
-                        unit_rate=subtotal,
-                        line_subtotal=subtotal,
-                        tax_rate=tax_rate,
-                        tax_amount=tax_amt,
-                        total_amount=grand_total
-                    )
+            ClientInvoiceViewSet._write_permanent_invoice_lines(
+                company=invoice.company,
+                invoice=invoice,
+                item=matched_for_write,
+                calc_mode=calc_mode,
+                billing_month=invoice.billing_month,
+                subtotal=subtotal,
+                tax_amt=tax_amt,
+                tax_rate=tax_rate,
+                grand_total=grand_total,
+            )
 
             clean_notes = re.sub(r'\[MODE:[^\]]+\]', '', invoice.notes or '').strip()
             invoice.notes = f"{clean_notes} [MODE:{calc_mode}]".strip()
@@ -1280,6 +1506,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         payment_terms = request.data.get('payment_terms', 'NET_30')
         group_by = request.data.get('group_by', 'PER_LOCATION')  # 'PER_LOCATION' | 'CONSOLIDATED'
         tax_rate = Decimal(str(request.data.get('tax_rate') or '0.00'))
+        template_mode = str(request.data.get('template_mode', '')).upper()
         services = request.data.get('services', [])
         initial_status = str(request.data.get('initial_status', ClientInvoiceStatus.ISSUED)).upper()
         if initial_status not in [ClientInvoiceStatus.DRAFT, ClientInvoiceStatus.ISSUED]:
@@ -1349,7 +1576,13 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 desc = s.get('description') or f"CRM Retainer Security @ {site_label} ({billing_month})"
                 tag = f"[MODE:CONTRACT_RATE] [SITE:{s_id}]" if s_id else "[MODE:CONTRACT_RATE]"
 
-            line_tax = (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+            if s.get('sales_tax_amount') is not None:
+                line_tax = Decimal(str(s.get('sales_tax_amount') or 0)).quantize(Decimal('0.01'))
+                eff_line_rate = ((line_tax / line_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (line_sub > 0 and line_tax > 0) else Decimal('0.00')
+            else:
+                eff_line_rate = tax_rate
+                line_tax = (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+
             return {
                 'line_type': line_type,
                 'description': desc,
@@ -1357,12 +1590,13 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 'quantity': qty,
                 'unit_rate': rate,
                 'line_subtotal': line_sub,
-                'tax_rate': tax_rate,
+                'tax_rate': eff_line_rate,
                 'tax_amount': line_tax,
                 'total_amount': line_sub + line_tax,
                 'tag': tag,
                 'site_label': site_label,
-                'contract_id': s.get('contract_id')
+                'contract_id': s.get('contract_id'),
+                'has_explicit_tax': s.get('sales_tax_amount') is not None,
             }
 
         created_invoices = []
@@ -1376,6 +1610,8 @@ class ClientInvoiceViewSet(TenantModelViewSet):
 
                 for _grp_key, svc_list in grouped_services.items():
                     subtotal = Decimal('0.00')
+                    explicit_tax_sum = Decimal('0.00')
+                    any_explicit_tax = False
                     lines_data = []
                     site_obj = None
                     tags = []
@@ -1384,6 +1620,9 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     for s in svc_list:
                         parsed = _parse_service_line(s)
                         subtotal += parsed['line_subtotal']
+                        if parsed['has_explicit_tax']:
+                            any_explicit_tax = True
+                            explicit_tax_sum += parsed['tax_amount']
                         if parsed['site'] and not site_obj:
                             site_obj = parsed['site']
                         if parsed['contract_id'] and not contract_id_hint:
@@ -1392,8 +1631,10 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                             tags.append(parsed['tag'])
                         lines_data.append(parsed)
 
-                    tax_amount = (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                    tax_amount = explicit_tax_sum.quantize(Decimal('0.01')) if any_explicit_tax else (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
                     grand_total = subtotal + tax_amount
+                    fmt_tag = f"[FMT:{template_mode}]" if template_mode in ('CASH', 'CHEQUE') else ('[FMT:CHEQUE]' if tax_amount > 0 else '[FMT:CASH]')
+                    tags.append(fmt_tag)
                     loc_name = site_obj.name if site_obj else (lines_data[0]['site_label'] if lines_data else 'General Services')
                     contract_obj = (
                         ServiceContract.objects.filter(id=contract_id_hint, company_id=company_id).first()
@@ -1442,6 +1683,8 @@ class ClientInvoiceViewSet(TenantModelViewSet):
 
             else:
                 subtotal = Decimal('0.00')
+                explicit_tax_sum = Decimal('0.00')
+                any_explicit_tax = False
                 lines_data = []
                 tags = []
                 contract_id_hint = None
@@ -1449,14 +1692,19 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 for s in services:
                     parsed = _parse_service_line(s)
                     subtotal += parsed['line_subtotal']
+                    if parsed['has_explicit_tax']:
+                        any_explicit_tax = True
+                        explicit_tax_sum += parsed['tax_amount']
                     if parsed['contract_id'] and not contract_id_hint:
                         contract_id_hint = parsed['contract_id']
                     if parsed['tag']:
                         tags.append(parsed['tag'])
                     lines_data.append(parsed)
 
-                tax_amount = (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                tax_amount = explicit_tax_sum.quantize(Decimal('0.01')) if any_explicit_tax else (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
                 grand_total = subtotal + tax_amount
+                fmt_tag = f"[FMT:{template_mode}]" if template_mode in ('CASH', 'CHEQUE') else ('[FMT:CHEQUE]' if tax_amount > 0 else '[FMT:CASH]')
+                tags.append(fmt_tag)
                 contract_obj = (
                     ServiceContract.objects.filter(id=contract_id_hint, company_id=company_id).first()
                     if contract_id_hint
@@ -1647,6 +1895,40 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['post'], url_path='set-template-mode')
+    def set_template_mode(self, request, pk=None):
+        """
+        POST /api/billing/client-invoices/{id}/set-template-mode/
+        Switches invoice between CASH ('INVOICE') and CHEQUE ('SALES TAX INVOICE') format.
+        """
+        import re as _re
+        invoice = self.get_object()
+        mode = str(request.data.get('template_mode', 'CASH')).upper()
+        if mode not in ('CASH', 'CHEQUE'):
+            return Response({'error': 'template_mode must be CASH or CHEQUE.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        clean_notes = _re.sub(r'\[FMT:[^\]]+\]', '', invoice.notes or '').strip()
+        invoice.notes = f"{clean_notes} [FMT:{mode}]".strip()
+        invoice.save(update_fields=['notes', 'updated_at'])
+        return Response(render_invoice_context(invoice), status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get', 'put', 'patch'], url_path='invoice-templates')
+    def invoice_templates(self, request):
+        """
+        GET/PUT/PATCH /api/billing/client-invoices/invoice-templates/
+        Per-tenant customizable Cash & Cheque invoice templates stored in CompanyModule.configuration.
+        """
+        from companies.models import Company
+        from billing.services.invoice_template_service import get_invoice_templates, save_invoice_templates
+        company_id = self._get_company_id(request)
+        company = Company.objects.get(id=company_id)
+
+        if request.method == 'GET':
+            return Response(get_invoice_templates(company), status=status.HTTP_200_OK)
+
+        updated = save_invoice_templates(company, request.data or {})
+        return Response(updated, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='send-reminder')
     def send_reminder(self, request, pk=None):
         invoice = self.get_object()
@@ -1736,7 +2018,9 @@ class ClientInvoiceViewSet(TenantModelViewSet):
 
 
 class ClientReceiptViewSet(TenantModelViewSet):
-    queryset = ClientReceipt.objects.all()
+    queryset = ClientReceipt.objects.select_related(
+        'client', 'currency', 'bank_account', 'received_by', 'posted_by', 'reversed_by'
+    ).prefetch_related('allocations', 'allocations__invoice').all()
     serializer_class = ClientReceiptSerializer
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     required_module = 'billing'
@@ -1786,7 +2070,9 @@ class ClientReceiptViewSet(TenantModelViewSet):
 
 
 class RecoveryActivityViewSet(TenantModelViewSet):
-    queryset = RecoveryActivity.objects.all()
+    queryset = RecoveryActivity.objects.select_related(
+        'client', 'invoice', 'assigned_to', 'created_by'
+    ).all()
     serializer_class = RecoveryActivitySerializer
     permission_classes = [IsAuthenticated, RolePermission, ModulePermission]
     required_module = 'billing'

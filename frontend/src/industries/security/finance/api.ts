@@ -486,42 +486,162 @@ export interface ClientInvoice {
   updated_at: string;
 }
 
+export interface InvoiceTemplateConfig {
+  title: string;
+  show_header: boolean;
+  show_logo: boolean;
+  company_name: string;
+  address: string;
+  phone: string;
+  website: string;
+  email: string;
+  custom_logo_url: string;
+  show_tax_numbers: boolean;
+  ntn: string;
+  strn: string;
+  date_label: string;
+  invoice_no_label: string;
+  show_contract_id: boolean;
+  contract_label: string;
+  customer_label: string;
+  show_customer_ntn: boolean;
+  customer_ntn_label: string;
+  month_label: string;
+  period_label: string;
+  col_sno_label: string;
+  col_description_label: string;
+  col_qty_label: string;
+  col_rate_label: string;
+  col_amount_label: string;
+  col_amount_sublabel: string;
+  show_service_charges_row: boolean;
+  service_charges_label: string;
+  sales_tax_label: string;
+  currency_label: string;
+  footer_note: string;
+  left_signature_label: string;
+  right_signature_label: string;
+  show_bank_details: boolean;
+  bank_section_title: string;
+  bank_account_title: string;
+  bank_account_number: string;
+  bank_name: string;
+  bank_iban: string;
+}
+
+export interface InvoiceCompanyDefaults {
+  company_id: string;
+  company_name: string;
+  logo_url: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  ntn: string;
+  strn: string;
+  bank_name: string;
+  bank_account_title: string;
+  bank_account_number: string;
+  bank_iban: string;
+}
+
+export interface InvoiceTemplatesBundle {
+  cash: InvoiceTemplateConfig;
+  cheque: InvoiceTemplateConfig;
+  company_defaults: InvoiceCompanyDefaults;
+}
+
 export interface InvoicePreviewContext {
+  invoice_id?: string;
+  invoice_number?: string;
+  invoice_date?: string;
+  due_date?: string;
+  billing_month?: string;
+  period_start?: string;
+  period_end?: string;
+  currency?: string;
+  payment_terms?: string;
+  status?: string;
+  status_display?: string;
+  notes?: string;
+  terms_and_conditions?: string;
+  subtotal?: number;
+  tax_rate?: number;
+  tax_amount?: number;
+  grand_total?: number;
+  paid_amount?: number;
+  balance_due?: number;
+  template_mode: 'CASH' | 'CHEQUE';
+  calculation_mode?: 'CONTRACT_RATE' | 'ATTENDANCE_RATE';
+  amount_in_words: string;
+  service_charges: {
+    has_breakdown: boolean;
+    per_guard: number;
+    quantity: number;
+    amount: number;
+    guards_subtotal: number;
+    sales_tax_basis: string;
+    sales_tax_rate: number;
+    sales_tax_amount: number;
+  };
   company: {
     id: string;
     name: string;
     email: string;
     phone: string;
     address: string;
+    website?: string;
     logo_url?: string | null;
     ntn?: string;
     strn?: string;
   };
   client: {
-    id: string;
+    id: string | null;
     name: string;
+    trade_name?: string;
+    ntn?: string;
+    strn?: string;
     billing_address: string;
-    email: string;
-    phone: string;
+    contact_person?: string;
+    contact_email?: string;
+    contact_phone?: string;
+    email?: string;
+    phone?: string;
   };
+  contract?: {
+    id: string | null;
+    contract_number: string;
+    title: string;
+    client_name: string;
+  } | null;
+  billing_sheet?: {
+    id: string | null;
+    sheet_number: string;
+  } | null;
   invoice: {
     id: string;
     invoice_number: string;
-    contract_code: string;
-    billing_sheet_number: string;
+    contract_code?: string;
+    billing_sheet_number?: string;
     period_start: string;
     period_end: string;
     billing_month: string;
     invoice_date: string;
     due_date: string;
+    currency?: string;
     payment_terms: string;
     subtotal: number;
+    tax_rate: number;
     tax_amount: number;
     grand_total: number;
     paid_amount: number;
+    balance_due?: number;
     status: string;
+    status_display?: string;
     notes: string;
     terms_and_conditions: string;
+    template_mode?: 'CASH' | 'CHEQUE';
+    calculation_mode?: 'CONTRACT_RATE' | 'ATTENDANCE_RATE';
   };
   lines: Array<{
     id: string;
@@ -530,18 +650,29 @@ export interface InvoicePreviewContext {
     site_name: string;
     quantity: number;
     unit_rate: number;
+    unit_price?: number;
     line_subtotal: number;
     tax_rate: number;
     tax_amount: number;
     total_amount: number;
+  }>;
+  sites_breakdown?: Array<{
+    site_name: string;
+    site_code: string;
+    lines: any[];
+    site_subtotal: number;
+    site_tax: number;
+    site_total: number;
   }>;
   bank_details: {
     bank_name: string;
     account_title: string;
     account_number: string;
     iban: string;
-    branch: string;
+    branch?: string;
+    branch_code?: string;
   };
+  templates: InvoiceTemplatesBundle;
 }
 
 export async function fetchBillingSheets(params?: Record<string, any>): Promise<BillingSheet[]> {
@@ -610,11 +741,26 @@ export async function generateClientInvoiceFromSheet(
 }
 
 export async function fetchClientInvoices(params?: Record<string, any>): Promise<ClientInvoice[]> {
+  const mergedParams = { page_size: 1000, ...(params || {}) };
   const resp = await axios.get(`${BILLING_API_BASE}/client-invoices/`, {
     ...getAuthHeaders(),
-    params
+    params: mergedParams
   });
-  return resp.data.results || resp.data;
+  const data = resp.data;
+  if (Array.isArray(data)) return data;
+  let allResults: ClientInvoice[] = Array.isArray(data?.results) ? [...data.results] : [];
+  let nextUrl: string | null = data?.next || null;
+  let pageGuard = 0;
+  while (nextUrl && pageGuard < 20) {
+    pageGuard += 1;
+    const nextResp = await axios.get(nextUrl, getAuthHeaders());
+    const nextData = nextResp.data;
+    if (Array.isArray(nextData?.results)) {
+      allResults = allResults.concat(nextData.results);
+    }
+    nextUrl = nextData?.next || null;
+  }
+  return allResults;
 }
 
 export async function fetchClientInvoiceById(id: string): Promise<ClientInvoice> {
@@ -670,6 +816,7 @@ export interface CRMInvoiceServiceItem {
   contract_monthly_rate?: number;
   fulfilled_shifts?: number;
   guard_daily_bill_rate?: number;
+  sales_tax_amount?: number;
   temporary_service_id?: string;
   temporary_title?: string;
   temporary_amount?: number;
@@ -682,6 +829,7 @@ export interface GenerateFromCRMPayload {
   due_date?: string;
   payment_terms?: string;
   tax_rate?: number;
+  template_mode?: 'CASH' | 'CHEQUE';
   group_by?: 'PER_LOCATION' | 'CONSOLIDATED';
   initial_status?: 'DRAFT' | 'ISSUED';
   services: CRMInvoiceServiceItem[];
@@ -700,6 +848,15 @@ export interface CRMBillingPreviewSite {
   guard_daily_bill_rate: number;
   attendance_monthly_amount: number;
   tax_rate: number;
+  nominal_tax_rate?: number;
+  sales_tax_basis?: string;
+  sales_tax_override?: number | null;
+  service_charges_per_guard?: number;
+  total_service_charges?: number;
+  sales_tax_amount?: number;
+  crm_total_invoice_amount?: number;
+  attendance_tax_amount?: number;
+  attendance_total_invoice_amount?: number;
   payment_terms: string;
   line_breakdown: Array<{
     service_type: string;
@@ -769,11 +926,37 @@ export async function autoSyncCRMInvoices(data?: {
 }): Promise<{
   success: boolean;
   created_count: number;
+  updated_count?: number;
   skipped_count: number;
   months_synced: string[];
   invoices: ClientInvoice[];
 }> {
   const resp = await axios.post(`${BILLING_API_BASE}/client-invoices/auto-sync-month/`, data || {}, getAuthHeaders());
+  return resp.data;
+}
+
+export async function fetchInvoiceTemplates(): Promise<InvoiceTemplatesBundle> {
+  const resp = await axios.get(`${BILLING_API_BASE}/client-invoices/invoice-templates/`, getAuthHeaders());
+  return resp.data;
+}
+
+export async function saveInvoiceTemplates(payload: {
+  cash?: Partial<InvoiceTemplateConfig>;
+  cheque?: Partial<InvoiceTemplateConfig>;
+}): Promise<InvoiceTemplatesBundle> {
+  const resp = await axios.put(`${BILLING_API_BASE}/client-invoices/invoice-templates/`, payload, getAuthHeaders());
+  return resp.data;
+}
+
+export async function setInvoiceTemplateMode(
+  invoiceId: string,
+  template_mode: 'CASH' | 'CHEQUE'
+): Promise<InvoicePreviewContext> {
+  const resp = await axios.post(
+    `${BILLING_API_BASE}/client-invoices/${invoiceId}/set-template-mode/`,
+    { template_mode },
+    getAuthHeaders()
+  );
   return resp.data;
 }
 
@@ -3046,6 +3229,28 @@ export interface FinanceActionItem {
   category: string;
   target_tab: string;
   description: string;
+}
+
+export interface ExecutiveDashboardBundle {
+  overview: ExecutiveDashboardData;
+  financial_health: FinancialHealthSummary;
+  trends: any[];
+  receivables_snapshot: any;
+  payables_snapshot: any;
+  payroll_snapshot: any;
+  tax_snapshot: any;
+  treasury_snapshot: any;
+  profitability_snapshot: any;
+  accounting_health: any;
+  action_center: FinanceActionItem[];
+}
+
+export async function fetchExecutiveDashboardBundle(startDate?: string, endDate?: string): Promise<ExecutiveDashboardBundle> {
+  const resp = await axios.get(`${EXEC_BASE}/bundle/`, {
+    ...getAuthHeaders(),
+    params: { start_date: startDate, end_date: endDate }
+  });
+  return resp.data;
 }
 
 export async function fetchExecutiveOverview(startDate?: string, endDate?: string): Promise<ExecutiveDashboardData> {

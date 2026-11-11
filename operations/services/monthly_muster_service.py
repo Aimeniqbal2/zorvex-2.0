@@ -1728,6 +1728,42 @@ class MonthlyMusterService:
         }
 
     @staticmethod
+    def unfreeze_month(company, year: int, month: int, user=None):
+        """
+        Temporarily unfreezes DailyDutyPay and WorkforceAttendance records for the given month
+        so authorized admins/managers can correct accidental freezes or attendance entries.
+        """
+        days_in_month = calendar.monthrange(year, month)[1]
+        start_date = date(year, month, 1)
+        end_date = date(year, month, days_in_month)
+
+        with transaction.atomic():
+            pay_count = DailyDutyPay.objects.filter(
+                company=company,
+                duty_date__gte=start_date,
+                duty_date__lte=end_date,
+                is_deleted=False,
+                is_frozen=True
+            ).update(is_frozen=False)
+
+            att_count = WorkforceAttendance.objects.filter(
+                company=company,
+                date__gte=start_date,
+                date__lte=end_date,
+                is_deleted=False,
+                is_finalized=True
+            ).update(is_finalized=False)
+
+        return {
+            'status': 'success',
+            'year': year,
+            'month': month,
+            'unfrozen_records_count': pay_count,
+            'unfrozen_attendance_count': att_count,
+            'message': f"Monthly Duty Muster records for {month}/{year} have been temporarily unfrozen and are now editable."
+        }
+
+    @staticmethod
     def resolve_auto_attendance_code(prev_code: str) -> str:
         """
         Evaluates attendance code on day (D - 1) and determines auto-attendance code for day D.

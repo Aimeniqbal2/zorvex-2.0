@@ -24,6 +24,7 @@ from .views import (
     MonthlyMusterExcelImportView, MonthlyMusterGuardLedgerView,
     MonthlyMusterCleanupOrphanedAttendanceView,
     MonthlyMusterFreezeMonthView,
+    MonthlyMusterUnfreezeMonthView,
     MonthlyMusterAutoAttendanceConfigView,
     MonthlyMusterRunAutoAttendanceView
 )
@@ -85,6 +86,7 @@ urlpatterns = [
     path('monthly-muster/save/', MonthlyMusterSaveView.as_view(), name='monthly-muster-save'),
     path('monthly-muster/cleanup-orphaned/', MonthlyMusterCleanupOrphanedAttendanceView.as_view(), name='monthly-muster-cleanup-orphaned'),
     path('monthly-muster/freeze-month/', MonthlyMusterFreezeMonthView.as_view(), name='monthly-muster-freeze-month'),
+    path('monthly-muster/unfreeze-month/', MonthlyMusterUnfreezeMonthView.as_view(), name='monthly-muster-unfreeze-month'),
     path('monthly-muster/import-excel/', MonthlyMusterExcelImportView.as_view(), name='monthly-muster-import-excel'),
     path('monthly-muster/guard-ledger/', MonthlyMusterGuardLedgerView.as_view(), name='monthly-muster-guard-ledger'),
     path('monthly-muster/auto-attendance-config/', MonthlyMusterAutoAttendanceConfigView.as_view(), name='monthly-muster-auto-config'),

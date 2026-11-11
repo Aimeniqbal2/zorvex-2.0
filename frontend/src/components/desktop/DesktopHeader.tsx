@@ -74,10 +74,10 @@ export const DesktopHeader: React.FC = () => {
                     
                     <div className={`user-menu-dropdown ${menuOpen ? 'active' : ''}`}>
                         <button className="dropdown-item" onClick={() => { setSettingsTab('profile'); setSettingsOpen(true); setMenuOpen(false); }}>
-                            <i className='bx bx-user'></i> Profile
+                            <i className='bx bx-user'></i> Profile & Password
                         </button>
                         <button className="dropdown-item" onClick={() => { setSettingsTab('company'); setSettingsOpen(true); setMenuOpen(false); }}>
-                            <i className='bx bx-buildings'></i> {user?.company_id ? `Company ${user.company_id}` : 'My Company'}
+                            <i className='bx bx-buildings'></i> {user?.company_name || (user?.company_id ? `Company ${user.company_id}` : 'My Company')}
                         </button>
                         <button className="dropdown-item" onClick={() => { setSettingsTab('settings'); setSettingsOpen(true); setMenuOpen(false); }}>
                             <i className='bx bx-cog'></i> Settings

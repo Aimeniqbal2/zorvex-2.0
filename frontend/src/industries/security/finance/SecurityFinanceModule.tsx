@@ -42,6 +42,29 @@ export const SecurityFinanceModule: React.FC = () => {
   const [profitabilitySubTab, setProfitabilitySubTab] = useState<'PROFITABILITY' | 'EXPENSES'>('PROFITABILITY');
   const [accountingSubTab, setAccountingSubTab] = useState<'GL' | 'STATEMENTS' | 'TAX' | 'CONTROLS' | 'SETUP'>('GL');
 
+  // Keep visited hubs & sub-tabs mounted for instant 0ms tab switching with zero redundant API re-fetches
+  const [visitedTabs, setVisitedTabs] = useState<Record<string, boolean>>({ overview: true });
+  const [visitedInvoicingSubs, setVisitedInvoicingSubs] = useState<Record<string, boolean>>({ INVOICES: true });
+  const [visitedVouchersSubs, setVisitedVouchersSubs] = useState<Record<string, boolean>>({ TREASURY: true });
+  const [visitedProfitSubs, setVisitedProfitSubs] = useState<Record<string, boolean>>({ PROFITABILITY: true });
+  const [visitedAcctSubs, setVisitedAcctSubs] = useState<Record<string, boolean>>({ GL: true });
+
+  React.useEffect(() => {
+    setVisitedTabs((prev) => (prev[activeTab] ? prev : { ...prev, [activeTab]: true }));
+  }, [activeTab]);
+
+  React.useEffect(() => {
+    if (activeTab === 'invoicing') {
+      setVisitedInvoicingSubs((prev) => (prev[invoicingSubTab] ? prev : { ...prev, [invoicingSubTab]: true }));
+    } else if (activeTab === 'vouchers_treasury') {
+      setVisitedVouchersSubs((prev) => (prev[vouchersSubTab] ? prev : { ...prev, [vouchersSubTab]: true }));
+    } else if (activeTab === 'profitability') {
+      setVisitedProfitSubs((prev) => (prev[profitabilitySubTab] ? prev : { ...prev, [profitabilitySubTab]: true }));
+    } else if (activeTab === 'accounting_reports') {
+      setVisitedAcctSubs((prev) => (prev[accountingSubTab] ? prev : { ...prev, [accountingSubTab]: true }));
+    }
+  }, [activeTab, invoicingSubTab, vouchersSubTab, profitabilitySubTab, accountingSubTab]);
+
   const handleNavigateFromDashboard = (tabId: string) => {
     switch (tabId) {
       case 'client_invoices':
@@ -434,45 +457,108 @@ export const SecurityFinanceModule: React.FC = () => {
         </div>
       )}
 
-      {/* Main Tab Panels */}
+      {/* Main Tab Panels (visited tabs stay mounted cleanly via CSS display for instant switching) */}
       <div>
-        {activeTab === 'overview' && (
-          <ExecutiveFinanceDashboardTab onNavigateTab={handleNavigateFromDashboard} />
+        {visitedTabs.overview && (
+          <div style={{ display: activeTab === 'overview' ? 'block' : 'none' }}>
+            <ExecutiveFinanceDashboardTab onNavigateTab={handleNavigateFromDashboard} />
+          </div>
         )}
 
-        {activeTab === 'invoicing' && (
-          invoicingSubTab === 'INVOICES' ? <ClientInvoicesTab /> : <BillingSheetsTab />
+        {visitedTabs.invoicing && (
+          <div style={{ display: activeTab === 'invoicing' ? 'block' : 'none' }}>
+            {visitedInvoicingSubs.INVOICES && (
+              <div style={{ display: invoicingSubTab === 'INVOICES' ? 'block' : 'none' }}>
+                <ClientInvoicesTab />
+              </div>
+            )}
+            {visitedInvoicingSubs.BILLING_SHEETS && (
+              <div style={{ display: invoicingSubTab === 'BILLING_SHEETS' ? 'block' : 'none' }}>
+                <BillingSheetsTab />
+              </div>
+            )}
+          </div>
         )}
 
-        {activeTab === 'recovery' && <RecoveryCollectionsTab />}
-
-        {activeTab === 'payroll' && <PayrollFinanceTab />}
-
-        {activeTab === 'vendor_payments' && <VendorPaymentsTab />}
-
-        {activeTab === 'vouchers_treasury' && (
-          vouchersSubTab === 'TREASURY' ? (
-            <TreasuryDashboardTab
-              onNavigateToVouchers={() => setVouchersSubTab('VOUCHERS')}
-              onNavigateToCheques={() => setVouchersSubTab('VOUCHERS')}
-            />
-          ) : (
-            <VouchersTab />
-          )
+        {visitedTabs.recovery && (
+          <div style={{ display: activeTab === 'recovery' ? 'block' : 'none' }}>
+            <RecoveryCollectionsTab />
+          </div>
         )}
 
-        {activeTab === 'profitability' && (
-          profitabilitySubTab === 'PROFITABILITY' ? <ProfitabilityWorkspaceTab /> : <ExpensesTab />
+        {visitedTabs.payroll && (
+          <div style={{ display: activeTab === 'payroll' ? 'block' : 'none' }}>
+            <PayrollFinanceTab />
+          </div>
         )}
 
-        {activeTab === 'accounting_reports' && (
-          <>
-            {accountingSubTab === 'GL' && <GeneralLedgerTab />}
-            {accountingSubTab === 'STATEMENTS' && <FinancialStatementsTab />}
-            {accountingSubTab === 'TAX' && <TaxManagementTab />}
-            {accountingSubTab === 'CONTROLS' && <FinancialControlsTab />}
-            {accountingSubTab === 'SETUP' && <FinanceSetupTab />}
-          </>
+        {visitedTabs.vendor_payments && (
+          <div style={{ display: activeTab === 'vendor_payments' ? 'block' : 'none' }}>
+            <VendorPaymentsTab />
+          </div>
+        )}
+
+        {visitedTabs.vouchers_treasury && (
+          <div style={{ display: activeTab === 'vouchers_treasury' ? 'block' : 'none' }}>
+            {visitedVouchersSubs.TREASURY && (
+              <div style={{ display: vouchersSubTab === 'TREASURY' ? 'block' : 'none' }}>
+                <TreasuryDashboardTab
+                  onNavigateToVouchers={() => setVouchersSubTab('VOUCHERS')}
+                  onNavigateToCheques={() => setVouchersSubTab('VOUCHERS')}
+                />
+              </div>
+            )}
+            {visitedVouchersSubs.VOUCHERS && (
+              <div style={{ display: vouchersSubTab === 'VOUCHERS' ? 'block' : 'none' }}>
+                <VouchersTab />
+              </div>
+            )}
+          </div>
+        )}
+
+        {visitedTabs.profitability && (
+          <div style={{ display: activeTab === 'profitability' ? 'block' : 'none' }}>
+            {visitedProfitSubs.PROFITABILITY && (
+              <div style={{ display: profitabilitySubTab === 'PROFITABILITY' ? 'block' : 'none' }}>
+                <ProfitabilityWorkspaceTab />
+              </div>
+            )}
+            {visitedProfitSubs.EXPENSES && (
+              <div style={{ display: profitabilitySubTab === 'EXPENSES' ? 'block' : 'none' }}>
+                <ExpensesTab />
+              </div>
+            )}
+          </div>
+        )}
+
+        {visitedTabs.accounting_reports && (
+          <div style={{ display: activeTab === 'accounting_reports' ? 'block' : 'none' }}>
+            {visitedAcctSubs.GL && (
+              <div style={{ display: accountingSubTab === 'GL' ? 'block' : 'none' }}>
+                <GeneralLedgerTab />
+              </div>
+            )}
+            {visitedAcctSubs.STATEMENTS && (
+              <div style={{ display: accountingSubTab === 'STATEMENTS' ? 'block' : 'none' }}>
+                <FinancialStatementsTab />
+              </div>
+            )}
+            {visitedAcctSubs.TAX && (
+              <div style={{ display: accountingSubTab === 'TAX' ? 'block' : 'none' }}>
+                <TaxManagementTab />
+              </div>
+            )}
+            {visitedAcctSubs.CONTROLS && (
+              <div style={{ display: accountingSubTab === 'CONTROLS' ? 'block' : 'none' }}>
+                <FinancialControlsTab />
+              </div>
+            )}
+            {visitedAcctSubs.SETUP && (
+              <div style={{ display: accountingSubTab === 'SETUP' ? 'block' : 'none' }}>
+                <FinanceSetupTab />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

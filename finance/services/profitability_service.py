@@ -42,11 +42,12 @@ class ProfitabilityService:
         client_id: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Calculates Client Profitability from POSTED GL lines.
+        Calculates Client Profitability from POSTED GL lines using SQL aggregation.
         """
         lines = JournalEntryLine.objects.filter(
-            company=company, journal_entry__status='POSTED', is_deleted=False
-        ).select_related('account', 'crm_entity')
+            company=company, journal_entry__status='POSTED', is_deleted=False,
+            crm_entity_id__isnull=False
+        )
 
         if start_date:
             lines = lines.filter(journal_entry__posting_date__gte=start_date)
@@ -55,15 +56,18 @@ class ProfitabilityService:
         if client_id:
             lines = lines.filter(crm_entity_id=client_id)
 
+        agg_lines = lines.values('crm_entity_id', 'account__account_type').annotate(
+            debit=Sum('debit'), credit=Sum('credit')
+        )
+
         # Map active clients
-        clients_qs = CRMEntity.objects.filter(company=company, is_deleted=False)
+        clients_qs = CRMEntity.objects.filter(company=company, is_deleted=False).only('id', 'name')
         if client_id:
             clients_qs = clients_qs.filter(id=client_id)
 
-        client_map = {str(c.id): c for c in clients_qs}
         results = {}
-
-        for str_id, c in client_map.items():
+        for c in clients_qs:
+            str_id = str(c.id)
             results[str_id] = {
                 'client_id': str_id,
                 'client_name': c.name,
@@ -76,25 +80,21 @@ class ProfitabilityService:
                 'management_status': 'NO_REVENUE'
             }
 
-        # Overhead allocations map
         allocations = ProfitabilityService.calculate_overhead_allocations(company, start_date, end_date)
 
-        for l in lines:
-            if not l.crm_entity_id:
-                continue
-            str_id = str(l.crm_entity_id)
+        for l in agg_lines:
+            str_id = str(l['crm_entity_id'])
             if str_id not in results:
                 continue
 
-            acc = l.account
-            acc_type = str(acc.account_type).upper()
+            acc_type = str(l['account__account_type'] or '').upper()
+            l_debit = l['debit'] or Decimal('0.0000')
+            l_credit = l['credit'] or Decimal('0.0000')
 
             if acc_type in ['REVENUE', 'INCOME']:
-                rev = l.credit - l.debit
-                results[str_id]['revenue'] += rev
+                results[str_id]['revenue'] += (l_credit - l_debit)
             elif acc_type in ['COST_OF_SERVICE', 'COGS', 'EXPENSE']:
-                cost = l.debit - l.credit
-                results[str_id]['direct_costs'] += cost
+                results[str_id]['direct_costs'] += (l_debit - l_credit)
 
         output = []
         for str_id, data in results.items():
@@ -128,11 +128,12 @@ class ProfitabilityService:
         client_id: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Calculates Service Contract Profitability from POSTED GL lines.
+        Calculates Service Contract Profitability from POSTED GL lines using SQL aggregation.
         """
         lines = JournalEntryLine.objects.filter(
-            company=company, journal_entry__status='POSTED', is_deleted=False
-        ).select_related('account', 'contract', 'crm_entity')
+            company=company, journal_entry__status='POSTED', is_deleted=False,
+            contract_id__isnull=False
+        )
 
         if start_date:
             lines = lines.filter(journal_entry__posting_date__gte=start_date)
@@ -143,16 +144,19 @@ class ProfitabilityService:
         if client_id:
             lines = lines.filter(crm_entity_id=client_id)
 
-        contracts_qs = ServiceContract.objects.filter(company=company, is_deleted=False)
+        agg_lines = lines.values(
+            'contract_id', 'account__account_type', 'account__account_name', 'account__account_code'
+        ).annotate(debit=Sum('debit'), credit=Sum('credit'))
+
+        contracts_qs = ServiceContract.objects.filter(company=company, is_deleted=False).select_related('crm_entity')
         if contract_id:
             contracts_qs = contracts_qs.filter(id=contract_id)
         if client_id:
             contracts_qs = contracts_qs.filter(client_id=client_id)
 
-        contract_map = {str(c.id): c for c in contracts_qs}
         results = {}
-
-        for str_id, c in contract_map.items():
+        for c in contracts_qs:
+            str_id = str(c.id)
             client_name = c.crm_entity.name if hasattr(c, 'crm_entity') and c.crm_entity else 'Unassigned'
             code = getattr(c, 'contract_code', getattr(c, 'contract_number', f"Contract #{c.id}"))
             results[str_id] = {
@@ -178,21 +182,21 @@ class ProfitabilityService:
 
         allocations = ProfitabilityService.calculate_overhead_allocations(company, start_date, end_date)
 
-        for l in lines:
-            if not l.contract_id:
-                continue
-            str_id = str(l.contract_id)
+        for l in agg_lines:
+            str_id = str(l['contract_id'])
             if str_id not in results:
                 continue
 
-            acc = l.account
-            acc_type = str(acc.account_type).upper()
-            name_lower = acc.account_name.lower()
+            acc_type = str(l['account__account_type'] or '').upper()
+            acc_code = l['account__account_code'] or ''
+            name_lower = (l['account__account_name'] or '').lower()
+            l_debit = l['debit'] or Decimal('0.0000')
+            l_credit = l['credit'] or Decimal('0.0000')
 
             if acc_type in ['REVENUE', 'INCOME']:
-                results[str_id]['revenue'] += (l.credit - l.debit)
+                results[str_id]['revenue'] += (l_credit - l_debit)
             elif acc_type in ['COST_OF_SERVICE', 'COGS', 'EXPENSE']:
-                cost = l.debit - l.credit
+                cost = l_debit - l_credit
                 results[str_id]['total_direct_cost'] += cost
 
                 if 'supervisor' in name_lower:
@@ -203,7 +207,7 @@ class ProfitabilityService:
                     results[str_id]['equipment_cost'] += cost
                 elif 'transport' in name_lower or 'fuel' in name_lower:
                     results[str_id]['transport_cost'] += cost
-                elif 'salary' in name_lower or 'wage' in name_lower or 'guard' in name_lower or acc.account_code.startswith('51'):
+                elif 'salary' in name_lower or 'wage' in name_lower or 'guard' in name_lower or acc_code.startswith('51'):
                     results[str_id]['guard_payroll_cost'] += cost
                 else:
                     results[str_id]['other_direct_cost'] += cost
@@ -239,12 +243,13 @@ class ProfitabilityService:
         client_id: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Calculates Operational Site Profitability matching security management specs.
-        (e.g., ABC Factory Karachi layout with Direct Profit & Net Site Contribution).
+        Calculates Operational Site Profitability matching security management specs
+        using SQL aggregation over POSTED GL lines.
         """
         lines = JournalEntryLine.objects.filter(
-            company=company, journal_entry__status='POSTED', is_deleted=False
-        ).select_related('account', 'site', 'contract', 'crm_entity')
+            company=company, journal_entry__status='POSTED', is_deleted=False,
+            site_id__isnull=False
+        )
 
         if start_date:
             lines = lines.filter(journal_entry__posting_date__gte=start_date)
@@ -257,16 +262,19 @@ class ProfitabilityService:
         if client_id:
             lines = lines.filter(crm_entity_id=client_id)
 
-        sites_qs = OperationalSite.objects.filter(company=company, is_deleted=False)
+        agg_lines = lines.values(
+            'site_id', 'account__account_type', 'account__account_name', 'account__account_code'
+        ).annotate(debit=Sum('debit'), credit=Sum('credit'))
+
+        sites_qs = OperationalSite.objects.filter(company=company, is_deleted=False).select_related('crm_entity')
         if site_id:
             sites_qs = sites_qs.filter(id=site_id)
         if client_id:
             sites_qs = sites_qs.filter(crm_entity_id=client_id)
 
-        site_map = {str(s.id): s for s in sites_qs}
         results = {}
-
-        for str_id, s in site_map.items():
+        for s in sites_qs:
+            str_id = str(s.id)
             client_name = s.crm_entity.name if hasattr(s, 'crm_entity') and s.crm_entity else 'Unassigned'
             results[str_id] = {
                 'site_id': str_id,
@@ -291,21 +299,21 @@ class ProfitabilityService:
 
         allocations = ProfitabilityService.calculate_overhead_allocations(company, start_date, end_date)
 
-        for l in lines:
-            if not l.site_id:
-                continue
-            str_id = str(l.site_id)
+        for l in agg_lines:
+            str_id = str(l['site_id'])
             if str_id not in results:
                 continue
 
-            acc = l.account
-            acc_type = str(acc.account_type).upper()
-            name_lower = acc.account_name.lower()
+            acc_type = str(l['account__account_type'] or '').upper()
+            acc_code = l['account__account_code'] or ''
+            name_lower = (l['account__account_name'] or '').lower()
+            l_debit = l['debit'] or Decimal('0.0000')
+            l_credit = l['credit'] or Decimal('0.0000')
 
             if acc_type in ['REVENUE', 'INCOME']:
-                results[str_id]['revenue'] += (l.credit - l.debit)
+                results[str_id]['revenue'] += (l_credit - l_debit)
             elif acc_type in ['COST_OF_SERVICE', 'COGS', 'EXPENSE']:
-                cost = l.debit - l.credit
+                cost = l_debit - l_credit
                 results[str_id]['total_direct_costs'] += cost
 
                 if 'supervisor' in name_lower:
@@ -318,7 +326,7 @@ class ProfitabilityService:
                     results[str_id]['equipment'] += cost
                 elif 'site' in name_lower or 'utility' in name_lower or 'rent' in name_lower:
                     results[str_id]['site_expenses'] += cost
-                elif 'salary' in name_lower or 'wage' in name_lower or 'guard' in name_lower or acc.account_code.startswith('51'):
+                elif 'salary' in name_lower or 'wage' in name_lower or 'guard' in name_lower or acc_code.startswith('51'):
                     results[str_id]['guard_salaries'] += cost
                 else:
                     results[str_id]['other_direct'] += cost
@@ -362,7 +370,7 @@ class ProfitabilityService:
         if not profiles.exists():
             return {'sites': site_allocations, 'contracts': contract_allocations, 'clients': client_allocations}
 
-        # Aggregate total indirect overhead costs (expenses on cost centers marked or unassigned)
+        # Aggregate total indirect overhead costs directly in SQL
         indirect_lines = JournalEntryLine.objects.filter(
             company=company, journal_entry__status='POSTED', is_deleted=False,
             account__account_type__in=['EXPENSE', 'OPERATING_EXPENSE'],
@@ -373,29 +381,34 @@ class ProfitabilityService:
         if end_date:
             indirect_lines = indirect_lines.filter(journal_entry__posting_date__lte=end_date)
 
-        total_indirect = sum((l.debit - l.credit) for l in indirect_lines)
+        ind_agg = indirect_lines.aggregate(d=Sum('debit'), c=Sum('credit'))
+        total_indirect = (ind_agg['d'] or Decimal('0.0000')) - (ind_agg['c'] or Decimal('0.0000'))
 
         if total_indirect <= 0:
             return {'sites': site_allocations, 'contracts': contract_allocations, 'clients': client_allocations}
 
+        site_sums_cache = None
+
         # Apply active allocation profiles
         for p in profiles:
             if p.method == 'BY_REVENUE':
-                # Split indirect overhead proportionally to site/contract revenue
-                site_revs = JournalEntryLine.objects.filter(
-                    company=company, journal_entry__status='POSTED', is_deleted=False,
-                    account__account_type__in=['REVENUE', 'INCOME'], site__isnull=False
-                )
-                if start_date: site_revs = site_revs.filter(journal_entry__posting_date__gte=start_date)
-                if end_date: site_revs = site_revs.filter(journal_entry__posting_date__lte=end_date)
+                # Split indirect overhead proportionally to site revenue via SQL GROUP BY
+                if site_sums_cache is None:
+                    site_revs = JournalEntryLine.objects.filter(
+                        company=company, journal_entry__status='POSTED', is_deleted=False,
+                        account__account_type__in=['REVENUE', 'INCOME'], site__isnull=False
+                    )
+                    if start_date: site_revs = site_revs.filter(journal_entry__posting_date__gte=start_date)
+                    if end_date: site_revs = site_revs.filter(journal_entry__posting_date__lte=end_date)
 
-                total_rev = sum((l.credit - l.debit) for l in site_revs)
+                    site_sums_cache = {}
+                    for r in site_revs.values('site_id').annotate(d=Sum('debit'), c=Sum('credit')):
+                        sid = str(r['site_id'])
+                        site_sums_cache[sid] = (r['c'] or Decimal('0.0000')) - (r['d'] or Decimal('0.0000'))
+
+                total_rev = sum(site_sums_cache.values(), Decimal('0.0000'))
                 if total_rev > 0:
-                    site_sums = {}
-                    for l in site_revs:
-                        sid = str(l.site_id)
-                        site_sums[sid] = site_sums.get(sid, Decimal('0.0000')) + (l.credit - l.debit)
-                    for sid, srev in site_sums.items():
+                    for sid, srev in site_sums_cache.items():
                         share = (srev / total_rev) * total_indirect
                         site_allocations[sid] = site_allocations.get(sid, Decimal('0.0000')) + share
 
@@ -416,47 +429,59 @@ class ProfitabilityService:
     # 5. UNATTRIBUTED FINANCIAL LINES (Exceptions)
     # --------------------------------------------------------------------------
     @staticmethod
+    def _unattributed_lines_queryset(company, start_date=None, end_date=None):
+        q_unattr = (
+            Q(account__account_type__in=['REVENUE', 'INCOME', 'revenue', 'income'], site__isnull=True, contract__isnull=True, crm_entity__isnull=True)
+            | Q(account__account_type__in=['COST_OF_SERVICE', 'COGS', 'cost_of_service', 'cogs'], site__isnull=True, contract__isnull=True, crm_entity__isnull=True)
+            | Q(account__account_type__in=['EXPENSE', 'expense'], account__account_name__icontains='site', site__isnull=True)
+        )
+        qs = JournalEntryLine.objects.filter(
+            company=company, journal_entry__status='POSTED', is_deleted=False
+        ).filter(q_unattr)
+        if start_date:
+            qs = qs.filter(journal_entry__posting_date__gte=start_date)
+        if end_date:
+            qs = qs.filter(journal_entry__posting_date__lte=end_date)
+        return qs
+
+    @staticmethod
+    def get_unattributed_financial_lines_count(company, start_date=None, end_date=None) -> int:
+        return ProfitabilityService._unattributed_lines_queryset(company, start_date, end_date).count()
+
+    @staticmethod
     def get_unattributed_financial_lines(
         company,
         start_date: Optional[Any] = None,
         end_date: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Identifies POSTED GL lines missing expected dimensions (site, contract, client).
+        Identifies POSTED GL lines missing expected dimensions (site, contract, client) using SQL filtering.
         """
-        lines = JournalEntryLine.objects.filter(
-            company=company, journal_entry__status='POSTED', is_deleted=False
+        lines = ProfitabilityService._unattributed_lines_queryset(
+            company, start_date, end_date
         ).select_related('account', 'journal_entry')
 
-        if start_date:
-            lines = lines.filter(journal_entry__posting_date__gte=start_date)
-        if end_date:
-            lines = lines.filter(journal_entry__posting_date__lte=end_date)
-
         exceptions = []
-        for l in lines:
+        for l in lines[:300]:
             acc_type = str(l.account.account_type).upper()
             code = l.account.account_code
 
-            # Check if line should have site/contract/client attribution
             is_unattributed_revenue = acc_type in ['REVENUE', 'INCOME'] and not (l.site_id or l.contract_id or l.crm_entity_id)
             is_unattributed_direct_cost = acc_type in ['COST_OF_SERVICE', 'COGS'] and not (l.site_id or l.contract_id or l.crm_entity_id)
-            is_unattributed_site_exp = acc_type in ['EXPENSE'] and 'site' in l.account.account_name.lower() and not l.site_id
 
-            if is_unattributed_revenue or is_unattributed_direct_cost or is_unattributed_site_exp:
-                exc_type = 'UNASSIGNED_REVENUE' if is_unattributed_revenue else ('UNASSIGNED_DIRECT_COST' if is_unattributed_direct_cost else 'UNASSIGNED_SITE_EXPENSE')
-                exceptions.append({
-                    'line_id': str(l.id),
-                    'entry_number': l.journal_entry.entry_number,
-                    'posting_date': str(l.journal_entry.posting_date),
-                    'account_code': code,
-                    'account_name': l.account.account_name,
-                    'exception_type': exc_type,
-                    'amount': l.debit if l.debit > 0 else l.credit,
-                    'narration': l.description or l.journal_entry.description,
-                    'source_type': l.journal_entry.source_type or 'Manual',
-                    'source_number': l.journal_entry.source_number or '—'
-                })
+            exc_type = 'UNASSIGNED_REVENUE' if is_unattributed_revenue else ('UNASSIGNED_DIRECT_COST' if is_unattributed_direct_cost else 'UNASSIGNED_SITE_EXPENSE')
+            exceptions.append({
+                'line_id': str(l.id),
+                'entry_number': l.journal_entry.entry_number,
+                'posting_date': str(l.journal_entry.posting_date),
+                'account_code': code,
+                'account_name': l.account.account_name,
+                'exception_type': exc_type,
+                'amount': l.debit if l.debit > 0 else l.credit,
+                'narration': l.description or l.journal_entry.description,
+                'source_type': l.journal_entry.source_type or 'Manual',
+                'source_number': l.journal_entry.source_number or '—'
+            })
 
         return exceptions
 

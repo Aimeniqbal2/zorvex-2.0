@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type {
   PayrollAccountingIntegrationItem,
   SalaryPaymentBatchItem,
@@ -50,6 +50,8 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'LIVE_SALARIES' | 'INTEGRATIONS' | 'BATCHES'>('LIVE_SALARIES');
+  const skipNextMonthEffectRef = useRef(false);
+  const initialLoadedRef = useRef(false);
 
   // Pay Guard Salary Modal
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -75,41 +77,63 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
 
   const [mappingsModalOpen, setMappingsModalOpen] = useState(false);
 
-  const loadData = async (monthOverride?: string) => {
+  const loadData = async (monthOverride?: string, monthOnly = false) => {
     const targetMonth = monthOverride ?? selectedMonth;
+    const extractErrMsg = (err: any) =>
+      err?.response?.data?.error ||
+      err?.response?.data?.detail ||
+      err?.message ||
+      'Failed to load employee attendance salaries.';
+
     try {
       setLoading(true);
       setErrorMsg(null);
+      if (monthOnly && initialLoadedRef.current) {
+        const liveRes = await fetchLiveAttendanceSalaries(targetMonth === 'AUTO' ? undefined : targetMonth);
+        setLiveData(liveRes);
+        return;
+      }
+
+      let liveError: string | null = null;
       const [liveRes, intData, batchData, metricData, banks, coas] = await Promise.all([
         fetchLiveAttendanceSalaries(targetMonth === 'AUTO' ? undefined : targetMonth).catch((err) => {
+          liveError = extractErrMsg(err);
           console.error('Failed to load live attendance salaries:', err);
           return null;
         }),
         fetchPayrollIntegrations().catch(() => []),
         fetchSalaryBatches().catch(() => []),
         fetchPayrollFinanceSummaryMetrics().catch(() => null),
-        fetchBankAccounts().catch(() => []),
-        fetchChartOfAccounts().catch(() => []),
+        bankAccounts.length > 0 ? Promise.resolve(bankAccounts) : fetchBankAccounts().catch(() => []),
+        chartOfAccounts.length > 0 ? Promise.resolve(chartOfAccounts) : fetchChartOfAccounts().catch(() => []),
       ]);
 
+      initialLoadedRef.current = true;
       if (liveRes) {
         setLiveData(liveRes);
-        if (targetMonth === 'AUTO' && liveRes.month) {
+        if (targetMonth === 'AUTO' && liveRes.month && liveRes.month !== selectedMonth) {
+          skipNextMonthEffectRef.current = true;
           setSelectedMonth(liveRes.month);
         }
+      } else if (liveError) {
+        setErrorMsg(liveError);
       }
       setIntegrations(Array.isArray(intData) ? intData : []);
       setBatches(Array.isArray(batchData) ? batchData : []);
       if (metricData) setMetrics(metricData);
-      if (banks && banks.length) {
+      if (banks && banks.length && bankAccounts.length === 0) {
         const activeBanks = banks.filter((b) => b.is_active);
         const usable = activeBanks.length > 0 ? activeBanks : banks;
         setBankAccounts(usable);
         if (!payTreasuryId && usable.length > 0) {
           setPayTreasuryId(usable[0].id);
         }
+      } else if (banks && banks.length && !payTreasuryId) {
+        const activeBanks = banks.filter((b) => b.is_active);
+        const usable = activeBanks.length > 0 ? activeBanks : banks;
+        if (usable.length > 0) setPayTreasuryId(usable[0].id);
       }
-      if (coas && coas.length) setChartOfAccounts(coas);
+      if (coas && coas.length && chartOfAccounts.length === 0) setChartOfAccounts(coas);
     } catch (err: any) {
       setErrorMsg(err?.response?.data?.detail || err.message || 'Failed to load payroll finance workspace.');
     } finally {
@@ -118,7 +142,11 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
   };
 
   useEffect(() => {
-    loadData(selectedMonth);
+    if (skipNextMonthEffectRef.current) {
+      skipNextMonthEffectRef.current = false;
+      return;
+    }
+    loadData(selectedMonth, initialLoadedRef.current);
   }, [selectedMonth]);
 
   const handleFinalizeMonth = async () => {

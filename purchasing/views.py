@@ -54,8 +54,13 @@ class ProcurementTagViewSet(BasePurchasingViewSet):
 
 class ProcurementDocumentViewSet(BasePurchasingViewSet):
     queryset = ProcurementDocument.objects.prefetch_related(
-        'lines__item', 'lines__vendor_item', 'tags', 'notes_rel', 'attachments', 'audit_trails'
-    ).select_related('crm_entity', 'vendor', 'warehouse', 'created_by', 'approved_by', 'owner').all()
+        'lines__item', 'lines__item__category', 'lines__vendor_item',
+        'payment_allocations__payment', 'credit_notes',
+        'tags', 'notes_rel', 'attachments', 'audit_trails'
+    ).select_related(
+        'crm_entity', 'vendor', 'warehouse', 'parent_document',
+        'created_by', 'approved_by', 'override_by', 'owner'
+    ).all()
     serializer_class = ProcurementDocumentSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['document_type', 'status', 'warehouse', 'crm_entity', 'vendor']

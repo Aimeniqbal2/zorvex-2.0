@@ -5,6 +5,7 @@ import {
     importMonthlyMusterExcel, 
     cleanupOrphanedAttendance, 
     freezeMonthlyMuster, 
+    unfreezeMonthlyMuster,
     getAutoAttendanceConfig, 
     updateAutoAttendanceConfig, 
     runAutoAttendance, 
@@ -315,22 +316,43 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         }
     };
 
+    const [unfreezing, setUnfreezing] = useState(false);
+
     const handleFreezeMonth = async () => {
         const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         const confirmed = window.confirm(
-            `Are you sure you want to permanently freeze and close ${monthNames[month]} ${year}?\n\nThis will lock all attendance and salary calculations as official payroll history and cannot be undone.`
+            `Are you sure you want to freeze and lock ${monthNames[month]} ${year}?\n\nThis will lock all attendance and salary calculations as official payroll history until manually unfrozen.`
         );
         if (!confirmed) return;
 
         try {
             setFreezing(true);
             const res = await freezeMonthlyMuster(year, month);
-            addToast('success', res.message || `Month ${monthNames[month]} ${year} has been permanently frozen.`);
+            addToast('success', res.message || `Month ${monthNames[month]} ${year} has been frozen.`);
             await loadMusterData();
         } catch (err: any) {
             addToast('error', err?.response?.data?.detail || 'Failed to freeze month.');
         } finally {
             setFreezing(false);
+        }
+    };
+
+    const handleUnfreezeMonth = async () => {
+        const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const confirmed = window.confirm(
+            `Are you sure you want to temporarily unfreeze ${monthNames[month]} ${year}?\n\nThis will unlock attendance and duty pay records so corrections can be made. Remember to freeze the month again once corrections are complete.`
+        );
+        if (!confirmed) return;
+
+        try {
+            setUnfreezing(true);
+            const res = await unfreezeMonthlyMuster(year, month);
+            addToast('success', res.message || `Month ${monthNames[month]} ${year} has been temporarily unfrozen.`);
+            await loadMusterData();
+        } catch (err: any) {
+            addToast('error', err?.response?.data?.detail || 'Failed to unfreeze month.');
+        } finally {
+            setUnfreezing(false);
         }
     };
 
@@ -1135,22 +1157,46 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         )}
                     </div>
 
-                    {/* Month Frozen Badge */}
+                    {/* Month Frozen Badge & Temporary Unfreeze Button */}
                     {isFrozen && (
-                        <div style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: '6px', 
-                            padding: '8px 14px', 
-                            borderRadius: '8px', 
-                            background: '#fef3c7', 
-                            color: '#92400e', 
-                            border: '1px solid #fde68a', 
-                            fontWeight: 800, 
-                            fontSize: '0.88rem' 
-                        }}>
-                            <i className='bx bx-lock-alt' style={{ fontSize: '1.1rem' }}></i>
-                            Month Frozen (Locked)
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <div style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '6px', 
+                                padding: '8px 14px', 
+                                borderRadius: '8px', 
+                                background: '#fef3c7', 
+                                color: '#92400e', 
+                                border: '1px solid #fde68a', 
+                                fontWeight: 800, 
+                                fontSize: '0.88rem' 
+                            }}>
+                                <i className='bx bx-lock-alt' style={{ fontSize: '1.1rem' }}></i>
+                                Month Frozen (Locked)
+                            </div>
+                            <button
+                                onClick={handleUnfreezeMonth}
+                                disabled={unfreezing}
+                                style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '6px', 
+                                    padding: '8px 14px', 
+                                    borderRadius: '8px', 
+                                    background: '#ffffff', 
+                                    color: '#b45309', 
+                                    border: '1px solid #f59e0b', 
+                                    fontWeight: 800, 
+                                    fontSize: '0.86rem',
+                                    cursor: unfreezing ? 'not-allowed' : 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                                title="Temporarily unfreeze this month so accidental freeze or attendance corrections can be saved"
+                            >
+                                <i className={`bx ${unfreezing ? 'bx-loader-alt bx-spin' : 'bx-lock-open-alt'}`}></i>
+                                {unfreezing ? 'Unfreezing...' : 'Unfreeze Month'}
+                            </button>
                         </div>
                     )}
 
@@ -1322,6 +1368,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
                     gap: '12px',
                     background: '#fffbeb',
                     border: '1px solid #fde68a',
@@ -1333,10 +1381,33 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                     marginBottom: '20px',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
                 }}>
-                    <i className='bx bx-lock-alt' style={{ fontSize: '1.4rem', color: '#d97706' }}></i>
-                    <div>
-                        <strong>Official Payroll Record Locked:</strong> This month ({month}/{year}) has been permanently frozen. Duty attendance and salary calculations are immutable official payroll history and cannot be edited.
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 320px' }}>
+                        <i className='bx bx-lock-alt' style={{ fontSize: '1.4rem', color: '#d97706' }}></i>
+                        <div>
+                            <strong>Official Payroll Record Locked:</strong> This month ({month}/{year}) is frozen. Duty attendance and salary calculations are locked until unfrozen.
+                        </div>
                     </div>
+                    <button
+                        onClick={handleUnfreezeMonth}
+                        disabled={unfreezing}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '8px 14px',
+                            borderRadius: '8px',
+                            background: '#d97706',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontWeight: 800,
+                            fontSize: '0.85rem',
+                            cursor: unfreezing ? 'not-allowed' : 'pointer',
+                            whiteSpace: 'nowrap'
+                        }}
+                    >
+                        <i className={`bx ${unfreezing ? 'bx-loader-alt bx-spin' : 'bx-lock-open-alt'}`}></i>
+                        {unfreezing ? 'Unfreezing...' : 'Temporary Unfreeze'}
+                    </button>
                 </div>
             )}
 

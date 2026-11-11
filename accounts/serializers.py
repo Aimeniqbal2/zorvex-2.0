@@ -1,3 +1,5 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core import exceptions as django_exceptions
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User
@@ -9,6 +11,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
+        token['username'] = user.username
+        token['email'] = user.email or ''
+        token['full_name'] = user.get_full_name() or user.username
         token['role'] = user.role
         token['company_id'] = str(user.company_id) if user.company_id else None
         
@@ -132,3 +137,180 @@ class UserSerializer(serializers.ModelSerializer):
             UserModuleAccess(user=user, module=mod, enabled=True)
             for mod in mods
         ])
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """Strict read-only full user profile representation for authenticated /me/ queries."""
+    full_name = serializers.SerializerMethodField()
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
+    access_mode_display = serializers.CharField(source='get_access_mode_display', read_only=True)
+    company_role_name = serializers.SerializerMethodField()
+    company_role_code = serializers.SerializerMethodField()
+    company_id = serializers.SerializerMethodField()
+    company_name = serializers.SerializerMethodField()
+    company_domain = serializers.SerializerMethodField()
+    company_phone = serializers.SerializerMethodField()
+    company_address = serializers.SerializerMethodField()
+    company_tax_id = serializers.SerializerMethodField()
+    company_logo = serializers.SerializerMethodField()
+    business_type = serializers.SerializerMethodField()
+    allowed_modules = serializers.SerializerMethodField()
+    employee_profile = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
+            'role', 'role_display', 'company_role_name', 'company_role_code',
+            'access_mode', 'access_mode_display', 'allowed_modules',
+            'company_id', 'company_name', 'company_domain', 'company_phone',
+            'company_address', 'company_tax_id', 'company_logo', 'business_type',
+            'is_active', 'is_staff', 'is_superuser', 'date_joined', 'last_login',
+            'employee_profile',
+        )
+        read_only_fields = fields
+
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.username
+
+    def get_company_role_name(self, obj):
+        return obj.company_role.name if getattr(obj, 'company_role', None) else None
+
+    def get_company_role_code(self, obj):
+        return obj.company_role.code if getattr(obj, 'company_role', None) else None
+
+    def get_company_id(self, obj):
+        return str(obj.company_id) if obj.company_id else None
+
+    def get_company_name(self, obj):
+        return obj.company.name if getattr(obj, 'company', None) else 'Zorvex ERP'
+
+    def get_company_domain(self, obj):
+        return obj.company.domain if getattr(obj, 'company', None) else ''
+
+    def get_company_phone(self, obj):
+        return obj.company.phone if getattr(obj, 'company', None) else ''
+
+    def get_company_address(self, obj):
+        return obj.company.address if getattr(obj, 'company', None) else ''
+
+    def get_company_tax_id(self, obj):
+        return obj.company.tax_id if getattr(obj, 'company', None) else ''
+
+    def get_company_logo(self, obj):
+        try:
+            comp = getattr(obj, 'company', None)
+            if comp and getattr(comp, 'logo', None) and getattr(comp.logo, 'name', ''):
+                return comp.logo.url
+        except Exception:
+            pass
+        return None
+
+    def get_business_type(self, obj):
+        return obj.company.business_type if getattr(obj, 'company', None) else None
+
+    def get_allowed_modules(self, obj):
+        try:
+            if obj.is_superuser:
+                return ['ALL (Super Admin)']
+            if obj.access_mode == 'CUSTOM':
+                return list(obj.custom_module_access.filter(enabled=True).values_list('module__name', flat=True))
+            if obj.company_id:
+                return list(
+                    CompanyModule.objects.filter(company_id=obj.company_id, enabled=True)
+                    .values_list('module__name', flat=True)
+                )
+        except Exception:
+            pass
+        return []
+
+    def get_employee_profile(self, obj):
+        try:
+            emp = getattr(obj, 'employee_profile_new', None)
+        except Exception:
+            emp = None
+        if not emp or getattr(emp, 'is_deleted', False):
+            return None
+        photo_url = None
+        try:
+            if getattr(emp, 'photograph', None) and getattr(emp.photograph, 'name', ''):
+                photo_url = emp.photograph.url
+        except Exception:
+            photo_url = None
+        return {
+            'id': str(emp.id),
+            'employee_code': emp.display_code,
+            'full_name': emp.full_name,
+            'email': emp.email or '',
+            'phone': emp.phone or emp.telephone_number or '',
+            'department_name': emp.department.name if getattr(emp, 'department', None) else '',
+            'designation_name': emp.designation.name if getattr(emp, 'designation', None) else '',
+            'position_name': emp.position.name if getattr(emp, 'position', None) else '',
+            'branch_name': emp.branch.name if getattr(emp, 'branch', None) else '',
+            'hire_date': emp.hire_date.isoformat() if emp.hire_date else None,
+            'employment_status': emp.employment_status or '',
+            'city': emp.city or '',
+            'cnic_number': emp.cnic_number or '',
+            'current_address': emp.current_address or '',
+            'photograph_url': photo_url,
+        }
+
+
+class VerifyPasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=False, write_only=True,
+        error_messages={'required': 'Current password is required.', 'blank': 'Current password cannot be empty.'}
+    )
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict) and 'old_password' not in data and 'current_password' in data:
+            data = {**data, 'old_password': data['current_password']}
+        return super().to_internal_value(data)
+
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError('Current password is incorrect. Please enter your right password.')
+        return value
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=False, write_only=True,
+        error_messages={'required': 'Current password is required.', 'blank': 'Current password cannot be empty.'}
+    )
+    new_password = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=False, write_only=True,
+        error_messages={'required': 'New password is required.', 'blank': 'New password cannot be empty.'}
+    )
+    confirm_password = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=False, write_only=True,
+        error_messages={'required': 'Please confirm your new password.', 'blank': 'Confirm password cannot be empty.'}
+    )
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict) and 'old_password' not in data and 'current_password' in data:
+            data = {**data, 'old_password': data['current_password']}
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        old_pw = attrs.get('old_password', '')
+        new_pw = attrs.get('new_password', '')
+        confirm_pw = attrs.get('confirm_password', '')
+
+        if not user.check_password(old_pw):
+            raise serializers.ValidationError({'old_password': ['Current password is incorrect. Please enter your right password.']})
+
+        if new_pw != confirm_pw:
+            raise serializers.ValidationError({'confirm_password': ['New password and confirm password do not match.']})
+
+        if new_pw == old_pw:
+            raise serializers.ValidationError({'new_password': ['New password must be different from your current password.']})
+
+        try:
+            validate_password(new_pw, user=user)
+        except django_exceptions.ValidationError as exc:
+            raise serializers.ValidationError({'new_password': list(exc.messages)})
+
+        return attrs

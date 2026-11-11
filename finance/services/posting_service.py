@@ -1277,7 +1277,48 @@ class AccountingPostingService:
         if not end_date:
             end_date = timezone.now().date()
 
-        accounts = ChartOfAccount.objects.filter(company=company, is_deleted=False).order_by('account_code')
+        accounts = list(ChartOfAccount.objects.filter(company=company, is_deleted=False).order_by('account_code'))
+
+        # 1. Bulk Prior Period aggregates in a single GROUP BY query
+        prior_map = {}
+        if start_date:
+            prior_f = Q(
+                company=company,
+                journal_entry__status=JournalStatus.POSTED,
+                journal_entry__posting_date__lt=start_date,
+                is_deleted=False
+            )
+            if cost_center:
+                prior_f &= Q(cost_center=cost_center)
+            if profit_center:
+                prior_f &= Q(profit_center=profit_center)
+            for row in JournalEntryLine.objects.filter(prior_f).values('account_id').annotate(d=Sum('debit'), c=Sum('credit')):
+                prior_map[row['account_id']] = (
+                    (row['d'] or Decimal('0.0000')).quantize(Decimal('0.0001')),
+                    (row['c'] or Decimal('0.0000')).quantize(Decimal('0.0001')),
+                )
+
+        # 2. Bulk Period Movement aggregates in a single GROUP BY query
+        period_f = Q(
+            company=company,
+            journal_entry__status=JournalStatus.POSTED,
+            is_deleted=False
+        )
+        if start_date:
+            period_f &= Q(journal_entry__posting_date__gte=start_date)
+        if end_date:
+            period_f &= Q(journal_entry__posting_date__lte=end_date)
+        if cost_center:
+            period_f &= Q(cost_center=cost_center)
+        if profit_center:
+            period_f &= Q(profit_center=profit_center)
+
+        period_map = {}
+        for row in JournalEntryLine.objects.filter(period_f).values('account_id').annotate(d=Sum('debit'), c=Sum('credit')):
+            period_map[row['account_id']] = (
+                (row['d'] or Decimal('0.0000')).quantize(Decimal('0.0001')),
+                (row['c'] or Decimal('0.0000')).quantize(Decimal('0.0001')),
+            )
 
         trial_balance_rows = []
         grand_opening_debit = Decimal('0.0000')
@@ -1288,24 +1329,7 @@ class AccountingPostingService:
         grand_closing_credit = Decimal('0.0000')
 
         for acc in accounts:
-            # 1. Prior Period aggregates
-            prior_debit = Decimal('0.0000')
-            prior_credit = Decimal('0.0000')
-            if start_date:
-                prior_f = Q(
-                    company=company,
-                    account=acc,
-                    journal_entry__status=JournalStatus.POSTED,
-                    journal_entry__posting_date__lt=start_date,
-                    is_deleted=False
-                )
-                if cost_center:
-                    prior_f &= Q(cost_center=cost_center)
-                if profit_center:
-                    prior_f &= Q(profit_center=profit_center)
-                p_agg = JournalEntryLine.objects.filter(prior_f).aggregate(d=Sum('debit'), c=Sum('credit'))
-                prior_debit = (p_agg['d'] or Decimal('0.0000')).quantize(Decimal('0.0001'))
-                prior_credit = (p_agg['c'] or Decimal('0.0000')).quantize(Decimal('0.0001'))
+            prior_debit, prior_credit = prior_map.get(acc.id, (Decimal('0.0000'), Decimal('0.0000')))
 
             # Net Opening
             net_prior = prior_debit - prior_credit
@@ -1316,25 +1340,7 @@ class AccountingPostingService:
                 row_open_debit = Decimal('0.0000')
                 row_open_credit = abs(net_prior)
 
-            # 2. Period Movement aggregates
-            period_f = Q(
-                company=company,
-                account=acc,
-                journal_entry__status=JournalStatus.POSTED,
-                is_deleted=False
-            )
-            if start_date:
-                period_f &= Q(journal_entry__posting_date__gte=start_date)
-            if end_date:
-                period_f &= Q(journal_entry__posting_date__lte=end_date)
-            if cost_center:
-                period_f &= Q(cost_center=cost_center)
-            if profit_center:
-                period_f &= Q(profit_center=profit_center)
-
-            cur_agg = JournalEntryLine.objects.filter(period_f).aggregate(d=Sum('debit'), c=Sum('credit'))
-            row_period_debit = (cur_agg['d'] or Decimal('0.0000')).quantize(Decimal('0.0001'))
-            row_period_credit = (cur_agg['c'] or Decimal('0.0000')).quantize(Decimal('0.0001'))
+            row_period_debit, row_period_credit = period_map.get(acc.id, (Decimal('0.0000'), Decimal('0.0000')))
 
             # 3. Net Closing
             net_closing = (prior_debit + row_period_debit) - (prior_credit + row_period_credit)
@@ -1519,113 +1525,105 @@ class AccountingPostingService:
         """
         queue = []
 
+        # Bulk fetch all POSTED (source_type, source_id) pairs in 1 query (eliminates N+1)
+        posted_pairs = set(
+            JournalEntry.objects.filter(
+                company=company,
+                status=JournalStatus.POSTED,
+                source_type__in=[
+                    JournalSourceType.CLIENT_INVOICE,
+                    JournalSourceType.EXPENSE,
+                    JournalSourceType.PAYROLL_ACCRUAL,
+                    JournalSourceType.TAX_PAYMENT,
+                ],
+                is_deleted=False,
+            ).values_list('source_type', 'source_id')
+        )
+
         # 1. Billing Invoices
         from billing.models import ClientInvoice, ClientInvoiceStatus
-        invoices = ClientInvoice.objects.filter(
-            company=company,
-            status__in=[ClientInvoiceStatus.ISSUED, ClientInvoiceStatus.PAID, ClientInvoiceStatus.PARTIALLY_PAID],
-            is_deleted=False
-        ).select_related('client', 'contract')
-
-        for inv in invoices:
-            has_je = JournalEntry.objects.filter(
+        if source_type in ('ALL', JournalSourceType.CLIENT_INVOICE):
+            invoices = ClientInvoice.objects.filter(
                 company=company,
-                source_type=JournalSourceType.CLIENT_INVOICE,
-                source_id=str(inv.id),
-                status=JournalStatus.POSTED
-            ).exists()
+                status__in=[ClientInvoiceStatus.ISSUED, ClientInvoiceStatus.PAID, ClientInvoiceStatus.PARTIALLY_PAID],
+                is_deleted=False
+            ).select_related('client', 'contract')
 
-            if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
-                queue.append({
-                    'id': str(inv.id),
-                    'source_type': JournalSourceType.CLIENT_INVOICE,
-                    'source_number': inv.invoice_number,
-                    'transaction_date': inv.invoice_date.isoformat() if inv.invoice_date else '',
-                    'counterparty': getattr(inv.client, 'name', 'Client'),
-                    'amount': float(inv.grand_total if hasattr(inv, 'grand_total') else inv.total_amount),
-                    'description': f"Client Invoice {inv.invoice_number} ({getattr(inv.contract, 'contract_code', '')})",
-                    'is_posted': has_je,
-                    'status': 'POSTED' if has_je else 'READY_TO_POST',
-                })
+            for inv in invoices:
+                has_je = (JournalSourceType.CLIENT_INVOICE, str(inv.id)) in posted_pairs
+                if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
+                    queue.append({
+                        'id': str(inv.id),
+                        'source_type': JournalSourceType.CLIENT_INVOICE,
+                        'source_number': inv.invoice_number,
+                        'transaction_date': inv.invoice_date.isoformat() if inv.invoice_date else '',
+                        'counterparty': getattr(inv.client, 'name', 'Client'),
+                        'amount': float(inv.grand_total if hasattr(inv, 'grand_total') else inv.total_amount),
+                        'description': f"Client Invoice {inv.invoice_number} ({getattr(inv.contract, 'contract_code', '')})",
+                        'is_posted': has_je,
+                        'status': 'POSTED' if has_je else 'READY_TO_POST',
+                    })
 
         # 2. Expenses
-        from finance.models import Expense, ExpenseStatus
-        expenses = Expense.objects.filter(company=company, is_deleted=False).select_related('bank_account', 'expense_account')
-        for exp in expenses:
-            has_je = JournalEntry.objects.filter(
-                company=company,
-                source_type=JournalSourceType.EXPENSE,
-                source_id=str(exp.id),
-                status=JournalStatus.POSTED
-            ).exists()
-
-            if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
-                queue.append({
-                    'id': str(exp.id),
-                    'source_type': JournalSourceType.EXPENSE,
-                    'source_number': exp.expense_number or str(exp.id),
-                    'transaction_date': exp.expense_date.isoformat() if exp.expense_date else '',
-                    'counterparty': exp.payee or getattr(exp.vendor, 'name', '') or getattr(exp.employee, 'first_name', ''),
-                    'amount': float(exp.total_amount),
-                    'description': f"Expense {exp.expense_number}: {exp.title}",
-                    'is_posted': has_je,
-                    'status': 'POSTED' if has_je else 'READY_TO_POST',
-                })
+        if source_type in ('ALL', JournalSourceType.EXPENSE):
+            from finance.models import Expense, ExpenseStatus
+            expenses = Expense.objects.filter(company=company, is_deleted=False).select_related('bank_account', 'expense_account', 'vendor', 'employee')
+            for exp in expenses:
+                has_je = (JournalSourceType.EXPENSE, str(exp.id)) in posted_pairs
+                if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
+                    queue.append({
+                        'id': str(exp.id),
+                        'source_type': JournalSourceType.EXPENSE,
+                        'source_number': exp.expense_number or str(exp.id),
+                        'transaction_date': exp.expense_date.isoformat() if exp.expense_date else '',
+                        'counterparty': exp.payee or getattr(exp.vendor, 'name', '') or getattr(exp.employee, 'first_name', ''),
+                        'amount': float(exp.total_amount),
+                        'description': f"Expense {exp.expense_number}: {exp.title}",
+                        'is_posted': has_je,
+                        'status': 'POSTED' if has_je else 'READY_TO_POST',
+                    })
 
         # 3. Payroll Integrations
-        from finance.models import PayrollAccountingIntegration
-        payrolls = PayrollAccountingIntegration.objects.filter(company=company, is_deleted=False)
-        for pr in payrolls:
-            has_je = JournalEntry.objects.filter(
-                company=company,
-                source_type=JournalSourceType.PAYROLL_ACCRUAL,
-                source_id=str(pr.id),
-                status=JournalStatus.POSTED
-            ).exists()
-
-            if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
-                queue.append({
-                    'id': str(pr.id),
-                    'source_type': JournalSourceType.PAYROLL_ACCRUAL,
-                    'source_number': pr.payroll_period_name,
-                    'transaction_date': pr.transaction_date.isoformat() if pr.transaction_date else '',
-                    'counterparty': 'Employees & Field Guards',
-                    'amount': float(pr.gross_payroll),
-                    'description': f"Payroll Accrual: {pr.payroll_period_name}",
-                    'is_posted': has_je,
-                    'status': 'POSTED' if has_je else 'READY_TO_POST',
-                })
+        if source_type in ('ALL', JournalSourceType.PAYROLL_ACCRUAL):
+            from finance.models import PayrollAccountingIntegration
+            payrolls = PayrollAccountingIntegration.objects.filter(company=company, is_deleted=False)
+            for pr in payrolls:
+                has_je = (JournalSourceType.PAYROLL_ACCRUAL, str(pr.id)) in posted_pairs
+                if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
+                    queue.append({
+                        'id': str(pr.id),
+                        'source_type': JournalSourceType.PAYROLL_ACCRUAL,
+                        'source_number': pr.payroll_period_name,
+                        'transaction_date': pr.transaction_date.isoformat() if pr.transaction_date else '',
+                        'counterparty': 'Employees & Field Guards',
+                        'amount': float(pr.gross_payroll),
+                        'description': f"Payroll Accrual: {pr.payroll_period_name}",
+                        'is_posted': has_je,
+                        'status': 'POSTED' if has_je else 'READY_TO_POST',
+                    })
 
         # 4. Tax Payment Vouchers
-        from finance.models import TaxPaymentVoucher, TaxVoucherStatus
-        vouchers = TaxPaymentVoucher.objects.filter(
-            company=company,
-            status__in=[TaxVoucherStatus.PAID, TaxVoucherStatus.FILED],
-            is_deleted=False
-        ).select_related('tax_authority', 'treasury_account')
-
-        for v in vouchers:
-            has_je = JournalEntry.objects.filter(
+        if source_type in ('ALL', JournalSourceType.TAX_PAYMENT):
+            from finance.models import TaxPaymentVoucher, TaxVoucherStatus
+            vouchers = TaxPaymentVoucher.objects.filter(
                 company=company,
-                source_type=JournalSourceType.TAX_PAYMENT,
-                source_id=str(v.id),
-                status=JournalStatus.POSTED
-            ).exists()
+                status__in=[TaxVoucherStatus.PAID, TaxVoucherStatus.FILED],
+                is_deleted=False
+            ).select_related('tax_authority', 'treasury_account')
 
-            if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
-                queue.append({
-                    'id': str(v.id),
-                    'source_type': JournalSourceType.TAX_PAYMENT,
-                    'source_number': v.voucher_number,
-                    'transaction_date': v.payment_date.isoformat() if v.payment_date else '',
-                    'counterparty': v.tax_authority.name,
-                    'amount': float(v.amount),
-                    'description': f"Tax Deposit: {v.voucher_number} to {v.tax_authority.name}",
-                    'is_posted': has_je,
-                    'status': 'POSTED' if has_je else 'READY_TO_POST',
-                })
-
-        if source_type != 'ALL':
-            queue = [q for q in queue if q['source_type'] == source_type]
+            for v in vouchers:
+                has_je = (JournalSourceType.TAX_PAYMENT, str(v.id)) in posted_pairs
+                if (filter_status == 'READY_TO_POST' and not has_je) or (filter_status == 'POSTED' and has_je) or filter_status == 'ALL':
+                    queue.append({
+                        'id': str(v.id),
+                        'source_type': JournalSourceType.TAX_PAYMENT,
+                        'source_number': v.voucher_number,
+                        'transaction_date': v.payment_date.isoformat() if v.payment_date else '',
+                        'counterparty': v.tax_authority.name,
+                        'amount': float(v.amount),
+                        'description': f"Tax Deposit: {v.voucher_number} to {v.tax_authority.name}",
+                        'is_posted': has_je,
+                        'status': 'POSTED' if has_je else 'READY_TO_POST',
+                    })
 
         return queue

@@ -21,6 +21,9 @@ interface SiteServiceConfig {
   contractMonthlyRate: number;
   fulfilledShifts: number;
   guardDailyBillRate: number;
+  salesTaxBasis: string;
+  salesTaxAmount: number;
+  attendanceTaxAmount: number;
   existingInvoiceNumber?: string | null;
   existingInvoiceStatus?: string | null;
   loadingAttendance: boolean;
@@ -54,6 +57,8 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
   const [dueDate, setDueDate] = useState<string>(defaultDueDate);
   const [paymentTerms, setPaymentTerms] = useState<string>('NET_30');
   const [taxRate, setTaxRate] = useState<number>(0);
+  const [taxOverrideEdited, setTaxOverrideEdited] = useState<boolean>(false);
+  const [templateMode, setTemplateMode] = useState<'AUTO' | 'CASH' | 'CHEQUE'>('AUTO');
   const [groupBy, setGroupBy] = useState<'PER_LOCATION' | 'CONSOLIDATED'>('PER_LOCATION');
   const [initialStatus, setInitialStatus] = useState<'DRAFT' | 'ISSUED'>('DRAFT');
 
@@ -121,15 +126,21 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
       contractMonthlyRate: Number(s.contract_monthly_rate || 0),
       fulfilledShifts: Number(s.fulfilled_shifts || 0),
       guardDailyBillRate: Number(s.guard_daily_bill_rate || 0),
+      salesTaxBasis: s.sales_tax_basis || 'MANUAL',
+      salesTaxAmount: Number(s.sales_tax_amount || 0),
+      attendanceTaxAmount: Number(s.attendance_tax_amount || 0),
       existingInvoiceNumber: s.existing_invoice_number,
       existingInvoiceStatus: s.existing_invoice_status,
       loadingAttendance: false
     }));
     setSiteConfigs(configs);
+    setTaxOverrideEdited(false);
 
     if (clientPermSites.length > 0) {
-      if (clientPermSites[0].tax_rate > 0) setTaxRate(clientPermSites[0].tax_rate);
+      setTaxRate(Number(clientPermSites[0].tax_rate || 0));
       if (clientPermSites[0].payment_terms) setPaymentTerms(clientPermSites[0].payment_terms);
+    } else {
+      setTaxRate(0);
     }
 
     const clientTemp = (previewData.temporary_services || [])
@@ -176,7 +187,14 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
     return t.included ? acc + t.amount : acc;
   }, 0);
 
-  const taxAmount = Math.round((subtotal * taxRate) / 100);
+  const crmCalculatedTax = siteConfigs.reduce((acc, site) => {
+    if (!site.included) return acc;
+    return acc + (site.calcMode === 'CONTRACT_RATE' ? site.salesTaxAmount : site.attendanceTaxAmount);
+  }, 0);
+
+  const taxAmount = taxOverrideEdited
+    ? Math.round((subtotal * taxRate) / 100)
+    : Number(crmCalculatedTax.toFixed(2));
   const grandTotal = subtotal + taxAmount;
 
   const handleGenerateInvoices = async () => {
@@ -198,7 +216,10 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
           calculation_mode: s.calcMode,
           contract_monthly_rate: s.contractMonthlyRate,
           fulfilled_shifts: s.fulfilledShifts,
-          guard_daily_bill_rate: s.guardDailyBillRate
+          guard_daily_bill_rate: s.guardDailyBillRate,
+          sales_tax_amount: taxOverrideEdited
+            ? undefined
+            : (s.calcMode === 'CONTRACT_RATE' ? s.salesTaxAmount : s.attendanceTaxAmount)
         });
       }
     });
@@ -232,6 +253,7 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
         due_date: dueDate,
         payment_terms: paymentTerms,
         tax_rate: taxRate,
+        template_mode: templateMode === 'AUTO' ? undefined : templateMode,
         group_by: groupBy,
         initial_status: initialStatus,
         services: servicesToInvoice
@@ -503,17 +525,20 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
               </select>
             </div>
 
-            {/* Tax Rate */}
+            {/* Tax Rate & Invoice Template Mode */}
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
-                Sales Tax Rate (%)
+                Sales Tax Rate (% {taxOverrideEdited ? 'Manual' : 'from CRM'})
               </label>
               <input
                 type="number"
                 min="0"
                 max="100"
                 value={taxRate}
-                onChange={(e) => setTaxRate(Number(e.target.value) || 0)}
+                onChange={(e) => {
+                  setTaxOverrideEdited(true);
+                  setTaxRate(Number(e.target.value) || 0);
+                }}
                 style={{
                   width: '100%',
                   padding: '8px 12px',
@@ -524,6 +549,29 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
                   color: 'inherit'
                 }}
               />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                Invoice Template Format
+              </label>
+              <select
+                value={templateMode}
+                onChange={(e) => setTemplateMode(e.target.value as 'AUTO' | 'CASH' | 'CHEQUE')}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border, #cbd5e1)',
+                  fontSize: '13px',
+                  background: 'var(--color-surface, #ffffff)',
+                  color: 'inherit'
+                }}
+              >
+                <option value="AUTO">Auto (Cash if 0 Tax, Cheque if Tax &gt; 0)</option>
+                <option value="CASH">Cash — Standard INVOICE</option>
+                <option value="CHEQUE">Cheque — SALES TAX INVOICE</option>
+              </select>
             </div>
 
             {/* Invoicing Mode (Grouping) */}
@@ -849,9 +897,11 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
                 <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Services Subtotal</div>
                 <div style={{ fontSize: '15px', fontWeight: 600 }}>Rs {subtotal.toLocaleString()}</div>
               </div>
-              {taxRate > 0 && (
+              {taxAmount > 0 && (
                 <div>
-                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Tax ({taxRate}%)</div>
+                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                    Sales Tax {taxOverrideEdited ? `(${taxRate}%)` : '(CRM Formula)'}
+                  </div>
                   <div style={{ fontSize: '15px', fontWeight: 600, color: '#eab308' }}>Rs {taxAmount.toLocaleString()}</div>
                 </div>
               )}

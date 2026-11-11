@@ -152,47 +152,59 @@ class AttendanceRegisterService:
         # 2. Fetch live Operations Monthly Duty Muster (DailyDutyPay) & HRM WorkforceAttendance
         #    for the whole company in [start_date, end_date] first so we know which employees have
         #    actual attendance in this period and can build cross-location stacked cells accurately.
-        from operations.models import DailyDutyPay, Deployment, OperationalSite
+        from operations.models import DailyDutyPay, Deployment
 
-        ddp_qs = DailyDutyPay.objects.filter(
+        ddp_rows = DailyDutyPay.objects.filter(
             company_id=company_id,
             is_deleted=False,
             duty_date__range=[start_date, end_date],
-        ).select_related('site', 'site__crm_entity', 'post', 'employee')
+        ).filter(
+            Q(site__isnull=True) | Q(site__is_deleted=False),
+            Q(site__crm_entity__isnull=True) | Q(site__crm_entity__is_deleted=False),
+        ).values(
+            'employee_id',
+            'duty_date',
+            'attendance_status',
+            'duty_type',
+            'site_id',
+            'site__name',
+            'site__crm_entity_id',
+            'post__post_name',
+            'notes',
+            'is_replacement_duty',
+        )
 
-        if site_id:
-            ddp_site_emp_ids = set(ddp_qs.filter(site_id=site_id).values_list('employee_id', flat=True))
-        else:
-            ddp_site_emp_ids = set()
-
-        if client_id:
-            ddp_client_emp_ids = set(ddp_qs.filter(site__crm_entity_id=client_id).values_list('employee_id', flat=True))
-        else:
-            ddp_client_emp_ids = set()
+        ddp_site_emp_ids = set()
+        ddp_client_emp_ids = set()
+        site_id_str = str(site_id) if site_id else None
+        client_id_str = str(client_id) if client_id else None
 
         # Group DailyDutyPay rows by (emp_id, date_str) -> ordered site entries
         # Within the same site on the same date: merge (P + O -> PO) and (P + OD -> POD)
         emp_day_ddp_sites = defaultdict(dict)  # (emp_id, date_str) -> { site_key: entry_dict }
         marked_emp_ids = set()
 
-        for dp in ddp_qs:
-            if dp.site and dp.site.is_deleted:
-                continue
-            if dp.site and getattr(dp.site, 'crm_entity', None) and dp.site.crm_entity.is_deleted:
-                continue
+        for dp in ddp_rows:
+            dp_emp_id = dp['employee_id']
+            dp_site_id = dp['site_id']
+            dp_client_id = dp['site__crm_entity_id']
+            if site_id_str and dp_site_id and str(dp_site_id) == site_id_str:
+                ddp_site_emp_ids.add(dp_emp_id)
+            if client_id_str and dp_client_id and str(dp_client_id) == client_id_str:
+                ddp_client_emp_ids.add(dp_emp_id)
 
-            emp_id = str(dp.employee_id)
-            d_str = dp.duty_date.strftime('%Y-%m-%d')
-            code = _canonical_code_from_raw(dp.attendance_status, dp.duty_type)
+            emp_id = str(dp_emp_id)
+            d_str = dp['duty_date'].strftime('%Y-%m-%d')
+            code = _canonical_code_from_raw(dp['attendance_status'], dp['duty_type'])
             if not code:
                 continue
 
-            marked_emp_ids.add(dp.employee_id)
+            marked_emp_ids.add(dp_emp_id)
 
-            s_key = str(dp.site_id) if dp.site_id else '__NO_SITE__'
-            site_name = dp.site.name if dp.site else ''
-            post_name = dp.post.post_name if getattr(dp, 'post', None) else ''
-            notes_val = (dp.notes or '').strip()
+            s_key = str(dp_site_id) if dp_site_id else '__NO_SITE__'
+            site_name = dp['site__name'] or ''
+            post_name = dp['post__post_name'] or ''
+            notes_val = (dp['notes'] or '').strip()
 
             site_bucket = emp_day_ddp_sites[(emp_id, d_str)]
             existing = site_bucket.get(s_key)
@@ -217,63 +229,80 @@ class AttendanceRegisterService:
                     existing['post'] = post_name
                 if notes_val and notes_val not in existing['notes']:
                     existing['notes'] = f"{existing['notes']}; {notes_val}".strip('; ')
-                existing['is_replacement'] = existing['is_replacement'] or bool(getattr(dp, 'is_replacement_duty', False))
+                existing['is_replacement'] = existing['is_replacement'] or bool(dp['is_replacement_duty'])
             else:
                 site_bucket[s_key] = {
                     'code': code,
                     'status': code,
                     'status_display': _display_label_for_code(code),
-                    'site_id': str(dp.site_id) if dp.site_id else None,
+                    'site_id': str(dp_site_id) if dp_site_id else None,
                     'site': site_name,
                     'post': post_name,
                     'shift': 'Overtime' if code in ('O', 'OD') else ('Present + OT' if code in ('PO', 'POD') else 'Duty Shift'),
-                    'is_replacement': bool(getattr(dp, 'is_replacement_duty', False)),
+                    'is_replacement': bool(dp['is_replacement_duty']),
                     'notes': notes_val,
                     'source': 'MUSTER',
                 }
 
-        # Fetch HRM WorkforceAttendance as fallback ONLY for (employee_id, date) with no DailyDutyPay rows
-        wa_qs = WorkforceAttendance.objects.filter(
+        # Fetch HRM WorkforceAttendance as lightweight values dict (fallback ONLY when no DailyDutyPay)
+        wa_rows = WorkforceAttendance.objects.filter(
             company_id=company_id,
             is_deleted=False,
             date__range=[start_date, end_date],
-        ).select_related('site', 'shift')
+        ).values(
+            'employee_id',
+            'date',
+            'status',
+            'site_id',
+            'site__name',
+            'site__crm_entity_id',
+            'shift_id',
+            'shift__name',
+            'is_replacement',
+            'notes',
+        )
 
-        if shift_id:
-            wa_shift_emp_ids = set(wa_qs.filter(shift_id=shift_id).values_list('employee_id', flat=True))
-        else:
-            wa_shift_emp_ids = set()
-
-        wa_site_emp_ids = set(wa_qs.filter(site_id=site_id).values_list('employee_id', flat=True)) if site_id else set()
-        wa_client_emp_ids = set(wa_qs.filter(site__crm_entity_id=client_id).values_list('employee_id', flat=True)) if client_id else set()
+        shift_id_str = str(shift_id) if shift_id else None
+        wa_shift_emp_ids = set()
+        wa_site_emp_ids = set()
+        wa_client_emp_ids = set()
 
         wa_lookup = {}
-        wa_extra_by_day = {}
-        for wa in wa_qs:
-            emp_id = str(wa.employee_id)
-            d_str = wa.date.strftime('%Y-%m-%d')
-            wa_extra_by_day[(emp_id, d_str)] = wa
+        wa_shift_by_day = {}
+        for wa in wa_rows:
+            wa_emp_id = wa['employee_id']
+            if shift_id_str and wa['shift_id'] and str(wa['shift_id']) == shift_id_str:
+                wa_shift_emp_ids.add(wa_emp_id)
+            if site_id_str and wa['site_id'] and str(wa['site_id']) == site_id_str:
+                wa_site_emp_ids.add(wa_emp_id)
+            if client_id_str and wa['site__crm_entity_id'] and str(wa['site__crm_entity_id']) == client_id_str:
+                wa_client_emp_ids.add(wa_emp_id)
+
+            emp_id = str(wa_emp_id)
+            d_str = wa['date'].strftime('%Y-%m-%d')
+            if wa['shift__name']:
+                wa_shift_by_day[(emp_id, d_str)] = wa['shift__name']
 
             if (emp_id, d_str) in emp_day_ddp_sites:
                 continue
 
-            code = _canonical_code_from_raw(wa.status, 'PRIMARY')
+            code = _canonical_code_from_raw(wa['status'], 'PRIMARY')
             if not code:
                 continue
 
-            marked_emp_ids.add(wa.employee_id)
-            site_name = wa.site.name if wa.site else ''
-            shift_name = wa.shift.name if getattr(wa, 'shift', None) else ''
+            marked_emp_ids.add(wa_emp_id)
+            site_name = wa['site__name'] or ''
+            shift_name = wa['shift__name'] or ''
             wa_lookup[(emp_id, d_str)] = {
                 'code': code,
                 'status': code,
                 'status_display': _display_label_for_code(code),
-                'site_id': str(wa.site_id) if wa.site_id else None,
+                'site_id': str(wa['site_id']) if wa['site_id'] else None,
                 'site': site_name,
                 'post': '',
                 'shift': shift_name,
-                'is_replacement': bool(getattr(wa, 'is_replacement', False)),
-                'notes': (wa.notes or '').strip(),
+                'is_replacement': bool(wa['is_replacement']),
+                'notes': (wa['notes'] or '').strip(),
                 'source': 'HRM',
             }
 
@@ -362,18 +391,18 @@ class AttendanceRegisterService:
 
         employees = sorted(list(qs), key=_natural_code_sort_key)
 
-        # Fetch active deployment map for fallback tooltip info only (never used to fabricate attendance)
+        # Fetch active deployment map for fallback tooltip info only (values_list avoids ORM overhead)
         active_deployments = {}
         try:
-            deps = Deployment.objects.filter(
+            for dep_emp_id, site_name in Deployment.objects.filter(
                 company_id=company_id,
                 is_deleted=False,
                 is_active=True,
+                site__is_deleted=False,
                 employee_id__in=[e.id for e in employees],
-            ).select_related('site')
-            for d in deps:
-                if d.site and not d.site.is_deleted:
-                    active_deployments.setdefault(str(d.employee_id), []).append(d.site.name)
+            ).values_list('employee_id', 'site__name'):
+                if site_name:
+                    active_deployments.setdefault(str(dep_emp_id), []).append(site_name)
         except Exception:
             pass
 
@@ -422,11 +451,11 @@ class AttendanceRegisterService:
                 site_entries = emp_day_ddp_sites.get((emp_id_str, d_str))
                 if site_entries:
                     # Enrich shift metadata if WorkforceAttendance also recorded it
-                    wa_meta = wa_extra_by_day.get((emp_id_str, d_str))
+                    wa_shift_name = wa_shift_by_day.get((emp_id_str, d_str), '')
                     for entry in site_entries.values():
                         enriched = dict(entry)
-                        if wa_meta and getattr(wa_meta, 'shift', None) and not enriched.get('shift'):
-                            enriched['shift'] = wa_meta.shift.name
+                        if wa_shift_name and not enriched.get('shift'):
+                            enriched['shift'] = wa_shift_name
                         entries.append(enriched)
                 elif (emp_id_str, d_str) in wa_lookup:
                     entries.append(dict(wa_lookup[(emp_id_str, d_str)]))

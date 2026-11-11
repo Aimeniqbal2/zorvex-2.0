@@ -1,17 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useRef } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { WorkspaceTabBar } from './WorkspaceTabBar';
 import { DesktopHeader } from '../desktop/DesktopHeader';
 import { Desktop } from '../desktop/Desktop';
 import { ModulePlaceholder } from '../../pages/ModulePlaceholder';
-import { InventoryModule } from '../../modules/inventory/InventoryModule';
-import { POSModule } from '../../modules/pos';
-import { CRMModule } from '../../modules/crm/CRMModule';
-import { SecurityOperationsModule } from '../../modules/security-operations/SecurityOperationsModule';
-import { PlatformModule } from '../../modules/platform/PlatformModule';
-import { HRModule } from '../../modules/hr';
-import FinanceModule from '../../modules/finance/FinanceModule';
-import { PurchasingModule } from '../../modules/purchasing/PurchasingModule';
 import { MODULE_REGISTRY } from '../../config/modules';
 import { isModuleAuthorized } from '../../auth/moduleAuth';
 import { useAuthStore } from '../../auth/authStore';
@@ -19,17 +11,33 @@ import { useAppStore } from '../../stores/appStore';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { SECURITY_NAVIGATION } from '../../industries/security/navigation';
 import { MOBILE_NAVIGATION } from '../../industries/mobile/navigation';
-import { MobileHRModule } from '../../industries/mobile/hrm/MobileHRModule';
-import { SecurityCRMModule } from '../../industries/security/crm/SecurityCRMModule';
-import { SecurityPurchasingModule } from '../../industries/security/purchasing/SecurityPurchasingModule';
-import { SecurityFinanceModule } from '../../industries/security/finance/SecurityFinanceModule';
-import { SecurityReportsWorkspace } from '../../modules/security-operations/components/SecurityReportsWorkspace';
-import { SecurityInventoryWorkspace } from '../../modules/security-operations/components/SecurityInventoryWorkspace';
-import { MonthlyMusterSheetTab } from '../../modules/security-operations/components/MonthlyMusterSheetTab';
-import { AttendanceRegisterView as OperationsAttendanceLedgerView } from '../../modules/security-operations/components/AttendanceRegisterView';
-import { AttendanceRegisterView as MasterAttendanceRegistryView } from '../../modules/hr/components/AttendanceRegisterView';
-import { FastCostingGridTab } from '../../industries/security/crm/components/FastCostingGridTab';
-import { SettingsWorkspace } from '../desktop/SettingsWorkspace';
+
+// Route-level code splitting so initial login/desktop loads only the lightweight shell
+const InventoryModule = React.lazy(() => import('../../modules/inventory/InventoryModule').then(m => ({ default: m.InventoryModule })));
+const POSModule = React.lazy(() => import('../../modules/pos').then(m => ({ default: m.POSModule })));
+const CRMModule = React.lazy(() => import('../../modules/crm/CRMModule').then(m => ({ default: m.CRMModule })));
+const SecurityOperationsModule = React.lazy(() => import('../../modules/security-operations/SecurityOperationsModule').then(m => ({ default: m.SecurityOperationsModule })));
+const PlatformModule = React.lazy(() => import('../../modules/platform/PlatformModule').then(m => ({ default: m.PlatformModule })));
+const HRModule = React.lazy(() => import('../../modules/hr').then(m => ({ default: m.HRModule })));
+const FinanceModule = React.lazy(() => import('../../modules/finance/FinanceModule'));
+const PurchasingModule = React.lazy(() => import('../../modules/purchasing/PurchasingModule').then(m => ({ default: m.PurchasingModule })));
+const MobileHRModule = React.lazy(() => import('../../industries/mobile/hrm/MobileHRModule').then(m => ({ default: m.MobileHRModule })));
+const SecurityCRMModule = React.lazy(() => import('../../industries/security/crm/SecurityCRMModule').then(m => ({ default: m.SecurityCRMModule })));
+const SecurityPurchasingModule = React.lazy(() => import('../../industries/security/purchasing/SecurityPurchasingModule').then(m => ({ default: m.SecurityPurchasingModule })));
+const SecurityFinanceModule = React.lazy(() => import('../../industries/security/finance/SecurityFinanceModule').then(m => ({ default: m.SecurityFinanceModule })));
+const SecurityReportsWorkspace = React.lazy(() => import('../../modules/security-operations/components/SecurityReportsWorkspace').then(m => ({ default: m.SecurityReportsWorkspace })));
+const SecurityInventoryWorkspace = React.lazy(() => import('../../modules/security-operations/components/SecurityInventoryWorkspace').then(m => ({ default: m.SecurityInventoryWorkspace })));
+const MonthlyMusterSheetTab = React.lazy(() => import('../../modules/security-operations/components/MonthlyMusterSheetTab').then(m => ({ default: m.MonthlyMusterSheetTab })));
+const OperationsAttendanceLedgerView = React.lazy(() => import('../../modules/security-operations/components/AttendanceRegisterView').then(m => ({ default: m.AttendanceRegisterView })));
+const MasterAttendanceRegistryView = React.lazy(() => import('../../modules/hr/components/AttendanceRegisterView').then(m => ({ default: m.AttendanceRegisterView })));
+const FastCostingGridTab = React.lazy(() => import('../../industries/security/crm/components/FastCostingGridTab').then(m => ({ default: m.FastCostingGridTab })));
+const SettingsWorkspace = React.lazy(() => import('../desktop/SettingsWorkspace').then(m => ({ default: m.SettingsWorkspace })));
+
+const TabLoadingFallback = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '32px', color: '#64748b', fontSize: '0.9rem', fontWeight: 500 }}>
+        Loading workspace...
+    </div>
+);
 
 
 export const WorkspaceManager: React.FC = () => {
@@ -119,6 +127,7 @@ export const WorkspaceManager: React.FC = () => {
                             overflowY: 'auto'
                         }}
                     >
+                    <Suspense fallback={TabLoadingFallback}>
                         {tab.moduleCode === 'inventory' || tab.moduleCode === 'store_equipment' ? (
                             isSecurityIndustry ? <SecurityInventoryWorkspace /> : <InventoryModule />
                         ) : tab.moduleCode === 'pos' ? (
@@ -167,6 +176,7 @@ export const WorkspaceManager: React.FC = () => {
                         ) : (
                             <ModulePlaceholder title={tab.title} />
                         )}
+                    </Suspense>
 
                     </div>
                 ))}

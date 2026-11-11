@@ -2632,6 +2632,43 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                 pass
         return qs
 
+    def _resolve_operational_site_id(self, company_id, crm_entity_id, site_val, site_name=None, is_temporary=False):
+        """Resolve an OperationalSite UUID (accepting either OperationalSite.id or ClientLocation.id)."""
+        from operations.models import OperationalSite
+        from crm.models import CRMEntity
+        if site_val:
+            if OperationalSite.objects.filter(id=site_val, company_id=company_id, is_deleted=False).exists():
+                return str(site_val)
+            from security_crm.models import ClientLocation
+            cl = ClientLocation.objects.filter(id=site_val, company_id=company_id).first()
+            if cl:
+                crm_id = crm_entity_id or cl.customer_id
+                matched = OperationalSite.objects.filter(
+                    company_id=company_id,
+                    crm_entity_id=crm_id,
+                    name__iexact=cl.name,
+                    is_deleted=False,
+                ).first()
+                if not matched:
+                    matched = OperationalSite.objects.create(
+                        company_id=company_id,
+                        crm_entity_id=crm_id,
+                        name=cl.name,
+                        address=getattr(cl, 'address', None) or cl.name,
+                    )
+                return str(matched.id)
+        if is_temporary and site_name:
+            crm_ent = CRMEntity.objects.filter(id=crm_entity_id, company_id=company_id).first()
+            if crm_ent:
+                site = OperationalSite.objects.create(
+                    company_id=company_id,
+                    crm_entity=crm_ent,
+                    name=site_name,
+                    address=site_name or 'Event / Temporary Venue',
+                )
+                return str(site.id)
+        return None
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         company_id = self._resolve_company(request)
@@ -2645,19 +2682,15 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
             comp_obj = Company.objects.filter(id=company_id).first()
             data['reference_number'] = DocumentSequence.get_next_number(comp_obj, 'TEMP_SERVICE', 'TSR-')
 
-        # Scenario 2 / 3: If temporary site is requested and no site selected, auto-create site
-        if data.get('is_temporary_site') and not data.get('operational_site') and data.get('site_name'):
-            from operations.models import OperationalSite
-            from crm.models import CRMEntity
-            crm_ent = CRMEntity.objects.filter(id=data.get('crm_entity'), company_id=company_id).first()
-            if crm_ent:
-                site = OperationalSite.objects.create(
-                    company_id=company_id,
-                    crm_entity=crm_ent,
-                    name=data.get('site_name'),
-                    address=data.get('site_name') or 'Event / Temporary Venue'
-                )
-                data['operational_site'] = str(site.id)
+        resolved_site_id = self._resolve_operational_site_id(
+            company_id=company_id,
+            crm_entity_id=data.get('crm_entity'),
+            site_val=data.get('operational_site'),
+            site_name=data.get('site_name'),
+            is_temporary=bool(data.get('is_temporary_site')),
+        )
+        if resolved_site_id:
+            data['operational_site'] = resolved_site_id
 
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
@@ -2674,19 +2707,15 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
         lines_data = data.pop('lines', None)
         guards_data = data.pop('assigned_guards', None)
 
-        # Scenario 2 / 3: If temporary site is requested and no site selected, auto-create site
-        if data.get('is_temporary_site') and not data.get('operational_site') and data.get('site_name') and not ts.operational_site:
-            from operations.models import OperationalSite
-            from crm.models import CRMEntity
-            crm_ent = CRMEntity.objects.filter(id=data.get('crm_entity') or ts.crm_entity_id, company=ts.company).first()
-            if crm_ent:
-                site = OperationalSite.objects.create(
-                    company=ts.company,
-                    crm_entity=crm_ent,
-                    name=data.get('site_name'),
-                    address=data.get('site_name') or 'Event / Temporary Venue'
-                )
-                data['operational_site'] = str(site.id)
+        resolved_site_id = self._resolve_operational_site_id(
+            company_id=ts.company_id,
+            crm_entity_id=data.get('crm_entity') or ts.crm_entity_id,
+            site_val=data.get('operational_site') if 'operational_site' in data else ts.operational_site_id,
+            site_name=data.get('site_name'),
+            is_temporary=bool(data.get('is_temporary_site')) and not ts.operational_site_id,
+        )
+        if resolved_site_id:
+            data['operational_site'] = resolved_site_id
 
         serializer = self.get_serializer(ts, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -2778,6 +2807,7 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                 except Exception:
                     guards_data = []
             ts.assigned_guards.all().delete()
+            seen_emp_ids = set()
             for gd in guards_data:
                 if isinstance(gd, str):
                     import json
@@ -2786,9 +2816,12 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
                     except Exception:
                         continue
                 emp_id = gd.get('employee_id')
+                if not emp_id or str(emp_id) in seen_emp_ids:
+                    continue
                 emp = Employee.objects.filter(id=emp_id, company=ts.company, is_active=True, employment_status='ACTIVE').first()
                 if not emp:
                     continue
+                seen_emp_ids.add(str(emp.id))
                 desig_id = gd.get('designation_id') or emp.designation_id
                 desig = Designation.objects.filter(id=desig_id, company=ts.company).first()
                 daily_p = Decimal(str(gd.get('daily_pay_rate', 0)))
@@ -2929,24 +2962,44 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
             is_deleted=False
         ).select_related('employee'))
 
+        def _status_to_code(raw_status):
+            if raw_status == AttendanceStatus.PRESENT:
+                return 'P'
+            if raw_status == AttendanceStatus.ABSENT:
+                return 'A'
+            if raw_status in [AttendanceStatus.PAID_LEAVE, AttendanceStatus.UNPAID_LEAVE, AttendanceStatus.ON_LEAVE, 'LEAVE']:
+                return 'L'
+            if raw_status == AttendanceStatus.OVERTIME:
+                return 'O'
+            if raw_status == AttendanceStatus.OVERTIME_DOZING:
+                return 'OD'
+            if raw_status in [AttendanceStatus.WORKED_WEEKLY_OFF, AttendanceStatus.DOUBLE_SHIFT]:
+                return 'WP'
+            if raw_status in [AttendanceStatus.WEEKLY_OFF, AttendanceStatus.OFF_DAY]:
+                return 'W'
+            return 'P'
+
         att_map = {}
         for a in attendances:
-            code = 'P'
-            if a.status in [AttendanceStatus.PRESENT]:
-                code = 'P'
-            elif a.status in [AttendanceStatus.ABSENT]:
-                code = 'A'
-            elif a.status in [AttendanceStatus.LEAVE, AttendanceStatus.UNPAID_LEAVE]:
-                code = 'L'
-            elif a.status in [AttendanceStatus.OVERTIME]:
-                code = 'O'
-            elif a.status in [AttendanceStatus.OVERTIME_DOZING]:
-                code = 'OD'
-            elif a.status in [AttendanceStatus.WORKED_WEEKLY_OFF, AttendanceStatus.DOUBLE_SHIFT]:
-                code = 'WP'
-            elif a.status in [AttendanceStatus.WEEKLY_OFF, AttendanceStatus.OFF_DAY]:
-                code = 'W'
-            att_map[(str(a.site_id), str(a.employee_id), a.date.day)] = code
+            att_map[(str(a.site_id), str(a.employee_id), a.date.day)] = _status_to_code(a.status)
+
+        from operations.models import DailyDutyPay
+        grid_company_id = self._resolve_company(request)
+        grid_year = int(request.query_params.get('year', timezone.now().year))
+        grid_month = int(request.query_params.get('month', timezone.now().month))
+        temp_pay_map = {}
+        temp_pays = DailyDutyPay.objects.filter(
+            company_id=grid_company_id,
+            duty_date__year=grid_year,
+            duty_date__month=grid_month,
+            is_deleted=False,
+            notes__startswith='Temporary Service:'
+        ).only('employee_id', 'duty_date', 'attendance_status', 'notes')
+        for dp in temp_pays:
+            note_body = (dp.notes or '').replace('Temporary Service:', '', 1).strip()
+            ref_token = note_body.split(' ', 1)[0].strip()
+            if ref_token:
+                temp_pay_map[(ref_token, str(dp.employee_id), dp.duty_date.day)] = _status_to_code(dp.attendance_status)
 
         services_data = []
         for ts in services_qs:
@@ -2978,7 +3031,9 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
 
                 for d in range(1, days_in_month + 1):
                     if d in active_days:
-                        code = att_map.get((site_id_str, emp_id_str, d), '')
+                        code = temp_pay_map.get((ts.reference_number, emp_id_str, d))
+                        if code is None:
+                            code = att_map.get((site_id_str, emp_id_str, d), '')
                         days_dict[str(d)] = code
                         if code in ['P', 'PO', 'POD', 'WP', '1']:
                             p_count += 1
@@ -3097,104 +3152,224 @@ class TemporaryServiceRequestViewSet(BaseSecurityOpsViewSet):
 
     @action(detail=False, methods=['post'], url_path='save-muster-attendance')
     def save_muster_attendance(self, request):
+        import calendar
+        from datetime import date
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from django.db import IntegrityError
+        from hrm.models import WorkforceAttendance, AttendanceStatus, Employee
+        from operations.models import DailyDutyPay, DutyType, DailyPayCalculationStatus
+
         company_id = self._resolve_company(request)
         updates = request.data.get('updates', [])
         year = int(request.data.get('year', timezone.now().year))
         month = int(request.data.get('month', timezone.now().month))
 
-        from datetime import date
-        from hrm.models import WorkforceAttendance, AttendanceStatus, Employee
-        from operations.models import DailyDutyPay, DutyType
+        if not isinstance(updates, list):
+            return Response({'error': 'Invalid updates payload.'}, status=status.HTTP_400_BAD_REQUEST)
 
         updated_count = 0
-        with transaction.atomic():
-            for u in updates:
-                service_id = u.get('service_id')
-                emp_id = u.get('employee_id')
-                day = int(u.get('day'))
-                raw_code = str(u.get('code', '')).strip().upper()
+        try:
+            with transaction.atomic():
+                for u in updates:
+                    service_id = u.get('service_id')
+                    emp_id = u.get('employee_id')
+                    day = int(u.get('day'))
+                    raw_code = str(u.get('code', '')).strip().upper()
 
-                ts = TemporaryServiceRequest.objects.filter(id=service_id, company_id=company_id).first()
-                if not ts:
-                    continue
+                    ts = TemporaryServiceRequest.objects.filter(id=service_id, company_id=company_id).first()
+                    if not ts:
+                        continue
 
-                ts_start = ts.start_datetime.date()
-                ts_end = ts.end_datetime.date() if ts.end_datetime else date(year, month, calendar.monthrange(year, month)[1])
-                duty_date = date(year, month, day)
+                    ts_start = ts.start_datetime.date()
+                    ts_end = ts.end_datetime.date() if ts.end_datetime else date(year, month, calendar.monthrange(year, month)[1])
+                    duty_date = date(year, month, day)
 
-                if not (ts_start <= duty_date <= ts_end):
-                    return Response({
-                        'error': f'Day {day} is outside the active dates ({ts_start} to {ts_end}) for {ts.reference_number}.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    if not (ts_start <= duty_date <= ts_end):
+                        return Response({
+                            'error': f'Day {day} is outside the active dates ({ts_start} to {ts_end}) for {ts.reference_number}.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
 
-                emp = Employee.objects.filter(id=emp_id, company_id=company_id).first()
-                if not emp:
-                    continue
+                    emp = Employee.objects.filter(id=emp_id, company_id=company_id).first()
+                    if not emp:
+                        continue
 
-                asgn = ts.assigned_guards.filter(employee=emp).first()
-                daily_pay = asgn.daily_pay_rate if asgn else Decimal('0.00')
+                    asgn = ts.assigned_guards.filter(employee=emp).first()
+                    daily_pay = asgn.daily_pay_rate if asgn else Decimal('0.00')
+                    ref_prefix = f"Temporary Service: {ts.reference_number}"
+                    ts_note = f"{ref_prefix} ({ts.title})"
 
-                att_status = AttendanceStatus.PRESENT
-                payable_amount = daily_pay
-                if raw_code in ['P', '1']:
-                    att_status = AttendanceStatus.PRESENT
-                    payable_amount = daily_pay
-                elif raw_code in ['A', '0']:
-                    att_status = AttendanceStatus.ABSENT
-                    payable_amount = Decimal('0.00')
-                elif raw_code in ['L', 'PL', 'SL']:
-                    att_status = AttendanceStatus.LEAVE
-                    payable_amount = Decimal('0.00')
-                elif raw_code in ['O']:
-                    att_status = AttendanceStatus.OVERTIME
-                    payable_amount = daily_pay
-                elif raw_code in ['OD']:
-                    att_status = AttendanceStatus.OVERTIME_DOZING
-                    payable_amount = daily_pay
-                elif raw_code in ['WP']:
-                    att_status = AttendanceStatus.WORKED_WEEKLY_OFF
-                    payable_amount = daily_pay * Decimal('2.00')
-                elif raw_code == '':
-                    WorkforceAttendance.objects.filter(
-                        company_id=company_id, site=ts.operational_site, employee=emp, date=duty_date
-                    ).delete()
-                    DailyDutyPay.objects.filter(
-                        company_id=company_id, site=ts.operational_site, employee=emp, duty_date=duty_date
-                    ).delete()
+                    existing_ts_pays = DailyDutyPay.objects.filter(
+                        company_id=company_id,
+                        employee=emp,
+                        duty_date=duty_date,
+                        roster__isnull=True,
+                        is_deleted=False,
+                        notes__startswith=ref_prefix,
+                    )
+                    if existing_ts_pays.filter(is_frozen=True).exists():
+                        return Response({
+                            'error': f'Records for {month}/{year} are frozen. Please temporarily unfreeze the month in Monthly Duty Muster before editing temporary attendance.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    if raw_code == '':
+                        WorkforceAttendance.objects.filter(
+                            company_id=company_id,
+                            employee=emp,
+                            date=duty_date,
+                            notes__startswith=ref_prefix,
+                        ).delete()
+                        existing_ts_pays.delete()
+                        updated_count += 1
+                        continue
+
+                    if raw_code in ['P', '1']:
+                        att_status = AttendanceStatus.PRESENT
+                        payable_amount = daily_pay
+                    elif raw_code in ['A', '0']:
+                        att_status = AttendanceStatus.ABSENT
+                        payable_amount = Decimal('0.00')
+                    elif raw_code in ['L', 'PL', 'SL']:
+                        att_status = AttendanceStatus.ON_LEAVE
+                        payable_amount = Decimal('0.00')
+                    elif raw_code in ['O']:
+                        att_status = AttendanceStatus.OVERTIME
+                        payable_amount = daily_pay
+                    elif raw_code in ['OD']:
+                        att_status = AttendanceStatus.OVERTIME_DOZING
+                        payable_amount = daily_pay
+                    elif raw_code in ['WP']:
+                        att_status = AttendanceStatus.WORKED_WEEKLY_OFF
+                        payable_amount = daily_pay * Decimal('2.00')
+                    else:
+                        att_status = AttendanceStatus.PRESENT
+                        payable_amount = daily_pay
+
+                    # Resolve effective site if DB schema marks WorkForceAttendance.site or DailyDutyPay.site non-nullable
+                    att_site_nullable = WorkforceAttendance._meta.get_field('site').null
+                    pay_site_nullable = DailyDutyPay._meta.get_field('site').null
+                    att_site = ts.operational_site
+                    pay_site = ts.operational_site
+
+                    if ts.operational_site is None and (not att_site_nullable or not pay_site_nullable):
+                        from operations.models import OperationalSite
+                        fallback_name = (ts.site_name or ts.title or ts.reference_number or 'Temporary Venue')[:255]
+                        fallback_site = (
+                            OperationalSite.objects.filter(
+                                company_id=company_id,
+                                crm_entity=ts.crm_entity,
+                                name=fallback_name,
+                                is_deleted=False,
+                            ).first()
+                            or OperationalSite.objects.create(
+                                company_id=company_id,
+                                crm_entity=ts.crm_entity,
+                                name=fallback_name,
+                                address=fallback_name,
+                                is_active=False,
+                            )
+                        )
+                        if not att_site_nullable:
+                            att_site = fallback_site
+                        if not pay_site_nullable:
+                            pay_site = fallback_site
+
+                    # Safely record WorkforceAttendance without violating unique (company, employee, date, status)
+                    existing_same_status = WorkforceAttendance.objects.filter(
+                        company_id=company_id,
+                        employee=emp,
+                        date=duty_date,
+                        status=att_status,
+                        is_deleted=False,
+                    ).first()
+                    existing_ts_att = WorkforceAttendance.objects.filter(
+                        company_id=company_id,
+                        employee=emp,
+                        date=duty_date,
+                        is_deleted=False,
+                        notes__startswith=ref_prefix,
+                    ).first()
+
+                    if existing_same_status:
+                        # Regular or matching temporary record already holds this exact (company, emp, date, status)
+                        if existing_ts_att and existing_ts_att.id != existing_same_status.id:
+                            existing_ts_att.delete()
+                    elif existing_ts_att:
+                        existing_ts_att.status = att_status
+                        existing_ts_att.site = att_site
+                        existing_ts_att.notes = ref_prefix
+                        existing_ts_att.save(update_fields=['status', 'site', 'notes', 'updated_at'])
+                    else:
+                        WorkforceAttendance.objects.create(
+                            company_id=company_id,
+                            site=att_site,
+                            employee=emp,
+                            date=duty_date,
+                            status=att_status,
+                            notes=ref_prefix,
+                        )
+
+                    # Safely record DailyDutyPay without colliding with regular muster PRIMARY constraint
+                    preferred_duty_type = DutyType.OVERTIME if raw_code in ['O', 'OD'] else DutyType.PRIMARY
+                    existing_ts_pay = existing_ts_pays.first()
+
+                    other_active_types = set(
+                        DailyDutyPay.objects.filter(
+                            company_id=company_id,
+                            employee=emp,
+                            duty_date=duty_date,
+                            roster__isnull=True,
+                            is_deleted=False,
+                        )
+                        .exclude(id=existing_ts_pay.id if existing_ts_pay else None)
+                        .values_list('duty_type', flat=True)
+                    )
+
+                    if preferred_duty_type not in other_active_types:
+                        chosen_duty_type = preferred_duty_type
+                    elif DutyType.OVERTIME not in other_active_types:
+                        chosen_duty_type = DutyType.OVERTIME
+                    elif DutyType.PRIMARY not in other_active_types:
+                        chosen_duty_type = DutyType.PRIMARY
+                    else:
+                        emp_name = f"{emp.first_name} {emp.last_name or ''}".strip()
+                        return Response({
+                            'error': f'{emp_name} already has both Primary and Overtime duty pay logged for {duty_date}.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    if existing_ts_pay:
+                        existing_ts_pay.site = pay_site
+                        existing_ts_pay.client = ts.crm_entity
+                        existing_ts_pay.attendance_status = att_status
+                        existing_ts_pay.duty_type = chosen_duty_type
+                        existing_ts_pay.daily_payable_rate = daily_pay
+                        existing_ts_pay.payable_amount = payable_amount
+                        existing_ts_pay.calculation_status = DailyPayCalculationStatus.CALCULATED
+                        existing_ts_pay.notes = ts_note
+                        existing_ts_pay.save()
+                    else:
+                        DailyDutyPay.objects.create(
+                            company_id=company_id,
+                            employee=emp,
+                            site=pay_site,
+                            client=ts.crm_entity,
+                            duty_date=duty_date,
+                            attendance_status=att_status,
+                            duty_type=chosen_duty_type,
+                            daily_payable_rate=daily_pay,
+                            payable_amount=payable_amount,
+                            calculation_status=DailyPayCalculationStatus.CALCULATED,
+                            notes=ts_note,
+                        )
                     updated_count += 1
-                    continue
 
-                WorkforceAttendance.objects.update_or_create(
-                    company_id=company_id,
-                    site=ts.operational_site,
-                    employee=emp,
-                    date=duty_date,
-                    defaults={
-                        'status': att_status,
-                        'notes': f"Temporary Service: {ts.reference_number}"
-                    }
-                )
-
-                DailyDutyPay.objects.update_or_create(
-                    company_id=company_id,
-                    site=ts.operational_site,
-                    employee=emp,
-                    duty_date=duty_date,
-                    defaults={
-                        'attendance_status': att_status,
-                        'duty_type': DutyType.PRIMARY if raw_code not in ['O', 'OD'] else DutyType.OVERTIME,
-                        'daily_payable_rate': daily_pay,
-                        'payable_amount': payable_amount,
-                        'notes': f"Temporary Service: {ts.reference_number} ({ts.title})"
-                    }
-                )
-                updated_count += 1
-
-        return Response({
-            'status': 'success',
-            'updated_count': updated_count,
-            'message': f'Successfully updated {updated_count} attendance records.'
-        }, status=status.HTTP_200_OK)
+            return Response({
+                'status': 'success',
+                'updated_count': updated_count,
+                'message': f'Successfully updated {updated_count} attendance records.'
+            }, status=status.HTTP_200_OK)
+        except (DjangoValidationError, IntegrityError, ValueError, TypeError) as exc:
+            msg = '; '.join(exc.messages) if hasattr(exc, 'messages') else str(exc)
+            return Response({'error': msg, 'detail': msg}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], url_path='generate-invoice')
     def generate_invoice(self, request, pk=None):
@@ -5072,6 +5247,33 @@ class MonthlyMusterCleanupOrphanedAttendanceView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def _run_month_lock_action(request, freeze: bool):
+    """Shared handler to validate company/year/month and freeze or unfreeze Monthly Duty Muster."""
+    company = _resolve_company_for_api_view(request)
+    if not company:
+        return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    year = request.data.get('year')
+    month = request.data.get('month')
+    if not year or not month:
+        return Response({'detail': 'Both year and month are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        year = int(year)
+        month = int(month)
+    except (ValueError, TypeError):
+        return Response({'detail': 'Invalid year or month format.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from operations.services.monthly_muster_service import MonthlyMusterService
+    action = MonthlyMusterService.freeze_month if freeze else MonthlyMusterService.unfreeze_month
+    try:
+        res = action(company=company, year=year, month=month, user=request.user)
+        return Response(res, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("Error %s monthly muster: %s", "freezing" if freeze else "unfreezing", e)
+        return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class MonthlyMusterFreezeMonthView(APIView):
     """
     POST /api/operations/monthly-muster/freeze-month/
@@ -5080,28 +5282,18 @@ class MonthlyMusterFreezeMonthView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        company = _resolve_company_for_api_view(request)
-        if not company:
-            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        return _run_month_lock_action(request, freeze=True)
 
-        year = request.data.get('year')
-        month = request.data.get('month')
-        if not year or not month:
-            return Response({'detail': 'Both year and month are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            year = int(year)
-            month = int(month)
-        except (ValueError, TypeError):
-            return Response({'detail': 'Invalid year or month format.'}, status=status.HTTP_400_BAD_REQUEST)
+class MonthlyMusterUnfreezeMonthView(APIView):
+    """
+    POST /api/operations/monthly-muster/unfreeze-month/
+    Temporarily unfreezes attendance and duty pay records for the given month so accidental freezes can be corrected.
+    """
+    permission_classes = [IsAuthenticated]
 
-        from operations.services.monthly_muster_service import MonthlyMusterService
-        try:
-            res = MonthlyMusterService.freeze_month(company=company, year=year, month=month, user=request.user)
-            return Response(res, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.exception("Error freezing monthly muster: %s", e)
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    def post(self, request):
+        return _run_month_lock_action(request, freeze=False)
 
 
 class MonthlyMusterAutoAttendanceConfigView(APIView):

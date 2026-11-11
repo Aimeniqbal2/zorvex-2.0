@@ -8,6 +8,7 @@ import {
     deleteSignature, type UserEmailSignature 
 } from '../../api/communications';
 import { API_HOST_URL } from '../../api/client';
+import { UserProfilePanel } from './UserProfilePanel';
 
 export const SettingsWorkspace: React.FC = () => {
     const { user } = useAuthStore();
@@ -229,23 +230,7 @@ export const SettingsWorkspace: React.FC = () => {
                     <div style={{ flex: 1, padding: '0 12px', overflowY: 'auto' }}>
                         {/* Tab 1: Profile */}
                         {activeTab === 'profile' && (
-                            <div>
-                                <h3 style={{ fontSize: '16px', fontWeight: 700, margin: '0 0 16px 0', color: 'var(--color-text)' }}>Profile Details</h3>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '500px' }}>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '4px' }}>Username</label>
-                                        <div style={{ padding: '9px 12px', border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface-secondary)', fontSize: '13.5px' }}>{user?.username}</div>
-                                    </div>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '4px' }}>Email</label>
-                                        <div style={{ padding: '9px 12px', border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface-secondary)', fontSize: '13.5px' }}>{(user as any)?.email || 'N/A'}</div>
-                                    </div>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '4px' }}>Role</label>
-                                        <div style={{ padding: '9px 12px', border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface-secondary)', fontSize: '13.5px', textTransform: 'capitalize' }}>{user?.role}</div>
-                                    </div>
-                                </div>
-                            </div>
+                            <UserProfilePanel />
                         )}
 
                         {/* Tab 2: Email Signatures */}

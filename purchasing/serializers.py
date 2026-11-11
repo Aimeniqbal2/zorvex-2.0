@@ -149,22 +149,27 @@ class ProcurementDocumentSerializer(serializers.ModelSerializer):
             'paid_amount', 'outstanding_amount', 'is_overdue'
         ]
 
+    def _get_payment_summary(self, obj):
+        cache = getattr(obj, '_payment_summary_cache', None)
+        if cache is None:
+            from .services.payment_service import get_invoice_payment_summary
+            cache = get_invoice_payment_summary(obj)
+            obj._payment_summary_cache = cache
+        return cache
+
     def get_paid_amount(self, obj):
         if obj.document_type in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
-            from .services.payment_service import get_invoice_payment_summary
-            return get_invoice_payment_summary(obj)['paid_amount']
+            return self._get_payment_summary(obj)['paid_amount']
         return Decimal('0.00')
 
     def get_outstanding_amount(self, obj):
         if obj.document_type in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
-            from .services.payment_service import get_invoice_payment_summary
-            return get_invoice_payment_summary(obj)['outstanding_amount']
+            return self._get_payment_summary(obj)['outstanding_amount']
         return obj.total_amount or Decimal('0.00')
 
     def get_is_overdue(self, obj):
         if obj.document_type in ('VENDOR_INVOICE', 'PURCHASE_ORDER'):
-            from .services.payment_service import get_invoice_payment_summary
-            return get_invoice_payment_summary(obj)['is_overdue']
+            return self._get_payment_summary(obj)['is_overdue']
         return False
 
 

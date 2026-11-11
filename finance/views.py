@@ -2151,14 +2151,21 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
 
         chosen = (month_str or '').strip()
         if not chosen or chosen.upper() == 'AUTO':
+            from django.db.models import Q
             curr_yr, curr_mo = map(int, current_month.split('-'))
             prev_yr, prev_mo = map(int, previous_month.split('-'))
+            worked_q = Q(daily_pay_amount__gt=0) | Q(
+                attendance_status__in=[
+                    'PRESENT', 'P', 'OVERTIME', 'O', 'OVERTIME_DOZING', 'OD',
+                    'WORKED_WEEKLY_OFF', 'WP', 'HALF_DAY', 'HD', 'DOUBLE_SHIFT', 'PO', 'POD'
+                ]
+            )
             has_curr = DailyDutyPay.objects.filter(
                 company=company, duty_date__year=curr_yr, duty_date__month=curr_mo, is_deleted=False
-            ).exists()
+            ).filter(worked_q).exists()
             has_prev = DailyDutyPay.objects.filter(
                 company=company, duty_date__year=prev_yr, duty_date__month=prev_mo, is_deleted=False
-            ).exists()
+            ).filter(worked_q).exists()
             chosen = previous_month if (has_prev and not has_curr) else current_month
 
         try:
@@ -2177,25 +2184,36 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
     def live_attendance_salaries(self, request):
         """
         GET /api/finance/payroll-integrations/live-attendance-salaries/?month=YYYY-MM
-        Automatically aggregates guard/employee attendance salaries from Operations
-        (DailyDutyPay + PayrollRulesService + additions/deductions/advances),
-        merging any already-finalized Finance snapshots & payment statuses.
+        High-performance read-only bulk aggregator for guard/employee attendance salaries
+        from Operations (DailyDutyPay + Overtime + Additions/Deductions/Statutory/Advances),
+        merging any already-finalized Finance snapshots & payment statuses without per-row writes.
         """
         from collections import defaultdict
-        from decimal import Decimal
+        from decimal import Decimal, ROUND_HALF_UP
+        from django.db.models import Q
         from django.utils import timezone
-        from hrm.models import Employee, AttendanceStatus
-        from operations.models import (
-            DailyDutyPay, DutyType, Deployment,
-            EmployeePayrollCalculation, PayrollCalculationStatus
+        from hrm.models import (
+            Employee, AttendanceStatus, EmployeeSalaryAssignment, CompanyPayrollPolicy,
+            StatutoryScheme, StatutorySchemeType, StatutoryRule, StatutorySchemeRateHistory,
+            EmployeeStatutoryEnrollment, OvertimeRecord, OvertimeStatus, OvertimeType
         )
-        from operations.services.payroll_rules_service import PayrollRulesService
+        from operations.models import (
+            DailyDutyPay, DutyType, DailyPayCalculationStatus, Deployment,
+            EmployeePayrollCalculation, PayrollAddition, PayrollAdditionType,
+            PayrollAdditionFrequency, PayrollDeduction, PayrollDeductionType,
+            PayrollDeductionFrequency
+        )
         from finance.models import (
-            PayrollEmployeeFinanceSnapshot, SalaryPaymentBatchLine,
-            SalaryPaymentLineStatus, EmployeePaymentDestination, EmployeeAdvance,
-            AdvanceStatus
+            SalaryPaymentBatchLine, SalaryPaymentLineStatus, EmployeePaymentDestination,
+            EmployeeAdvance, AdvanceStatus, AdvanceRecoveryMethod
         )
         from finance.services.period_service import ensure_open_period_and_foundation
+
+        def _q2(val):
+            if val is None:
+                return Decimal('0.00')
+            d = Decimal(str(val)) if not isinstance(val, Decimal) else val
+            return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         company = self.get_company()
         month_param = request.query_params.get('month')
@@ -2207,20 +2225,54 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         ensure_open_period_and_foundation(company, period_end)
         ensure_open_period_and_foundation(company, timezone.now().date())
 
-        # Fetch all DailyDutyPay records in this period
-        duty_pays = list(DailyDutyPay.objects.filter(
-            company=company, duty_date__gte=period_start, duty_date__lte=period_end, is_deleted=False
-        ).select_related('employee', 'employee__designation', 'site'))
+        # 1. Fetch lightweight values from DailyDutyPay (no heavy model hydration)
+        ot_statuses = {'OVERTIME', 'O', 'OVERTIME_DOZING', 'OD'}
+        absent_statuses = {AttendanceStatus.ABSENT, 'ABSENT', 'A', AttendanceStatus.UNPAID_LEAVE, 'UNPAID_LEAVE'}
 
-        dp_by_emp = defaultdict(list)
+        dp_stats_by_emp = {}
         sites_by_emp = defaultdict(set)
-        for dp in duty_pays:
-            eid = str(dp.employee_id)
-            dp_by_emp[eid].append(dp)
-            if dp.site and dp.site.name:
-                sites_by_emp[eid].add(dp.site.name)
+        dp_rows = DailyDutyPay.objects.filter(
+            company=company, duty_date__gte=period_start, duty_date__lte=period_end, is_deleted=False
+        ).values(
+            'employee_id', 'site__name', 'duty_type', 'attendance_status',
+            'payable_amount', 'daily_payable_rate', 'calculation_status',
+            'unresolved_reason', 'duty_date'
+        )
+        for dp in dp_rows:
+            eid = str(dp['employee_id'])
+            if dp['site__name']:
+                sites_by_emp[eid].add(dp['site__name'])
+            st_stats = dp_stats_by_emp.get(eid)
+            if st_stats is None:
+                st_stats = {
+                    'present_days': 0,
+                    'ot_shifts': 0,
+                    'raw_duty_earnings': Decimal('0.00'),
+                    'raw_ot_earnings': Decimal('0.00'),
+                    'blockers': [],
+                }
+                dp_stats_by_emp[eid] = st_stats
 
-        # Also include existing finalized PayrollAccountingIntegration snapshots covering this month
+            amt = _q2(dp['payable_amount'])
+            rate = _q2(dp['daily_payable_rate'])
+            att_st = str(dp['attendance_status'] or '').upper()
+            if (
+                dp['calculation_status'] == DailyPayCalculationStatus.UNRESOLVED
+                or (rate <= Decimal('0.00') and att_st not in absent_statuses)
+            ):
+                if len(st_stats['blockers']) < 3:
+                    reason = dp['unresolved_reason'] or 'Missing rate setup'
+                    st_stats['blockers'].append(f"Unresolved daily duty pay on {dp['duty_date']}: {reason}")
+
+            if dp['duty_type'] == DutyType.OVERTIME or att_st in ot_statuses:
+                st_stats['ot_shifts'] += 1
+                st_stats['raw_ot_earnings'] += amt
+            else:
+                if att_st not in absent_statuses:
+                    st_stats['present_days'] += 1
+                st_stats['raw_duty_earnings'] += amt
+
+        # 2. Existing finalized PayrollAccountingIntegration snapshots covering this month
         matching_integrations = list(PayrollAccountingIntegration.objects.filter(
             company=company,
             is_deleted=False,
@@ -2232,7 +2284,9 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         snap_ids = []
         primary_integration = matching_integrations[0] if matching_integrations else None
         for integ in matching_integrations:
-            for snap in integ.employee_snapshots.filter(is_deleted=False).select_related('employee', 'employee__designation', 'department', 'payslip'):
+            for snap in integ.employee_snapshots.filter(is_deleted=False).select_related(
+                'employee', 'employee__designation', 'department', 'payslip'
+            ):
                 eid = str(snap.employee_id)
                 if eid not in snaps_by_emp:
                     snaps_by_emp[eid] = (integ, snap)
@@ -2246,44 +2300,150 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             ).select_related('batch'):
                 paid_lines_by_snap[str(bl.employee_snapshot_id)] = bl
 
-        # Active deployments for site fallback
-        active_deployments = Deployment.objects.filter(
-            company=company, is_deleted=False, status='ACTIVE'
-        ).select_related('site')
-        for dep in active_deployments:
-            if dep.site and dep.site.name:
-                sites_by_emp[str(dep.employee_id)].add(dep.site.name)
+        # Active deployments for site fallback (values_list avoids ORM overhead)
+        for emp_id_val, s_name in Deployment.objects.filter(
+            company=company, is_deleted=False, status='ACTIVE', site__isnull=False
+        ).values_list('employee_id', 'site__name'):
+            if s_name:
+                sites_by_emp[str(emp_id_val)].add(s_name)
 
-        all_emp_ids = set(dp_by_emp.keys()) | set(snaps_by_emp.keys())
+        all_emp_ids = set(dp_stats_by_emp.keys()) | set(snaps_by_emp.keys())
+        emp_id_list = list(all_emp_ids)
         employees_map = {
             str(e.id): e for e in Employee.objects.filter(
-                company=company, id__in=list(all_emp_ids), is_deleted=False
+                company=company, id__in=emp_id_list, is_deleted=False
             ).select_related('designation', 'department')
         }
 
         # Destinations & Outstanding Advances
         dest_by_emp = {}
         for d in EmployeePaymentDestination.objects.filter(
-            company=company, employee_id__in=list(all_emp_ids), is_active=True, is_deleted=False
+            company=company, employee_id__in=emp_id_list, is_active=True, is_deleted=False
         ).order_by('-is_preferred'):
             eid = str(d.employee_id)
             if eid not in dest_by_emp:
                 dest_by_emp[eid] = d
 
         adv_by_emp = defaultdict(Decimal)
-        for adv in EmployeeAdvance.objects.filter(
-            company=company, employee_id__in=list(all_emp_ids),
+        auto_adv_by_emp = defaultdict(list)
+        for adv_id, adv_emp_id, adv_num, adv_bal, adv_st, adv_method, adv_ready in EmployeeAdvance.objects.filter(
+            company=company, employee_id__in=emp_id_list,
             status=AdvanceStatus.PAID, is_deleted=False
+        ).values_list(
+            'id', 'employee_id', 'advance_number', 'outstanding_balance',
+            'status', 'recovery_method', 'payroll_deduction_ready'
         ):
-            adv_by_emp[str(adv.employee_id)] += Decimal(str(adv.outstanding_balance or 0))
+            bal = Decimal(str(adv_bal or 0))
+            eid = str(adv_emp_id)
+            adv_by_emp[eid] += bal
+            if (
+                adv_ready
+                and bal > Decimal('0.00')
+                and adv_method in (AdvanceRecoveryMethod.PAYROLL_DEDUCTION, AdvanceRecoveryMethod.MIXED)
+            ):
+                auto_adv_by_emp[eid].append((adv_id, adv_num, bal))
 
         # Existing calculations map
         existing_calcs = {
             str(c.employee_id): c for c in EmployeePayrollCalculation.objects.filter(
-                company=company, employee_id__in=list(all_emp_ids),
+                company=company, employee_id__in=emp_id_list,
                 period_start=period_start, period_end=period_end, is_deleted=False
             )
         }
+
+        # 3. Bulk prefetch non-finalized/non-frozen payroll rule inputs in ~7 queries total (instead of 10,000+)
+        eval_emp_ids = [
+            eid for eid in emp_id_list
+            if eid not in snaps_by_emp and not (existing_calcs.get(eid) and existing_calcs[eid].is_frozen)
+        ]
+
+        comp_by_emp = {}
+        policy = None
+        overtimes_by_emp = defaultdict(list)
+        additions_by_emp = defaultdict(list)
+        deductions_by_emp = defaultdict(list)
+        adv_deductions_by_emp = defaultdict(list)
+        statutory_schemes = []
+        stat_rules_by_scheme = {}
+        stat_hist_by_scheme = {}
+        stat_enroll_by_emp_scheme = {}
+
+        if eval_emp_ids:
+            policy = CompanyPayrollPolicy.objects.filter(company=company, is_active=True).first()
+
+            comp_fallback = {}
+            for sa in EmployeeSalaryAssignment.objects.filter(
+                company=company, employee_id__in=eval_emp_ids, status='ACTIVE', is_deleted=False
+            ).order_by('-effective_from'):
+                seid = str(sa.employee_id)
+                if seid not in comp_fallback:
+                    comp_fallback[seid] = sa
+                if sa.effective_from <= period_end and (sa.effective_to is None or sa.effective_to >= period_end):
+                    if seid not in comp_by_emp:
+                        comp_by_emp[seid] = sa
+            for seid, sa in comp_fallback.items():
+                if seid not in comp_by_emp:
+                    comp_by_emp[seid] = sa
+
+            for ot in OvertimeRecord.objects.filter(
+                company=company, employee_id__in=eval_emp_ids,
+                date__gte=period_start, date__lte=period_end,
+                status=OvertimeStatus.APPROVED, is_deleted=False
+            ).order_by('date'):
+                overtimes_by_emp[str(ot.employee_id)].append(ot)
+
+            for add in PayrollAddition.objects.filter(
+                company=company, employee_id__in=eval_emp_ids,
+                is_active=True, is_approved=True, is_deleted=False
+            ).filter(
+                (Q(frequency=PayrollAdditionFrequency.ONE_TIME) & Q(effective_date__gte=period_start) & Q(effective_date__lte=period_end)) |
+                (Q(frequency=PayrollAdditionFrequency.RECURRING) & Q(effective_from__lte=period_end) & (Q(effective_to__isnull=True) | Q(effective_to__gte=period_start)))
+            ).values('employee_id', 'addition_type', 'amount'):
+                additions_by_emp[str(add['employee_id'])].append(add)
+
+            for ded in PayrollDeduction.objects.filter(
+                company=company, employee_id__in=eval_emp_ids,
+                is_active=True, is_approved=True, is_deleted=False
+            ).filter(
+                (Q(frequency=PayrollDeductionFrequency.ONE_TIME) & Q(effective_date__gte=period_start) & Q(effective_date__lte=period_end)) |
+                (Q(frequency=PayrollDeductionFrequency.RECURRING) & Q(effective_from__lte=period_end) & (Q(effective_to__isnull=True) | Q(effective_to__gte=period_start)))
+            ).values('employee_id', 'deduction_type', 'amount', 'advance_id', 'advance__advance_number', 'advance__outstanding_balance'):
+                deid = str(ded['employee_id'])
+                if ded['deduction_type'] == PayrollDeductionType.ADVANCE_RECOVERY:
+                    adv_deductions_by_emp[deid].append(ded)
+                else:
+                    deductions_by_emp[deid].append(ded)
+
+            statutory_schemes = list(StatutoryScheme.objects.filter(
+                company=company, is_active=True, is_deleted=False
+            ))
+            if statutory_schemes:
+                scheme_ids = [s.id for s in statutory_schemes]
+                for rule in StatutoryRule.objects.filter(
+                    company=company, scheme_id__in=scheme_ids,
+                    effective_from__lte=period_end, is_deleted=False
+                ).filter(
+                    Q(effective_to__isnull=True) | Q(effective_to__gte=period_start)
+                ).order_by('-effective_from'):
+                    if rule.scheme_id not in stat_rules_by_scheme:
+                        stat_rules_by_scheme[rule.scheme_id] = rule
+
+                for rh in StatutorySchemeRateHistory.objects.filter(
+                    company=company, scheme_id__in=scheme_ids,
+                    effective_from__lte=period_end, is_deleted=False
+                ).filter(
+                    Q(effective_to__isnull=True) | Q(effective_to__gte=period_end)
+                ).order_by('-effective_from'):
+                    if rh.scheme_id not in stat_hist_by_scheme:
+                        stat_hist_by_scheme[rh.scheme_id] = rh
+
+                for enr in EmployeeStatutoryEnrollment.objects.filter(
+                    company=company, employee_id__in=eval_emp_ids,
+                    scheme_id__in=scheme_ids, is_deleted=False
+                ):
+                    key = (str(enr.employee_id), enr.scheme_id)
+                    if key not in stat_enroll_by_emp_scheme:
+                        stat_enroll_by_emp_scheme[key] = enr
 
         rows = []
         total_gross = Decimal('0.00')
@@ -2299,32 +2459,23 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             if not emp:
                 continue
 
-            emp_dps = dp_by_emp.get(eid, [])
-            present_days = 0
-            ot_shifts = 0
-            raw_duty_earnings = Decimal('0.00')
-            raw_ot_earnings = Decimal('0.00')
-            for dp in emp_dps:
-                amt = Decimal(str(dp.payable_amount or 0))
-                if dp.duty_type == DutyType.OVERTIME or str(dp.attendance_status or '').upper() in ['OVERTIME', 'O', 'OVERTIME_DOZING', 'OD']:
-                    ot_shifts += 1
-                    raw_ot_earnings += amt
-                else:
-                    if str(dp.attendance_status or '').upper() not in [AttendanceStatus.ABSENT, 'ABSENT', 'A', AttendanceStatus.UNPAID_LEAVE]:
-                        present_days += 1
-                    raw_duty_earnings += amt
+            dp_st = dp_stats_by_emp.get(eid)
+            present_days = dp_st['present_days'] if dp_st else 0
+            ot_shifts = dp_st['ot_shifts'] if dp_st else 0
+            raw_duty_earnings = dp_st['raw_duty_earnings'] if dp_st else Decimal('0.00')
+            raw_ot_earnings = dp_st['raw_ot_earnings'] if dp_st else Decimal('0.00')
 
             snap_pair = snaps_by_emp.get(eid)
             calc = existing_calcs.get(eid)
 
             if snap_pair:
                 integ, snap = snap_pair
-                gross = Decimal(str(snap.gross_earnings or 0)).quantize(Decimal('0.01'))
-                ot_amt = Decimal(str(snap.overtime_pay or 0)).quantize(Decimal('0.01'))
-                allowances = Decimal(str(snap.allowances or 0)).quantize(Decimal('0.01'))
-                deductions = (Decimal(str(snap.deductions or 0)) + Decimal(str(snap.tax_amount or 0))).quantize(Decimal('0.01'))
-                adv_rec = Decimal(str(snap.advance_recovery or 0)).quantize(Decimal('0.01'))
-                net_salary = Decimal(str(snap.net_salary or 0)).quantize(Decimal('0.01'))
+                gross = _q2(snap.gross_earnings)
+                ot_amt = _q2(snap.overtime_pay)
+                allowances = _q2(snap.allowances)
+                deductions = (_q2(snap.deductions) + _q2(snap.tax_amount)).quantize(Decimal('0.01'))
+                adv_rec = _q2(snap.advance_recovery)
+                net_salary = _q2(snap.net_salary)
                 duty_earnings = max(Decimal('0.00'), gross - ot_amt - allowances).quantize(Decimal('0.01'))
                 payment_status = snap.payment_status
                 is_finalized_emp = True
@@ -2335,6 +2486,24 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                 batch_no = bl.batch.batch_number if (bl and bl.batch) else ''
                 paid_at = bl.processed_at.isoformat() if (bl and bl.processed_at) else None
                 blockers = []
+            elif calc and calc.is_frozen:
+                all_finalized = False
+                is_finalized_emp = False
+                snapshot_id = None
+                integ_id = None
+                payment_status = 'UNPAID'
+                pay_ref = ''
+                batch_no = ''
+                paid_at = None
+                duty_earnings = _q2(calc.duty_earnings)
+                ot_amt = _q2(calc.total_ot_amount)
+                allowances = (_q2(calc.allowances_amount) + _q2(calc.bonuses_amount) + _q2(calc.other_additions_amount)).quantize(Decimal('0.01'))
+                gross = _q2(calc.gross_earnings)
+                deductions = _q2(calc.total_deductions)
+                adv_rec = _q2(calc.advance_recovery_amount)
+                net_salary = _q2(calc.net_payable)
+                present_days = calc.duty_days_count or present_days
+                blockers = list(calc.blocking_reasons or []) if calc.has_blockers else []
             else:
                 all_finalized = False
                 is_finalized_emp = False
@@ -2345,39 +2514,121 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                 batch_no = ''
                 paid_at = None
 
-                # Compute live authoritative calculation using PayrollRulesService (if not frozen)
-                if not calc or not calc.is_frozen:
-                    try:
-                        calc = PayrollRulesService.calculate_employee_payroll(
-                            company=company,
-                            employee=emp,
-                            period_start=period_start,
-                            period_end=period_end,
-                            user=request.user,
-                            force_recalculate=True
-                        )
-                    except Exception:
-                        calc = existing_calcs.get(eid)
+                # Live read-only in-memory calculation matching PayrollRulesService invariants
+                blockers = list(dp_st['blockers']) if dp_st else []
+                duty_earnings = _q2(raw_duty_earnings)
+                comp_assignment = comp_by_emp.get(eid)
+                if not comp_assignment and present_days == 0:
+                    blockers.append("No active salary assignment or duty attendance found for employee.")
 
-                if calc:
-                    duty_earnings = Decimal(str(calc.duty_earnings or 0)).quantize(Decimal('0.01'))
-                    ot_amt = Decimal(str(calc.total_ot_amount or 0)).quantize(Decimal('0.01'))
-                    allowances = (Decimal(str(calc.allowances_amount or 0)) + Decimal(str(calc.bonuses_amount or 0)) + Decimal(str(calc.other_additions_amount or 0))).quantize(Decimal('0.01'))
-                    gross = Decimal(str(calc.gross_earnings or 0)).quantize(Decimal('0.01'))
-                    deductions = Decimal(str(calc.total_deductions or 0)).quantize(Decimal('0.01'))
-                    adv_rec = Decimal(str(calc.advance_recovery_amount or 0)).quantize(Decimal('0.01'))
-                    net_salary = Decimal(str(calc.net_payable or 0)).quantize(Decimal('0.01'))
-                    present_days = calc.duty_days_count or present_days
-                    blockers = list(calc.blocking_reasons or []) if calc.has_blockers else []
-                else:
-                    duty_earnings = raw_duty_earnings.quantize(Decimal('0.01'))
-                    ot_amt = raw_ot_earnings.quantize(Decimal('0.01'))
-                    allowances = Decimal('0.00')
-                    gross = (duty_earnings + ot_amt).quantize(Decimal('0.01'))
-                    deductions = Decimal('0.00')
-                    adv_rec = Decimal('0.00')
-                    net_salary = gross
-                    blockers = []
+                single_ot_amt = Decimal('0.00')
+                double_ot_amt = Decimal('0.00')
+                for ot in overtimes_by_emp.get(eid, ()):
+                    hrs = _q2(ot.hours)
+                    is_double = (ot.ot_type == OvertimeType.DOUBLE_OT)
+                    if ot.rate_override and ot.rate_override > Decimal('0.00'):
+                        ot_rate = _q2(ot.rate_override)
+                    elif comp_assignment and is_double and comp_assignment.double_ot_rate and comp_assignment.double_ot_rate > Decimal('0.00'):
+                        ot_rate = _q2(comp_assignment.double_ot_rate)
+                    elif comp_assignment and (not is_double) and comp_assignment.single_ot_rate and comp_assignment.single_ot_rate > Decimal('0.00'):
+                        ot_rate = _q2(comp_assignment.single_ot_rate)
+                    elif comp_assignment and is_double and comp_assignment.single_ot_rate and comp_assignment.single_ot_rate > Decimal('0.00') and (not (policy and getattr(policy, 'default_double_ot_rate', None))):
+                        ot_rate = _q2(comp_assignment.single_ot_rate * Decimal('2.00'))
+                    elif policy and is_double and getattr(policy, 'default_double_ot_rate', None) and policy.default_double_ot_rate > Decimal('0.00'):
+                        ot_rate = _q2(policy.default_double_ot_rate)
+                    elif policy and (not is_double) and getattr(policy, 'default_single_ot_rate', None) and policy.default_single_ot_rate > Decimal('0.00'):
+                        ot_rate = _q2(policy.default_single_ot_rate)
+                    elif policy and getattr(policy, 'enable_policy_ot_fallback', False) and comp_assignment and comp_assignment.base_salary > Decimal('0.00'):
+                        std_hours = policy.standard_monthly_hours if policy.standard_monthly_hours > Decimal('0.00') else Decimal('160.00')
+                        mult = policy.overtime_multiplier * (Decimal('2.00') if is_double else Decimal('1.00'))
+                        ot_rate = _q2((comp_assignment.base_salary / std_hours) * mult)
+                    else:
+                        ot_rate = Decimal('0.00')
+                        ot_type_name = "Double OT" if is_double else "Single OT"
+                        blockers.append(f"Missing overtime rate for {ot_type_name} on {ot.date}.")
+
+                    amt = _q2(hrs * ot_rate)
+                    if is_double:
+                        double_ot_amt += amt
+                    else:
+                        single_ot_amt += amt
+
+                ot_amt = _q2(single_ot_amt + double_ot_amt + raw_ot_earnings)
+
+                allowances_sum = Decimal('0.00')
+                bonuses_sum = Decimal('0.00')
+                other_add_sum = Decimal('0.00')
+                for add in additions_by_emp.get(eid, ()):
+                    a_amt = _q2(add['amount'])
+                    if add['addition_type'] == PayrollAdditionType.ALLOWANCE:
+                        allowances_sum += a_amt
+                    elif add['addition_type'] == PayrollAdditionType.BONUS:
+                        bonuses_sum += a_amt
+                    else:
+                        other_add_sum += a_amt
+                allowances = _q2(allowances_sum + bonuses_sum + other_add_sum)
+
+                gross = _q2(duty_earnings + ot_amt + allowances)
+
+                stat_total = Decimal('0.00')
+                if statutory_schemes:
+                    stat_base = duty_earnings if duty_earnings > Decimal('0.00') else (comp_assignment.base_salary if comp_assignment else Decimal('0.00'))
+                    for scheme in statutory_schemes:
+                        enr = stat_enroll_by_emp_scheme.get((eid, scheme.id))
+                        if not enr or not enr.is_enabled or not enr.is_active:
+                            continue
+                        if not enr.use_company_default and (enr.employee_rate_override is not None or enr.employer_rate_override is not None):
+                            emp_rate = enr.employee_rate_override if enr.employee_rate_override is not None else Decimal('0.00')
+                        else:
+                            rh = stat_hist_by_scheme.get(scheme.id)
+                            emp_rate = rh.employee_default_rate if rh else scheme.employee_default_rate
+
+                        rule = stat_rules_by_scheme.get(scheme.id)
+                        if rule and rule.is_flat_amount:
+                            sch_emp_amt = _q2(rule.employee_rate if emp_rate == 0 else emp_rate)
+                        else:
+                            basis = stat_base
+                            if rule and rule.wage_ceiling and basis > rule.wage_ceiling:
+                                basis = rule.wage_ceiling
+                            if rule and rule.wage_floor and basis < rule.wage_floor:
+                                basis = rule.wage_floor
+                            sch_emp_amt = _q2(basis * (emp_rate / Decimal('100.00')))
+                        stat_total += sch_emp_amt
+
+                other_ded_sum = Decimal('0.00')
+                for ded in deductions_by_emp.get(eid, ()):
+                    other_ded_sum += _q2(ded['amount'])
+
+                adv_rec = Decimal('0.00')
+                explicit_adv_ids = set()
+                for adv_ded in adv_deductions_by_emp.get(eid, ()):
+                    req_amt = _q2(adv_ded['amount'])
+                    adv_id = adv_ded['advance_id']
+                    if adv_id:
+                        explicit_adv_ids.add(adv_id)
+                        out_bal = Decimal(str(adv_ded['advance__outstanding_balance'] or 0))
+                        if out_bal <= Decimal('0.00'):
+                            blockers.append(f"Advance {adv_ded['advance__advance_number']} has zero outstanding balance.")
+                            continue
+                        if req_amt > out_bal:
+                            blockers.append(f"Advance recovery exceeds outstanding balance for {adv_ded['advance__advance_number']}.")
+                            adv_rec += out_bal
+                        else:
+                            adv_rec += req_amt
+                    else:
+                        adv_rec += req_amt
+
+                for a_id, _a_num, a_bal in auto_adv_by_emp.get(eid, ()):
+                    if a_id in explicit_adv_ids:
+                        continue
+                    recoverable = min(a_bal, gross - adv_rec)
+                    if recoverable > Decimal('0.00'):
+                        adv_rec += _q2(recoverable)
+
+                deductions = _q2(stat_total + other_ded_sum + adv_rec)
+                net_salary = _q2(gross - deductions)
+                if net_salary < Decimal('0.00'):
+                    blockers.append(f"Net payable salary is negative (Rs {net_salary}).")
 
             total_gross += gross
             total_deductions += deductions
@@ -3416,6 +3667,23 @@ class ExecutiveFinanceDashboardViewSet(BaseFinanceViewSet):
     """
     queryset = JournalEntry.objects.none()
     serializer_class = JournalEntrySerializer
+
+    @action(detail=False, methods=['get'])
+    def bundle(self, request):
+        company = self._get_company(request)
+        s_date_str = request.query_params.get('start_date')
+        e_date_str = request.query_params.get('end_date')
+
+        from datetime import datetime
+        start_date = datetime.strptime(s_date_str, '%Y-%m-%d').date() if s_date_str else None
+        end_date = datetime.strptime(e_date_str, '%Y-%m-%d').date() if e_date_str else None
+
+        from finance.services.executive_dashboard_service import ExecutiveFinanceDashboardService
+        try:
+            data = ExecutiveFinanceDashboardService.get_dashboard_bundle(company, start_date=start_date, end_date=end_date)
+            return Response(data)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'])
     def overview(self, request):

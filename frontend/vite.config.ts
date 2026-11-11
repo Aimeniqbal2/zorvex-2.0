@@ -106,6 +106,17 @@ function zorvexLandingPlugin(): Plugin {
 export default defineConfig({
   base: '/app/',
   plugins: [react(), zorvexLandingPlugin()],
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-utils': ['axios', 'zustand', 'lucide-react'],
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

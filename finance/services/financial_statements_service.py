@@ -113,25 +113,39 @@ class FinancialStatementsService:
 
     @staticmethod
     def _calculate_pl_period(company, start_date, end_date, **dimensions) -> Dict[str, Any]:
-        lines = FinancialStatementsService.get_posted_lines(company, start_date, end_date, **dimensions)
+        # SQL GROUP BY account instead of hydrating all JournalEntryLine rows
+        base_qs = JournalEntryLine.objects.filter(
+            company=company,
+            journal_entry__status='POSTED',
+            is_deleted=False
+        )
+        if start_date:
+            base_qs = base_qs.filter(journal_entry__posting_date__gte=start_date)
+        if end_date:
+            base_qs = base_qs.filter(journal_entry__posting_date__lte=end_date)
+        if dimensions.get('cost_center_id'):
+            base_qs = base_qs.filter(cost_center_id=dimensions['cost_center_id'])
+        if dimensions.get('profit_center_id'):
+            base_qs = base_qs.filter(profit_center_id=dimensions['profit_center_id'])
+        if dimensions.get('client_id') or dimensions.get('crm_entity_id'):
+            base_qs = base_qs.filter(crm_entity_id=dimensions.get('client_id') or dimensions.get('crm_entity_id'))
+        if dimensions.get('contract_id'):
+            base_qs = base_qs.filter(contract_id=dimensions['contract_id'])
+        if dimensions.get('site_id'):
+            base_qs = base_qs.filter(site_id=dimensions['site_id'])
+        if dimensions.get('department'):
+            base_qs = base_qs.filter(cost_center__department__icontains=dimensions['department'])
 
-        # Aggregate net debit and credit per account
-        account_totals = {}
-        for line in lines:
-            acc = line.account
-            acc_id = str(acc.id)
-            if acc_id not in account_totals:
-                account_totals[acc_id] = {
-                    'account': acc,
-                    'account_code': acc.account_code,
-                    'account_name': acc.account_name,
-                    'account_type': acc.account_type,
-                    'parent_id': str(acc.parent_id) if acc.parent_id else None,
-                    'debit': Decimal('0.0000'),
-                    'credit': Decimal('0.0000'),
-                }
-            account_totals[acc_id]['debit'] += line.debit
-            account_totals[acc_id]['credit'] += line.credit
+        agg_rows = base_qs.values(
+            'account_id',
+            'account__account_code',
+            'account__account_name',
+            'account__account_type',
+            'account__parent_id',
+        ).annotate(
+            debit=Sum('debit'),
+            credit=Sum('credit'),
+        )
 
         # Grouping categories
         revenue_lines = []
@@ -163,22 +177,25 @@ class FinancialStatementsService:
         total_other_income = Decimal('0.0000')
         total_other_expenses = Decimal('0.0000')
 
-        for item in account_totals.values():
-            acc = item['account']
-            acc_type = str(acc.account_type).upper()
-            code = acc.account_code
-            name_lower = acc.account_name.lower()
+        for item in agg_rows:
+            acc_id_str = str(item['account_id'])
+            acc_type = str(item['account__account_type'] or '').upper()
+            code = item['account__account_code'] or ''
+            acc_name = item['account__account_name'] or ''
+            name_lower = acc_name.lower()
+            item_debit = item['debit'] or Decimal('0.0000')
+            item_credit = item['credit'] or Decimal('0.0000')
 
-            net_credit = item['credit'] - item['debit']  # Revenue/Income normal balance
-            net_debit = item['debit'] - item['credit']   # Expense/COGS normal balance
+            net_credit = item_credit - item_debit  # Revenue/Income normal balance
+            net_debit = item_debit - item_credit   # Expense/COGS normal balance
 
             if acc_type in ['REVENUE', 'INCOME']:
                 amount = net_credit
                 if amount != 0:
                     revenue_lines.append({
-                        'account_id': str(acc.id),
+                        'account_id': acc_id_str,
                         'account_code': code,
-                        'account_name': acc.account_name,
+                        'account_name': acc_name,
                         'amount': amount
                     })
                     total_revenue += amount
@@ -201,9 +218,9 @@ class FinancialStatementsService:
                 amount = net_debit
                 if amount != 0:
                     cogs_lines.append({
-                        'account_id': str(acc.id),
+                        'account_id': acc_id_str,
                         'account_code': code,
-                        'account_name': acc.account_name,
+                        'account_name': acc_name,
                         'amount': amount
                     })
                     total_cogs += amount
@@ -228,9 +245,9 @@ class FinancialStatementsService:
                 amount = net_debit
                 if amount != 0:
                     expense_lines.append({
-                        'account_id': str(acc.id),
+                        'account_id': acc_id_str,
                         'account_code': code,
-                        'account_name': acc.account_name,
+                        'account_name': acc_name,
                         'amount': amount
                     })
                     total_expenses += amount
@@ -239,9 +256,9 @@ class FinancialStatementsService:
                 amount = net_credit
                 if amount != 0:
                     other_income_lines.append({
-                        'account_id': str(acc.id),
+                        'account_id': acc_id_str,
                         'account_code': code,
-                        'account_name': acc.account_name,
+                        'account_name': acc_name,
                         'amount': amount
                     })
                     total_other_income += amount
@@ -250,9 +267,9 @@ class FinancialStatementsService:
                 amount = net_debit
                 if amount != 0:
                     other_expense_lines.append({
-                        'account_id': str(acc.id),
+                        'account_id': acc_id_str,
                         'account_code': code,
-                        'account_name': acc.account_name,
+                        'account_name': acc_name,
                         'amount': amount
                     })
                     total_other_expenses += amount
@@ -322,26 +339,35 @@ class FinancialStatementsService:
         if not as_of_date:
             as_of_date = timezone.now().date()
 
-        # Cumulative POSTED lines up to as_of_date
-        lines = FinancialStatementsService.get_posted_lines(
-            company, start_date=None, end_date=as_of_date, **dimensions
+        # Cumulative POSTED lines aggregated directly in SQL by account
+        bs_qs = JournalEntryLine.objects.filter(
+            company=company,
+            journal_entry__status='POSTED',
+            journal_entry__posting_date__lte=as_of_date,
+            is_deleted=False
         )
+        if dimensions.get('cost_center_id'):
+            bs_qs = bs_qs.filter(cost_center_id=dimensions['cost_center_id'])
+        if dimensions.get('profit_center_id'):
+            bs_qs = bs_qs.filter(profit_center_id=dimensions['profit_center_id'])
+        if dimensions.get('client_id') or dimensions.get('crm_entity_id'):
+            bs_qs = bs_qs.filter(crm_entity_id=dimensions.get('client_id') or dimensions.get('crm_entity_id'))
+        if dimensions.get('contract_id'):
+            bs_qs = bs_qs.filter(contract_id=dimensions['contract_id'])
+        if dimensions.get('site_id'):
+            bs_qs = bs_qs.filter(site_id=dimensions['site_id'])
+        if dimensions.get('department'):
+            bs_qs = bs_qs.filter(cost_center__department__icontains=dimensions['department'])
 
-        account_balances = {}
-        for line in lines:
-            acc = line.account
-            acc_id = str(acc.id)
-            if acc_id not in account_balances:
-                account_balances[acc_id] = {
-                    'account': acc,
-                    'account_code': acc.account_code,
-                    'account_name': acc.account_name,
-                    'account_type': acc.account_type,
-                    'debit': Decimal('0.0000'),
-                    'credit': Decimal('0.0000'),
-                }
-            account_balances[acc_id]['debit'] += line.debit
-            account_balances[acc_id]['credit'] += line.credit
+        bs_agg_rows = bs_qs.values(
+            'account_id',
+            'account__account_code',
+            'account__account_name',
+            'account__account_type',
+        ).annotate(
+            debit=Sum('debit'),
+            credit=Sum('credit'),
+        )
 
         # Assets breakdown
         cash_bank_lines = []
@@ -378,20 +404,23 @@ class FinancialStatementsService:
         total_retained_earnings = Decimal('0.0000')
         total_equity_base = Decimal('0.0000')
 
-        for item in account_balances.values():
-            acc = item['account']
-            acc_type = str(acc.account_type).upper()
-            code = acc.account_code
-            name_lower = acc.account_name.lower()
+        for item in bs_agg_rows:
+            acc_id_str = str(item['account_id'])
+            acc_type = str(item['account__account_type'] or '').upper()
+            code = item['account__account_code'] or ''
+            acc_name = item['account__account_name'] or ''
+            name_lower = acc_name.lower()
+            item_debit = item['debit'] or Decimal('0.0000')
+            item_credit = item['credit'] or Decimal('0.0000')
 
-            net_debit = item['debit'] - item['credit']   # Asset normal
-            net_credit = item['credit'] - item['debit']  # Liability/Equity normal
+            net_debit = item_debit - item_credit   # Asset normal
+            net_credit = item_credit - item_debit  # Liability/Equity normal
 
             if acc_type == 'ASSET':
                 amount = net_debit
                 if amount == 0:
                     continue
-                row = {'account_id': str(acc.id), 'account_code': code, 'account_name': acc.account_name, 'amount': amount}
+                row = {'account_id': acc_id_str, 'account_code': code, 'account_name': acc_name, 'amount': amount}
                 total_assets += amount
 
                 if code.startswith('11') or 'bank' in name_lower or 'cash' in name_lower or 'petty' in name_lower:
@@ -417,7 +446,7 @@ class FinancialStatementsService:
                 amount = net_credit
                 if amount == 0:
                     continue
-                row = {'account_id': str(acc.id), 'account_code': code, 'account_name': acc.account_name, 'amount': amount}
+                row = {'account_id': acc_id_str, 'account_code': code, 'account_name': acc_name, 'amount': amount}
                 total_liabilities += amount
 
                 if code.startswith('21') or 'payable' in name_lower and 'vendor' in name_lower or 'ap' in name_lower:
@@ -437,7 +466,7 @@ class FinancialStatementsService:
                 amount = net_credit
                 if amount == 0:
                     continue
-                row = {'account_id': str(acc.id), 'account_code': code, 'account_name': acc.account_name, 'amount': amount}
+                row = {'account_id': acc_id_str, 'account_code': code, 'account_name': acc_name, 'amount': amount}
                 total_equity_base += amount
 
                 if code.startswith('32') or 'retained' in name_lower:
@@ -524,25 +553,23 @@ class FinancialStatementsService:
 
         cash_acc_ids = list(cash_accounts)
 
-        # 1. Opening Cash (all POSTED cash lines before start_date)
+        # 1. Opening Cash (single SQL aggregate)
         opening_cash = Decimal('0.0000')
-        if start_date:
-            opening_lines = JournalEntryLine.objects.filter(
+        if start_date and cash_acc_ids:
+            open_agg = JournalEntryLine.objects.filter(
                 company=company, journal_entry__status='POSTED', is_deleted=False,
                 account_id__in=cash_acc_ids, journal_entry__posting_date__lt=start_date
-            )
-            for l in opening_lines:
-                opening_cash += (l.debit - l.credit)
+            ).aggregate(d=Sum('debit'), c=Sum('credit'))
+            opening_cash = (open_agg['d'] or Decimal('0.0000')) - (open_agg['c'] or Decimal('0.0000'))
 
         # 2. Period Cash Movement Lines
-        period_lines = JournalEntryLine.objects.filter(
+        period_lines = list(JournalEntryLine.objects.filter(
             company=company, journal_entry__status='POSTED', is_deleted=False,
             account_id__in=cash_acc_ids
-        )
-        if start_date:
-            period_lines = period_lines.filter(journal_entry__posting_date__gte=start_date)
-        if end_date:
-            period_lines = period_lines.filter(journal_entry__posting_date__lte=end_date)
+        ).filter(
+            **({'journal_entry__posting_date__gte': start_date} if start_date else {}),
+            **({'journal_entry__posting_date__lte': end_date} if end_date else {}),
+        ).select_related('journal_entry'))
 
         operating_cash_flow = Decimal('0.0000')
         investing_cash_flow = Decimal('0.0000')
@@ -552,21 +579,26 @@ class FinancialStatementsService:
         investing_details = []
         financing_details = []
 
+        # Bulk-load offset accounts for all matching journal entries in 1 query (eliminates N+1)
+        je_ids = [l.journal_entry_id for l in period_lines]
+        offset_by_je = {}
+        if je_ids:
+            for ol in JournalEntryLine.objects.filter(
+                journal_entry_id__in=je_ids, is_deleted=False
+            ).exclude(account_id__in=cash_acc_ids).select_related('account'):
+                if ol.journal_entry_id not in offset_by_je:
+                    offset_by_je[ol.journal_entry_id] = ol
+
         # Analyze each cash line offset
-        for l in period_lines.select_related('journal_entry'):
+        for l in period_lines:
             net_movement = l.debit - l.credit
             je = l.journal_entry
-
-            # Look for offset lines in same journal entry
-            offsets = JournalEntryLine.objects.filter(
-                journal_entry=je, is_deleted=False
-            ).exclude(account_id__in=cash_acc_ids).select_related('account')
 
             category = CashFlowCategory.OPERATING
             offset_acc_name = "Operational Transaction"
 
-            if offsets.exists():
-                offset_l = offsets.first()
+            offset_l = offset_by_je.get(je.id)
+            if offset_l:
                 offset_acc = offset_l.account
                 offset_acc_name = offset_acc.account_name
 
@@ -603,12 +635,12 @@ class FinancialStatementsService:
         net_cash_movement = operating_cash_flow + investing_cash_flow + financing_cash_flow
         closing_cash = opening_cash + net_cash_movement
 
-        # Actual closing cash verification across DB
-        closing_lines = JournalEntryLine.objects.filter(
+        # Actual closing cash verification across DB (single SQL aggregate)
+        actual_agg = JournalEntryLine.objects.filter(
             company=company, journal_entry__status='POSTED', is_deleted=False,
             account_id__in=cash_acc_ids, journal_entry__posting_date__lte=end_date
-        )
-        actual_closing_cash = sum((l.debit - l.credit) for l in closing_lines)
+        ).aggregate(d=Sum('debit'), c=Sum('credit'))
+        actual_closing_cash = (actual_agg['d'] or Decimal('0.0000')) - (actual_agg['c'] or Decimal('0.0000'))
 
         is_reconciled = abs(closing_cash - actual_closing_cash) < Decimal('0.0100')
 

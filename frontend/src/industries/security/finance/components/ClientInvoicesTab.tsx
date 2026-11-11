@@ -13,9 +13,12 @@ import {
   fetchCRMBillingPreview,
   autoSyncCRMInvoices,
   switchInvoiceCalculationMode,
-  approveAllDraftInvoices
+  approveAllDraftInvoices,
+  setInvoiceTemplateMode
 } from '../api';
 import { CRMInvoicingModal } from './CRMInvoicingModal';
+import { InvoiceDocumentSheet } from './InvoiceDocumentSheet';
+import { InvoiceTemplateEditorModal } from './InvoiceTemplateEditorModal';
 
 export const ClientInvoicesTab: React.FC = () => {
   const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
@@ -28,8 +31,9 @@ export const ClientInvoicesTab: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const initialAutoSyncedRef = useRef<boolean>(false);
 
-  // CRM Invoicing Modal
+  // CRM Invoicing & Template Editor Modals
   const [isCRMModalOpen, setIsCRMModalOpen] = useState<boolean>(false);
+  const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState<boolean>(false);
 
   // Action Loading
   const [actionLoading, setActionLoading] = useState<boolean>(false);
@@ -38,6 +42,8 @@ export const ClientInvoicesTab: React.FC = () => {
   const [previewInvoiceId, setPreviewInvoiceId] = useState<string | null>(null);
   const [previewContext, setPreviewContext] = useState<InvoicePreviewContext | null>(null);
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+  const [switchingFormat, setSwitchingFormat] = useState<boolean>(false);
+  const printAreaRef = useRef<HTMLDivElement | null>(null);
 
   // Email Modal
   const [emailInvoiceId, setEmailInvoiceId] = useState<string | null>(null);
@@ -46,43 +52,71 @@ export const ClientInvoicesTab: React.FC = () => {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
 
-  const loadInvoices = async (runInitialAutoSync = false) => {
-    setLoading(true);
+  const loadInvoices = async (runInitialAutoSync = false, onlyPreview = false) => {
+    if (!onlyPreview) setLoading(true);
     setError(null);
     try {
       const previewMonthArg = selectedMonth !== 'ALL' ? selectedMonth : 'AUTO';
+      if (onlyPreview) {
+        const prevData = await fetchCRMBillingPreview(previewMonthArg).catch(() => null);
+        if (prevData) setCrmPreview(prevData);
+        return;
+      }
+
       const [invData, prevData] = await Promise.all([
-        fetchClientInvoices(),
+        fetchClientInvoices({ page_size: 1000 }),
         fetchCRMBillingPreview(previewMonthArg).catch(() => null)
       ]);
-      let finalInvoices = invData;
-      let finalPreview = prevData;
+      setInvoices(invData);
+      if (prevData) setCrmPreview(prevData);
+      setLoading(false);
 
-      // On first open, automatically draft unbilled last-month/current-month CRM & Attendance invoices
+      const crmMismatchDraftExists = Boolean(
+        prevData?.permanent_services?.some((p) => {
+          if (!p.existing_invoice_id || p.existing_invoice_status !== 'DRAFT') return false;
+          const inv = invData.find((i) => String(i.id) === String(p.existing_invoice_id));
+          if (!inv || (inv.notes || '').includes('[MODE:ATTENDANCE_RATE]')) return false;
+          const expected = Number(p.crm_total_invoice_amount ?? p.contract_monthly_rate ?? 0);
+          return expected > 0 && Math.abs(Number(inv.grand_total || 0) - expected) > 0.5;
+        })
+      );
+
+      // Non-blocking first-open sync: render existing invoices immediately and sync unbilled or mismatched CRM drafts
       if (
         runInitialAutoSync &&
         !initialAutoSyncedRef.current &&
         prevData &&
-        ((prevData.summary?.unbilled_locations_count || 0) > 0 || (prevData.summary?.unbilled_temp_count || 0) > 0)
+        (
+          (prevData.summary?.unbilled_locations_count || 0) > 0 ||
+          (prevData.summary?.unbilled_temp_count || 0) > 0 ||
+          crmMismatchDraftExists
+        )
       ) {
         initialAutoSyncedRef.current = true;
+        setSyncingCRM(true);
         try {
           const syncRes = await autoSyncCRMInvoices({
             months: [prevData.previous_month, prevData.current_month].filter(Boolean),
             calculation_mode: 'CONTRACT_RATE',
             initial_status: 'DRAFT'
           });
-          if (syncRes.created_count > 0) {
-            finalInvoices = await fetchClientInvoices();
-            finalPreview = await fetchCRMBillingPreview(previewMonthArg).catch(() => prevData);
+          if (syncRes.created_count > 0 || (syncRes.updated_count || 0) > 0) {
+            const [refInv, refPrev] = await Promise.all([
+              fetchClientInvoices({
+                billing_month: selectedMonth !== 'ALL' ? selectedMonth : undefined,
+                page_size: 1000
+              }),
+              fetchCRMBillingPreview(previewMonthArg).catch(() => prevData)
+            ]);
+            setInvoices(refInv);
+            if (refPrev) setCrmPreview(refPrev);
           }
         } catch {
           // Non-fatal: keep preview visible so user can trigger manual sync
+        } finally {
+          setSyncingCRM(false);
         }
       }
-
-      setInvoices(finalInvoices);
-      if (finalPreview) setCrmPreview(finalPreview);
     } catch (err: any) {
       setError(err?.response?.data?.error || err?.response?.data?.detail || err.message || 'Failed to load client invoices.');
     } finally {
@@ -91,7 +125,8 @@ export const ClientInvoicesTab: React.FC = () => {
   };
 
   useEffect(() => {
-    loadInvoices(true);
+    const isInitial = !initialAutoSyncedRef.current && invoices.length === 0;
+    loadInvoices(isInitial, !isInitial);
   }, [selectedMonth]);
 
   const handleSyncCRMMonth = async (mode: 'CONTRACT_RATE' | 'ATTENDANCE_RATE' = 'CONTRACT_RATE') => {
@@ -107,9 +142,9 @@ export const ClientInvoicesTab: React.FC = () => {
       });
       await loadInvoices(false);
       alert(
-        res.created_count > 0
-          ? `Prepared ${res.created_count} Draft invoice(s) from CRM & Operations for ${res.months_synced.join(', ')}. Review and click "Approve & Issue" to post to Receivables.`
-          : `All active client locations and approved temporary services for ${res.months_synced.join(', ')} are already invoiced.`
+        res.created_count > 0 || (res.updated_count || 0) > 0
+          ? `Synced CRM & Operations for ${res.months_synced.join(', ')}: ${res.created_count} created, ${res.updated_count || 0} draft(s) updated to exact CRM rates.`
+          : `All active client locations and approved temporary services for ${res.months_synced.join(', ')} match CRM rates.`
       );
     } catch (err: any) {
       alert(err?.response?.data?.error || err?.response?.data?.detail || err.message || 'Failed to sync CRM invoices.');
@@ -279,6 +314,25 @@ export const ClientInvoicesTab: React.FC = () => {
               <span>Approve & Issue All Drafts ({draftInvoicesCount})</span>
             </button>
           )}
+          <button
+            onClick={() => setIsTemplateEditorOpen(true)}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border, #cbd5e1)',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <i className="bx bx-edit-alt" style={{ fontSize: '16px', color: '#0284c7' }}></i>
+            <span>Edit Templates</span>
+          </button>
           <button
             onClick={() => handleSyncCRMMonth('CONTRACT_RATE')}
             disabled={syncingCRM}
@@ -460,6 +514,10 @@ export const ClientInvoicesTab: React.FC = () => {
             <option value="CANCELLED">Cancelled</option>
           </select>
         </div>
+
+        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+          Showing {filteredInvoices.length} of {invoices.length} invoice(s)
+        </div>
       </div>
 
       {/* Invoices List Table */}
@@ -530,7 +588,37 @@ export const ClientInvoicesTab: React.FC = () => {
                     {inv.due_date || '—'}
                   </td>
                   <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--color-text)' }}>
-                    PKR {Number(inv.grand_total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    <div>PKR {Number(inv.grand_total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                    {(() => {
+                      const isCheque = (inv.notes || '').includes('[FMT:CHEQUE]') || (!(inv.notes || '').includes('[FMT:CASH]') && Number(inv.tax_amount || 0) > 0);
+                      return (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await setInvoiceTemplateMode(inv.id, isCheque ? 'CASH' : 'CHEQUE');
+                              loadInvoices(false);
+                            } catch (err: any) {
+                              alert(err?.response?.data?.error || err.message || 'Failed to update invoice format.');
+                            }
+                          }}
+                          title="Click to switch between Cash (INVOICE) and Cheque (SALES TAX INVOICE) format"
+                          style={{
+                            marginTop: '4px',
+                            padding: '2px 7px',
+                            borderRadius: '10px',
+                            border: 'none',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            background: isCheque ? 'rgba(2, 132, 199, 0.14)' : 'rgba(15, 23, 42, 0.08)',
+                            color: isCheque ? '#0284c7' : '#334155'
+                          }}
+                        >
+                          {isCheque ? 'Cheque / Sales Tax' : 'Cash Invoice'}
+                        </button>
+                      );
+                    })()}
                   </td>
                   <td style={{ padding: '14px 16px' }}>{getStatusBadge(inv.status)}</td>
                   <td style={{ padding: '14px 16px', textAlign: 'right' }}>
@@ -748,18 +836,153 @@ export const ClientInvoicesTab: React.FC = () => {
             }}
           >
             {/* Preview Toolbar */}
-            <div style={{ padding: '14px 24px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div
+              style={{
+                padding: '12px 20px',
+                background: '#f8fafc',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '10px',
+                flexWrap: 'wrap'
+              }}
+            >
               <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e293b' }}>
-                Invoice Preview — {previewContext?.invoice?.invoice_number}
+                Invoice Preview — {previewContext?.invoice?.invoice_number || previewContext?.invoice_number || ''}
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {previewInvoiceId && previewContext && (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      overflow: 'hidden',
+                      background: '#ffffff'
+                    }}
+                  >
+                    <button
+                      type="button"
+                      disabled={switchingFormat}
+                      onClick={async () => {
+                        setSwitchingFormat(true);
+                        try {
+                          const updated = await setInvoiceTemplateMode(previewInvoiceId, 'CASH');
+                          setPreviewContext(updated);
+                          loadInvoices(false);
+                        } catch (err: any) {
+                          alert(err?.response?.data?.error || err.message || 'Failed to switch template format.');
+                        } finally {
+                          setSwitchingFormat(false);
+                        }
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        border: 'none',
+                        background: previewContext.template_mode === 'CASH' ? '#0f172a' : '#ffffff',
+                        color: previewContext.template_mode === 'CASH' ? '#ffffff' : '#334155',
+                        fontWeight: 600,
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cash (INVOICE)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={switchingFormat}
+                      onClick={async () => {
+                        setSwitchingFormat(true);
+                        try {
+                          const updated = await setInvoiceTemplateMode(previewInvoiceId, 'CHEQUE');
+                          setPreviewContext(updated);
+                          loadInvoices(false);
+                        } catch (err: any) {
+                          alert(err?.response?.data?.error || err.message || 'Failed to switch template format.');
+                        } finally {
+                          setSwitchingFormat(false);
+                        }
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        border: 'none',
+                        borderLeft: '1px solid #cbd5e1',
+                        background: previewContext.template_mode === 'CHEQUE' ? '#0284c7' : '#ffffff',
+                        color: previewContext.template_mode === 'CHEQUE' ? '#ffffff' : '#334155',
+                        fontWeight: 600,
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cheque (SALES TAX)
+                    </button>
+                  </div>
+                )}
+
                 <button
-                  onClick={() => window.print()}
-                  style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b', fontWeight: 600, cursor: 'pointer', fontSize: '12px' }}
+                  type="button"
+                  onClick={() => setIsTemplateEditorOpen(true)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#0284c7',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
                 >
-                  🖨 Print / Save as PDF
+                  Edit Template
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = printAreaRef.current;
+                    if (!el) {
+                      window.print();
+                      return;
+                    }
+                    const iframe = document.createElement('iframe');
+                    iframe.style.position = 'fixed';
+                    iframe.style.right = '0';
+                    iframe.style.bottom = '0';
+                    iframe.style.width = '0';
+                    iframe.style.height = '0';
+                    iframe.style.border = '0';
+                    document.body.appendChild(iframe);
+                    const doc = iframe.contentWindow?.document;
+                    if (doc) {
+                      doc.open();
+                      doc.write(
+                        `<!DOCTYPE html><html><head><title>Invoice ${previewContext?.invoice?.invoice_number || previewContext?.invoice_number || ''}</title><style>@page{size:A4;margin:10mm;}body{margin:0;background:#fff;color:#0f172a;-webkit-print-color-adjust:exact;print-color-adjust:exact;}</style></head><body>${el.innerHTML}</body></html>`
+                      );
+                      doc.close();
+                      setTimeout(() => {
+                        iframe.contentWindow?.focus();
+                        iframe.contentWindow?.print();
+                        setTimeout(() => document.body.removeChild(iframe), 1000);
+                      }, 150);
+                    }
+                  }}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#0f172a',
+                    color: '#ffffff',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
+                >
+                  Print / Save PDF
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setPreviewInvoiceId(null);
                     setPreviewContext(null);
@@ -772,154 +995,14 @@ export const ClientInvoicesTab: React.FC = () => {
             </div>
 
             {/* Printable Invoice Body */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '36px 40px', background: '#ffffff', fontFamily: "'Segoe UI', Roboto, sans-serif" }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px', background: '#cbd5e1' }}>
               {previewLoading || !previewContext ? (
-                <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>Loading preview...</div>
+                <div style={{ textAlign: 'center', padding: '60px', color: '#334155', background: '#ffffff', borderRadius: '8px' }}>
+                  Loading invoice preview...
+                </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-                  {/* Header Row */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.5px' }}>
-                        {previewContext.company.name}
-                      </h1>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                        {previewContext.company.address || 'Corporate Headquarters'}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        Email: {previewContext.company.email} | Phone: {previewContext.company.phone || '+92 21 111-ZORVEX'}
-                      </div>
-                      {(previewContext.company.ntn || previewContext.company.strn) && (
-                        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
-                          {previewContext.company.ntn && <span>NTN: {previewContext.company.ntn} </span>}
-                          {previewContext.company.strn && <span>| STRN: {previewContext.company.strn}</span>}
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '22px', fontWeight: 800, color: '#0284c7', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                        TAX INVOICE
-                      </div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
-                        {previewContext.invoice.invoice_number}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                        Date: {previewContext.invoice.invoice_date}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        Due Date: {previewContext.invoice.due_date || 'Due on Receipt'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <hr style={{ border: 'none', borderTop: '2px solid #e2e8f0', margin: 0 }} />
-
-                  {/* Billed To & Contract Reference */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                    <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        BILLED TO
-                      </div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
-                        {previewContext.client.name}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
-                        {previewContext.client.billing_address || 'Official Client Address'}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                        {previewContext.client.email || ''}
-                      </div>
-                    </div>
-
-                    <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        BILLING SPECIFICATIONS
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#334155', marginTop: '4px' }}>
-                        Contract Code: <strong>{previewContext.invoice.contract_code}</strong>
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px' }}>
-                        Billing Period: <strong>{previewContext.invoice.period_start} → {previewContext.invoice.period_end}</strong>
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px' }}>
-                        Billing Month: <strong>{previewContext.invoice.billing_month}</strong>
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px' }}>
-                        Payment Terms: <strong>{previewContext.invoice.payment_terms}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Line Items Table */}
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ background: '#0f172a', color: '#ffffff' }}>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Description</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Site</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Qty</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Unit Rate</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Total (PKR)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewContext.lines.map((ln, idx) => (
-                        <tr key={ln.id || idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                          <td style={{ padding: '10px 12px', color: '#0f172a' }}>
-                            <div style={{ fontWeight: 600 }}>{ln.description}</div>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>{ln.line_type.replace('_', ' ')}</div>
-                          </td>
-                          <td style={{ padding: '10px 12px', color: '#475569' }}>{ln.site_name}</td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', color: '#0f172a' }}>
-                            {Number(ln.quantity).toFixed(2)}
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', color: '#0f172a' }}>
-                            {Number(ln.unit_rate).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                            {Number(ln.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  {/* Totals Breakdown */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <div style={{ width: '300px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-                        <span>Subtotal:</span>
-                        <span>PKR {Number(previewContext.invoice.subtotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-                        <span>Sales Tax / Tax:</span>
-                        <span>PKR {Number(previewContext.invoice.tax_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      <hr style={{ border: 'none', borderTop: '1px solid #cbd5e1', margin: '4px 0' }} />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '15px', color: '#0284c7' }}>
-                        <span>Grand Total:</span>
-                        <span>PKR {Number(previewContext.invoice.grand_total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Bank Account Remittance Details */}
-                  {previewContext.bank_details && previewContext.bank_details.bank_name && (
-                    <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
-                      <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: '6px' }}>BANK REMITTANCE DETAILS</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: '#334155' }}>
-                        <div>Bank: <strong>{previewContext.bank_details.bank_name}</strong></div>
-                        <div>Account Title: <strong>{previewContext.bank_details.account_title}</strong></div>
-                        <div>Account No: <strong>{previewContext.bank_details.account_number}</strong></div>
-                        <div>IBAN: <strong>{previewContext.bank_details.iban || '—'}</strong></div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Footer Notes */}
-                  <div style={{ fontSize: '11px', color: '#94a3b8', textAlign: 'center', marginTop: '10px' }}>
-                    Thank you for partnering with {previewContext.company.name}. This is a computer-generated tax invoice and requires no physical signature.
-                  </div>
+                <div ref={printAreaRef} style={{ boxShadow: '0 8px 24px rgba(15,23,42,0.18)', background: '#ffffff' }}>
+                  <InvoiceDocumentSheet context={previewContext} />
                 </div>
               )}
             </div>
@@ -932,6 +1015,22 @@ export const ClientInvoicesTab: React.FC = () => {
         isOpen={isCRMModalOpen}
         onClose={() => setIsCRMModalOpen(false)}
         onSuccess={() => loadInvoices(false)}
+      />
+
+      {/* Multi-Tenant Cash & Cheque Invoice Template Editor Modal */}
+      <InvoiceTemplateEditorModal
+        isOpen={isTemplateEditorOpen}
+        onClose={() => setIsTemplateEditorOpen(false)}
+        onSaved={async () => {
+          if (previewInvoiceId) {
+            try {
+              const updatedCtx = await fetchClientInvoicePreviewContext(previewInvoiceId);
+              setPreviewContext(updatedCtx);
+            } catch {
+              // Ignore if preview closed concurrently
+            }
+          }
+        }}
       />
     </div>
   );

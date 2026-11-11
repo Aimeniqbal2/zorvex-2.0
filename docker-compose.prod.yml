@@ -43,7 +43,7 @@ services:
       dockerfile: Dockerfile
     container_name: zorvex_v2_web
     restart: unless-stopped
-    command: gunicorn erp_core.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+    command: gunicorn erp_core.wsgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class gthread --threads 4 --worker-tmp-dir /dev/shm --timeout 120
     volumes:
       - zorvex_v2_media_volume:/app/media
       - zorvex_v2_static_volume:/app/staticfiles

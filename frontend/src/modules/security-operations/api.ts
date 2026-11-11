@@ -1418,6 +1418,11 @@ export const freezeMonthlyMuster = async (year: number, month: number): Promise<
     return response.data;
 };
 
+export const unfreezeMonthlyMuster = async (year: number, month: number): Promise<any> => {
+    const response = await apiClient.post('/api/operations/monthly-muster/unfreeze-month/', { year, month });
+    return response.data;
+};
+
 export interface AutoAttendanceConfig {
     is_enabled: boolean;
     delay_days: number;

@@ -8,6 +8,7 @@ from decimal import Decimal
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, List
 from django.db.models import Sum, Q, Count, F
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
 from finance.models import (
@@ -17,7 +18,7 @@ from finance.models import (
     FiscalYear, CashCount, SalaryPaymentBatch, SalaryPaymentBatchStatus, PayrollAccountingIntegration
 )
 from billing.models import ClientInvoice, ClientReceipt, RecoveryStatus
-from purchasing.models import ProcurementDocument, VendorPayment, VendorCreditNote
+from purchasing.models import ProcurementDocument, VendorPayment, VendorCreditNote, VendorPaymentAllocation
 
 
 class ExecutiveFinanceDashboardService:
@@ -28,7 +29,71 @@ class ExecutiveFinanceDashboardService:
     """
 
     @classmethod
-    def get_executive_dashboard(cls, company, start_date: date = None, end_date: date = None) -> Dict[str, Any]:
+    def _get_ap_totals(cls, company) -> Dict[str, Decimal]:
+        """
+        Computes total, current, due-soon, and overdue Accounts Payable in 3 flat SQL
+        aggregate queries (eliminating N+1 per-bill get_invoice_payment_summary calls).
+        """
+        today = date.today()
+        bills = list(
+            ProcurementDocument.objects.filter(
+                company=company,
+                document_type='VENDOR_INVOICE',
+                is_deleted=False,
+            )
+            .exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
+            .values('id', 'total_amount', 'due_date')
+        )
+        if not bills:
+            zero = Decimal('0.0000')
+            return {'total_ap': zero, 'current_ap': zero, 'due_soon_ap': zero, 'overdue_ap': zero}
+
+        bill_ids = [b['id'] for b in bills]
+        paid_by_inv = {
+            r['invoice_id']: Decimal(str(r['s'] or 0))
+            for r in VendorPaymentAllocation.objects.filter(
+                invoice_id__in=bill_ids, payment__status='POSTED', is_deleted=False
+            ).values('invoice_id').annotate(s=Sum('amount'))
+        }
+        credit_by_inv = {
+            r['vendor_invoice_id']: Decimal(str(r['s'] or 0))
+            for r in VendorCreditNote.objects.filter(
+                vendor_invoice_id__in=bill_ids, status='POSTED', is_deleted=False
+            ).values('vendor_invoice_id').annotate(s=Sum('amount'))
+        }
+
+        total_ap = Decimal('0.0000')
+        current_ap = Decimal('0.0000')
+        due_soon_ap = Decimal('0.0000')
+        overdue_ap = Decimal('0.0000')
+
+        for b in bills:
+            orig = Decimal(str(b['total_amount'] or 0))
+            net = max(Decimal('0.00'), orig - credit_by_inv.get(b['id'], Decimal('0.00')))
+            bal = max(Decimal('0.00'), net - paid_by_inv.get(b['id'], Decimal('0.00')))
+            if bal > 0:
+                total_ap += bal
+                due_d = b['due_date']
+                if due_d:
+                    days = (due_d - today).days
+                    if days < 0:
+                        overdue_ap += bal
+                    elif days <= 7:
+                        due_soon_ap += bal
+                    else:
+                        current_ap += bal
+                else:
+                    current_ap += bal
+
+        return {
+            'total_ap': total_ap,
+            'current_ap': current_ap,
+            'due_soon_ap': due_soon_ap,
+            'overdue_ap': overdue_ap,
+        }
+
+    @classmethod
+    def get_executive_dashboard(cls, company, start_date: date = None, end_date: date = None, ap_totals: Dict[str, Decimal] = None) -> Dict[str, Any]:
         """
         Main entry point for Executive Finance Dashboard KPIs and Snapshots.
         """
@@ -39,10 +104,8 @@ class ExecutiveFinanceDashboardService:
             end_date = date.today()
 
         from finance.services.financial_statements_service import FinancialStatementsService
-        from finance.services.subledger_reconciliation_service import SubledgerReconciliationService
         from finance.services.posting_service import AccountingPostingService
         from finance.services.period_service import ensure_open_period_and_foundation
-        from purchasing.services.payment_service import get_invoice_payment_summary
         from operations.models import DailyDutyPay
 
         try:
@@ -50,7 +113,7 @@ class ExecutiveFinanceDashboardService:
         except Exception:
             pass
 
-        # 1. P&L Overview (from GL, with live Billing/Operations fallback so Executive Dashboard is never blind)
+        # 1. P&L Overview (from GL SQL aggregation, with Billing/Operations fallback)
         pnl = FinancialStatementsService.get_profit_and_loss(company, start_date=start_date, end_date=end_date)
         totals = pnl.get('totals', {})
         revenue_this_period = Decimal(str(totals.get('total_revenue', 0)))
@@ -70,7 +133,6 @@ class ExecutiveFinanceDashboardService:
                 invoice_date__lte=end_date
             ).aggregate(s=Sum('subtotal'))['s'] or Decimal('0.0000')
             if invoiced_rev == Decimal('0.0000'):
-                # Also check by billing_month (YYYY-MM)
                 bm = start_date.strftime('%Y-%m')
                 invoiced_rev = ClientInvoice.objects.filter(
                     company=company,
@@ -80,15 +142,18 @@ class ExecutiveFinanceDashboardService:
                 ).aggregate(s=Sum('subtotal'))['s'] or Decimal('0.0000')
             revenue_this_period = invoiced_rev
 
-        # 2. Receivables Overview (from billing — issued/approved invoices only)
-        invoices = ClientInvoice.objects.filter(
+        # 2. Receivables Overview (single SQL aggregate)
+        ar_agg = ClientInvoice.objects.filter(
             company=company,
             is_deleted=False,
             status__in=['ISSUED', 'SENT', 'PARTIALLY_PAID']
+        ).aggregate(
+            total_ar=Sum(F('grand_total') - F('paid_amount')),
+            overdue_ar=Sum(F('grand_total') - F('paid_amount'), filter=Q(due_date__lt=date.today())),
         )
-        total_ar = invoices.aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
-        overdue_ar = invoices.filter(due_date__lt=date.today()).aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
-        
+        total_ar = ar_agg['total_ar'] or Decimal('0.0000')
+        overdue_ar = ar_agg['overdue_ar'] or Decimal('0.0000')
+
         receipts_period = ClientReceipt.objects.filter(
             company=company,
             receipt_date__gte=start_date,
@@ -96,21 +161,10 @@ class ExecutiveFinanceDashboardService:
             is_deleted=False
         ).aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
 
-        # 3. Payables Overview (from purchasing — VENDOR_INVOICE + unpaid approved PURCHASE_ORDER)
-        bills = ProcurementDocument.objects.filter(
-            company=company,
-            document_type='VENDOR_INVOICE',
-            is_deleted=False
-        ).exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
-        total_ap = Decimal('0.0000')
-        overdue_ap = Decimal('0.0000')
-        for b in bills:
-            inv_sum = get_invoice_payment_summary(b)
-            bal = Decimal(str(inv_sum.get('outstanding_amount', 0)))
-            if bal > 0:
-                total_ap += bal
-                if inv_sum.get('is_overdue'):
-                    overdue_ap += bal
+        # 3. Payables Overview (fast bulk SQL helper)
+        ap_summary = ap_totals if ap_totals is not None else cls._get_ap_totals(company)
+        total_ap = ap_summary['total_ap']
+        overdue_ap = ap_summary['overdue_ap']
 
         vendor_payments_period = VendorPayment.objects.filter(
             company=company,
@@ -119,15 +173,18 @@ class ExecutiveFinanceDashboardService:
             is_deleted=False
         ).exclude(status__in=['CANCELLED', 'REVERSED']).aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
 
-        # 4. Payroll Overview (from S-4G Payroll accounting + live Operations attendance accrued fallback)
-        integrations = PayrollAccountingIntegration.objects.filter(company=company)
-        payroll_payable = integrations.exclude(status='POSTED').aggregate(s=Sum('net_payroll_payable'))['s'] or Decimal('0.0000')
-        salary_disbursed_period = integrations.filter(
-            status='POSTED',
-            created_at__date__gte=start_date,
-            created_at__date__lte=end_date
-        ).aggregate(s=Sum('total_paid'))['s'] or Decimal('0.0000')
-        outstanding_payroll_liability = integrations.aggregate(s=Sum('remaining_liability'))['s'] or Decimal('0.0000')
+        # 4. Payroll Overview (single aggregate on PayrollAccountingIntegration)
+        pr_agg = PayrollAccountingIntegration.objects.filter(company=company).aggregate(
+            payroll_payable=Sum('net_payroll_payable', filter=~Q(status='POSTED')),
+            salary_disbursed_period=Sum(
+                'total_paid',
+                filter=Q(status='POSTED', created_at__date__gte=start_date, created_at__date__lte=end_date),
+            ),
+            outstanding_payroll_liability=Sum('remaining_liability'),
+        )
+        payroll_payable = pr_agg['payroll_payable'] or Decimal('0.0000')
+        salary_disbursed_period = pr_agg['salary_disbursed_period'] or Decimal('0.0000')
+        outstanding_payroll_liability = pr_agg['outstanding_payroll_liability'] or Decimal('0.0000')
 
         live_duty_wages = DailyDutyPay.objects.filter(
             company=company,
@@ -147,11 +204,11 @@ class ExecutiveFinanceDashboardService:
                 gross_margin_pct = ((gross_profit / revenue_this_period) * Decimal('100')).quantize(Decimal('0.01'))
                 net_margin_pct = ((net_profit / revenue_this_period) * Decimal('100')).quantize(Decimal('0.01'))
 
-        # 5. Treasury Overview (from finance BankAccount)
+        # 5. Treasury Overview (from finance BankAccount & combined cash flow aggregate)
         bank_accounts = BankAccount.objects.filter(company=company, is_deleted=False)
         total_cash_bank_balance = bank_accounts.aggregate(s=Sum('current_balance'))['s'] or Decimal('0.0000')
 
-        cash_in_lines = JournalEntryLine.objects.filter(
+        cash_agg = JournalEntryLine.objects.filter(
             journal_entry__company=company,
             journal_entry__status=JournalStatus.POSTED,
             journal_entry__posting_date__gte=start_date,
@@ -159,14 +216,17 @@ class ExecutiveFinanceDashboardService:
             account__account_type=AccountType.ASSET,
             account__account_code__startswith='11',
             is_deleted=False
-        )
-        cash_in = cash_in_lines.aggregate(s=Sum('debit'))['s'] or Decimal('0.0000')
-        cash_out = cash_in_lines.aggregate(s=Sum('credit'))['s'] or Decimal('0.0000')
+        ).aggregate(c_in=Sum('debit'), c_out=Sum('credit'))
+        cash_in = cash_agg['c_in'] or Decimal('0.0000')
+        cash_out = cash_agg['c_out'] or Decimal('0.0000')
 
-        # 6. Tax Overview
-        tax_txns = TaxTransaction.objects.filter(company=company, is_deleted=False)
-        output_tax = tax_txns.filter(tax_code__tax_category='OUTPUT_TAX').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
-        tax_recoverable = tax_txns.filter(tax_code__tax_category='INPUT_TAX', tax_code__recoverability='RECOVERABLE').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
+        # 6. Tax Overview (single conditional aggregate)
+        tax_agg = TaxTransaction.objects.filter(company=company, is_deleted=False).aggregate(
+            out_t=Sum('tax_amount', filter=Q(tax_code__tax_category='OUTPUT_TAX')),
+            rec_t=Sum('tax_amount', filter=Q(tax_code__tax_category='INPUT_TAX', tax_code__recoverability='RECOVERABLE')),
+        )
+        output_tax = tax_agg['out_t'] or Decimal('0.0000')
+        tax_recoverable = tax_agg['rec_t'] or Decimal('0.0000')
         tax_paid_period = TaxPaymentVoucher.objects.filter(
             company=company,
             payment_date__gte=start_date,
@@ -223,16 +283,18 @@ class ExecutiveFinanceDashboardService:
         }
 
     @classmethod
-    def get_financial_health_summary(cls, company) -> Dict[str, Any]:
+    def get_financial_health_summary(cls, company, ap_totals: Dict[str, Decimal] = None) -> Dict[str, Any]:
         """
         Derives overall health status for Liquidity, AR, AP, Payroll, Tax, GL, Bank Recon, and Period Close.
         Returns statuses: HEALTHY, ATTENTION, CRITICAL.
         """
-        bank_accounts = BankAccount.objects.filter(company=company, is_deleted=False)
-        total_cash = bank_accounts.aggregate(s=Sum('current_balance'))['s'] or Decimal('0.0000')
-        invoices = ClientInvoice.objects.filter(company=company, is_deleted=False)
-        total_ar = invoices.aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
-        overdue_ar = invoices.filter(due_date__lt=date.today(), status__in=['ISSUED', 'PARTIALLY_PAID']).aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
+        total_cash = BankAccount.objects.filter(company=company, is_deleted=False).aggregate(s=Sum('current_balance'))['s'] or Decimal('0.0000')
+        ar_agg = ClientInvoice.objects.filter(company=company, is_deleted=False).aggregate(
+            total_ar=Sum(F('grand_total') - F('paid_amount')),
+            overdue_ar=Sum(F('grand_total') - F('paid_amount'), filter=Q(due_date__lt=date.today(), status__in=['ISSUED', 'PARTIALLY_PAID'])),
+        )
+        total_ar = ar_agg['total_ar'] or Decimal('0.0000')
+        overdue_ar = ar_agg['overdue_ar'] or Decimal('0.0000')
 
         liquidity_status = 'HEALTHY'
         if total_cash < Decimal('10000.0000'):
@@ -248,21 +310,9 @@ class ExecutiveFinanceDashboardService:
             elif overdue_ratio > Decimal('0.15'):
                 ar_status = 'ATTENTION'
 
-        from purchasing.services.payment_service import get_invoice_payment_summary
-        bills = ProcurementDocument.objects.filter(
-            company=company,
-            document_type='VENDOR_INVOICE',
-            is_deleted=False
-        ).exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
-        total_ap = Decimal('0.0000')
-        overdue_ap = Decimal('0.0000')
-        for b in bills:
-            inv_sum = get_invoice_payment_summary(b)
-            bal = Decimal(str(inv_sum.get('outstanding_amount', 0)))
-            if bal > 0:
-                total_ap += bal
-                if inv_sum.get('is_overdue'):
-                    overdue_ap += bal
+        ap_summary = ap_totals if ap_totals is not None else cls._get_ap_totals(company)
+        total_ap = ap_summary['total_ap']
+        overdue_ap = ap_summary['overdue_ap']
 
         ap_status = 'HEALTHY'
         if total_ap > 0:
@@ -323,53 +373,94 @@ class ExecutiveFinanceDashboardService:
     def get_revenue_expense_trend(cls, company) -> List[Dict[str, Any]]:
         """
         Derives monthly trend views for Revenue, Cost of Services, Gross Profit, Operating Expenses, Net Profit,
-        Cash In, and Cash Out directly from POSTED GL JournalEntryLine records over the last 6 months.
+        Cash In, and Cash Out across the last 6 calendar months in ONE SQL GROUP BY query.
         """
+        import calendar
         today = date.today()
-        trends = []
+        curr_idx = today.year * 12 + (today.month - 1)
+        months = []
+        for offset in range(5, -1, -1):
+            idx = curr_idx - offset
+            yr, mo0 = divmod(idx, 12)
+            mo = mo0 + 1
+            m_start = date(yr, mo, 1)
+            m_end = date(yr, mo, calendar.monthrange(yr, mo)[1])
+            months.append((m_start, m_end))
 
-        for i in range(5, -1, -1):
-            # Calculate month start and end
-            month_date = today.replace(day=1) - timedelta(days=i * 30)
-            month_start = date(month_date.year, month_date.month, 1)
-            if month_date.month == 12:
-                month_end = date(month_date.year, 12, 31)
-            else:
-                next_month = date(month_date.year, month_date.month + 1, 1)
-                month_end = next_month - timedelta(days=1)
+        window_start = months[0][0]
+        window_end = months[-1][1]
 
-            from finance.services.financial_statements_service import FinancialStatementsService
-            pnl = FinancialStatementsService.get_profit_and_loss(company, start_date=month_start, end_date=month_end)
-            totals = pnl.get('totals', {})
-            rev = Decimal(str(totals.get('total_revenue', 0)))
-            cos = Decimal(str(totals.get('total_cost_of_service', 0)))
-            gp = Decimal(str(totals.get('gross_profit', 0)))
-            opex = Decimal(str(totals.get('total_operating_expenses', 0)))
-            np = Decimal(str(totals.get('net_profit', 0)))
+        monthly_buckets = {
+            m_start: {
+                'rev': Decimal('0.0000'),
+                'cos': Decimal('0.0000'),
+                'opex': Decimal('0.0000'),
+                'other_inc': Decimal('0.0000'),
+                'other_exp': Decimal('0.0000'),
+                'c_in': Decimal('0.0000'),
+                'c_out': Decimal('0.0000'),
+            }
+            for m_start, _ in months
+        }
 
-            lines = JournalEntryLine.objects.filter(
-                journal_entry__company=company,
+        rows = (
+            JournalEntryLine.objects.filter(
+                company=company,
                 journal_entry__status=JournalStatus.POSTED,
-                journal_entry__posting_date__gte=month_start,
-                journal_entry__posting_date__lte=month_end,
-                account__account_type=AccountType.ASSET,
-                account__account_code__startswith='11',
-                is_deleted=False
+                journal_entry__posting_date__gte=window_start,
+                journal_entry__posting_date__lte=window_end,
+                is_deleted=False,
             )
-            c_in = lines.aggregate(s=Sum('debit'))['s'] or Decimal('0.0000')
-            c_out = lines.aggregate(s=Sum('credit'))['s'] or Decimal('0.0000')
+            .annotate(p_month=TruncMonth('journal_entry__posting_date'))
+            .values('p_month', 'account__account_type', 'account__account_code')
+            .annotate(d=Sum('debit'), c=Sum('credit'))
+        )
 
+        for r in rows:
+            pm = r['p_month']
+            if isinstance(pm, datetime):
+                pm = pm.date()
+            if pm:
+                pm = pm.replace(day=1)
+            b = monthly_buckets.get(pm)
+            if not b:
+                continue
+
+            acc_type = str(r['account__account_type'] or '').upper()
+            acc_code = str(r['account__account_code'] or '')
+            deb = r['d'] or Decimal('0.0000')
+            cred = r['c'] or Decimal('0.0000')
+
+            if acc_type in ('REVENUE', 'INCOME'):
+                b['rev'] += (cred - deb)
+            elif acc_type in ('COST_OF_SERVICE', 'COGS', 'COST_OF_SALES'):
+                b['cos'] += (deb - cred)
+            elif acc_type in ('EXPENSE', 'OPERATING_EXPENSE'):
+                b['opex'] += (deb - cred)
+            elif acc_type == 'OTHER_INCOME':
+                b['other_inc'] += (cred - deb)
+            elif acc_type == 'OTHER_EXPENSE':
+                b['other_exp'] += (deb - cred)
+            elif acc_type == 'ASSET' and acc_code.startswith('11'):
+                b['c_in'] += deb
+                b['c_out'] += cred
+
+        trends = []
+        for m_start, m_end in months:
+            b = monthly_buckets[m_start]
+            gp = b['rev'] - b['cos']
+            np = gp - b['opex'] + b['other_inc'] - b['other_exp']
             trends.append({
-                'month_name': month_start.strftime('%b %Y'),
-                'start_date': month_start,
-                'end_date': month_end,
-                'revenue': rev,
-                'cost_of_services': cos,
+                'month_name': m_start.strftime('%b %Y'),
+                'start_date': m_start,
+                'end_date': m_end,
+                'revenue': b['rev'],
+                'cost_of_services': b['cos'],
                 'gross_profit': gp,
-                'operating_expenses': opex,
+                'operating_expenses': b['opex'],
                 'net_profit': np,
-                'cash_in': c_in,
-                'cash_out': c_out
+                'cash_in': b['c_in'],
+                'cash_out': b['c_out']
             })
 
         return trends
@@ -377,28 +468,31 @@ class ExecutiveFinanceDashboardService:
     @classmethod
     def get_receivables_snapshot(cls, company) -> Dict[str, Any]:
         """
-        Surfaces S-4C Receivables snapshot (AR aging buckets, promises, disputes).
+        Surfaces S-4C Receivables snapshot (AR aging buckets, promises, disputes) via lightweight SQL values.
         """
         invoices = ClientInvoice.objects.filter(company=company, is_deleted=False)
         today = date.today()
 
-        total_ar = invoices.aggregate(s=Sum(F('grand_total') - F('paid_amount')))['s'] or Decimal('0.0000')
+        agg = invoices.aggregate(
+            total_ar=Sum(F('grand_total') - F('paid_amount')),
+            disputed=Count('id', filter=Q(recovery_status=getattr(RecoveryStatus, 'DISPUTED', 'DISPUTED'))),
+            broken=Count('id', filter=Q(recovery_status=getattr(RecoveryStatus, 'PROMISE_BROKEN', 'PROMISE_BROKEN'))),
+            followups=Count('id', filter=Q(recovery_status=getattr(RecoveryStatus, 'FOLLOW_UP_SCHEDULED', 'FOLLOW_UP_SCHEDULED'))),
+        )
+        total_ar = agg['total_ar'] or Decimal('0.0000')
         current = Decimal('0.0000')
         b_1_30 = Decimal('0.0000')
         b_31_60 = Decimal('0.0000')
         b_61_90 = Decimal('0.0000')
         b_90_plus = Decimal('0.0000')
 
-        disputed_count = invoices.filter(recovery_status=getattr(RecoveryStatus, 'DISPUTED', 'DISPUTED')).count()
-        broken_promises_count = invoices.filter(recovery_status=getattr(RecoveryStatus, 'PROMISE_BROKEN', 'PROMISE_BROKEN')).count()
-        upcoming_followups = invoices.filter(recovery_status=getattr(RecoveryStatus, 'FOLLOW_UP_SCHEDULED', 'FOLLOW_UP_SCHEDULED')).count()
-
-        for inv in invoices.filter(status__in=['ISSUED', 'PARTIALLY_PAID']):
-            bal = inv.outstanding_amount
+        for inv in invoices.filter(status__in=['ISSUED', 'PARTIALLY_PAID']).values(
+            'grand_total', 'paid_amount', 'due_date', 'invoice_date'
+        ):
+            bal = (Decimal(str(inv['grand_total'] or 0)) - Decimal(str(inv['paid_amount'] or 0)))
             if bal > 0:
-                due = inv.due_date or inv.invoice_date or today
+                due = inv['due_date'] or inv['invoice_date'] or today
                 days_overdue = (today - due).days
-
                 if days_overdue <= 0:
                     current += bal
                 elif days_overdue <= 30:
@@ -417,96 +511,75 @@ class ExecutiveFinanceDashboardService:
             'b_31_60': b_31_60,
             'b_61_90': b_61_90,
             'b_90_plus': b_90_plus,
-            'disputed_count': disputed_count,
-            'broken_promises_count': broken_promises_count,
-            'upcoming_followups_count': upcoming_followups
+            'disputed_count': agg['disputed'] or 0,
+            'broken_promises_count': agg['broken'] or 0,
+            'upcoming_followups_count': agg['followups'] or 0,
         }
 
     @classmethod
-    def get_payables_snapshot(cls, company) -> Dict[str, Any]:
+    def get_payables_snapshot(cls, company, ap_totals: Dict[str, Decimal] = None) -> Dict[str, Any]:
         """
-        Surfaces S-3/S-4F Payables snapshot.
+        Surfaces S-3/S-4F Payables snapshot using fast SQL aggregates.
         """
-        from purchasing.services.payment_service import get_invoice_payment_summary
-        bills = ProcurementDocument.objects.filter(
-            company=company,
-            document_type='VENDOR_INVOICE',
-            is_deleted=False
-        ).exclude(status__in=['CANCELLED', 'REJECTED', 'DRAFT'])
-        today = date.today()
-
-        total_ap = Decimal('0.0000')
-        current_ap = Decimal('0.0000')
-        overdue_ap = Decimal('0.0000')
-        due_soon_ap = Decimal('0.0000')
-
-        for b in bills:
-            inv_sum = get_invoice_payment_summary(b)
-            bal = Decimal(str(inv_sum.get('outstanding_amount', 0)))
-            if bal > 0:
-                total_ap += bal
-                if b.due_date:
-                    days = (b.due_date - today).days
-                    if days < 0:
-                        overdue_ap += bal
-                    elif days <= 7:
-                        due_soon_ap += bal
-                    else:
-                        current_ap += bal
-                else:
-                    current_ap += bal
-
-        vendor_credits = VendorCreditNote.objects.filter(company=company, is_deleted=False)
-        total_vendor_credits = vendor_credits.aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
-        unallocated_vendor_credits = vendor_credits.filter(status='ISSUED').aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
+        ap_summary = ap_totals if ap_totals is not None else cls._get_ap_totals(company)
+        vc_agg = VendorCreditNote.objects.filter(company=company, is_deleted=False).aggregate(
+            tot=Sum('amount'),
+            unalloc=Sum('amount', filter=Q(status='ISSUED')),
+        )
 
         return {
-            'total_ap': total_ap,
-            'current_ap': current_ap,
-            'overdue_ap': overdue_ap,
-            'due_soon_ap': due_soon_ap,
-            'total_vendor_credits': total_vendor_credits,
-            'unallocated_vendor_credits': unallocated_vendor_credits
+            'total_ap': ap_summary['total_ap'],
+            'current_ap': ap_summary['current_ap'],
+            'overdue_ap': ap_summary['overdue_ap'],
+            'due_soon_ap': ap_summary['due_soon_ap'],
+            'total_vendor_credits': vc_agg['tot'] or Decimal('0.0000'),
+            'unallocated_vendor_credits': vc_agg['unalloc'] or Decimal('0.0000')
         }
 
     @classmethod
     def get_payroll_snapshot(cls, company) -> Dict[str, Any]:
         """
-        Surfaces S-4G Payroll finance snapshot.
+        Surfaces S-4G Payroll finance snapshot in 2 aggregate queries.
         """
-        integrations = PayrollAccountingIntegration.objects.filter(company=company)
-        batches = SalaryPaymentBatch.objects.filter(company=company)
-
-        finalized_count = integrations.filter(status__in=['APPROVED', 'POSTED']).count()
-        net_payroll = integrations.aggregate(s=Sum('net_payroll_payable'))['s'] or Decimal('0.0000')
-        paid_amount = integrations.aggregate(s=Sum('total_paid'))['s'] or Decimal('0.0000')
-        outstanding_liability = integrations.aggregate(s=Sum('remaining_liability'))['s'] or Decimal('0.0000')
-
-        successful_transfers = batches.filter(status='COMPLETED').count()
-        failed_transfers = batches.filter(status='FAILED').count()
-        active_batches = batches.filter(status__in=['DRAFT', 'READY_FOR_PAYMENT', 'PROCESSING']).count()
+        i_agg = PayrollAccountingIntegration.objects.filter(company=company).aggregate(
+            finalized_count=Count('id', filter=Q(status__in=['APPROVED', 'POSTED'])),
+            net_payroll=Sum('net_payroll_payable'),
+            paid_amount=Sum('total_paid'),
+            outstanding_liability=Sum('remaining_liability'),
+        )
+        b_agg = SalaryPaymentBatch.objects.filter(company=company).aggregate(
+            successful=Count('id', filter=Q(status='COMPLETED')),
+            failed=Count('id', filter=Q(status='FAILED')),
+            active=Count('id', filter=Q(status__in=['DRAFT', 'READY_FOR_PAYMENT', 'PROCESSING'])),
+        )
 
         return {
-            'finalized_payroll_count': finalized_count,
-            'net_payroll_amount': net_payroll,
-            'paid_amount': paid_amount,
-            'outstanding_liability': outstanding_liability,
-            'successful_transfers': successful_transfers,
-            'failed_transfers': failed_transfers,
-            'active_batches': active_batches
+            'finalized_payroll_count': i_agg['finalized_count'] or 0,
+            'net_payroll_amount': i_agg['net_payroll'] or Decimal('0.0000'),
+            'paid_amount': i_agg['paid_amount'] or Decimal('0.0000'),
+            'outstanding_liability': i_agg['outstanding_liability'] or Decimal('0.0000'),
+            'successful_transfers': b_agg['successful'] or 0,
+            'failed_transfers': b_agg['failed'] or 0,
+            'active_batches': b_agg['active'] or 0
         }
 
     @classmethod
     def get_tax_snapshot(cls, company) -> Dict[str, Any]:
         """
-        Surfaces S-4H Tax snapshot.
+        Surfaces S-4H Tax snapshot in 2 SQL queries.
         """
-        txns = TaxTransaction.objects.filter(company=company, is_deleted=False)
-        output_tax = txns.filter(tax_code__tax_category='OUTPUT_TAX').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
-        recoverable_input_tax = txns.filter(tax_code__tax_category='INPUT_TAX', tax_code__recoverability='RECOVERABLE').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
-        wht_payable = txns.filter(tax_code__tax_category='WITHHOLDING_PAYABLE').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
-        wht_receivable = txns.filter(tax_code__tax_category='WITHHOLDING_RECEIVABLE').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
-        payroll_tax = txns.filter(tax_code__tax_category='PAYROLL_TAX').aggregate(s=Sum('tax_amount'))['s'] or Decimal('0.0000')
+        t_agg = TaxTransaction.objects.filter(company=company, is_deleted=False).aggregate(
+            output_tax=Sum('tax_amount', filter=Q(tax_code__tax_category='OUTPUT_TAX')),
+            rec_input=Sum('tax_amount', filter=Q(tax_code__tax_category='INPUT_TAX', tax_code__recoverability='RECOVERABLE')),
+            wht_pay=Sum('tax_amount', filter=Q(tax_code__tax_category='WITHHOLDING_PAYABLE')),
+            wht_rec=Sum('tax_amount', filter=Q(tax_code__tax_category='WITHHOLDING_RECEIVABLE')),
+            pr_tax=Sum('tax_amount', filter=Q(tax_code__tax_category='PAYROLL_TAX')),
+        )
+        output_tax = t_agg['output_tax'] or Decimal('0.0000')
+        recoverable_input_tax = t_agg['rec_input'] or Decimal('0.0000')
+        wht_payable = t_agg['wht_pay'] or Decimal('0.0000')
+        wht_receivable = t_agg['wht_rec'] or Decimal('0.0000')
+        payroll_tax = t_agg['pr_tax'] or Decimal('0.0000')
 
         unfiled_vouchers = TaxPaymentVoucher.objects.filter(company=company, status='DRAFT').count()
         net_tax_position = output_tax - recoverable_input_tax + wht_payable - wht_receivable
@@ -524,49 +597,49 @@ class ExecutiveFinanceDashboardService:
     @classmethod
     def get_treasury_snapshot(cls, company) -> Dict[str, Any]:
         """
-        Surfaces S-4D/S-4K Treasury snapshot.
-        Distinguishes operational balances from uncleared and unreconciled items.
+        Surfaces S-4D/S-4K Treasury snapshot in 4 SQL queries.
         """
-        accounts = BankAccount.objects.filter(company=company, is_deleted=False)
-        bank_accounts_count = accounts.filter(account_type='BANK').count()
-        cash_accounts_count = accounts.filter(account_type='CASH').count()
-        petty_cash_count = accounts.filter(account_type='PETTY_CASH').count()
-        wallets_count = accounts.filter(account_type='WALLET').count()
-
-        operational_balance = accounts.aggregate(s=Sum('current_balance'))['s'] or Decimal('0.0000')
-
-        uncleared_cheques = Cheque.objects.filter(company=company, status='ISSUED').aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
-        
         from finance.models import BankStatementLine
+        b_agg = BankAccount.objects.filter(company=company, is_deleted=False).aggregate(
+            bank_cnt=Count('id', filter=Q(account_type='BANK')),
+            cash_cnt=Count('id', filter=Q(account_type='CASH')),
+            petty_cnt=Count('id', filter=Q(account_type='PETTY_CASH')),
+            wallet_cnt=Count('id', filter=Q(account_type='WALLET')),
+            op_bal=Sum('current_balance'),
+        )
+        uncleared_cheques = Cheque.objects.filter(company=company, status='ISSUED').aggregate(s=Sum('amount'))['s'] or Decimal('0.0000')
         unreconciled_bank_lines = BankStatementLine.objects.filter(
             statement__company=company,
             match_status='UNMATCHED'
         ).count()
-
         cash_count_variances = CashCount.objects.filter(company=company, status='VARIANCE_FLAGGED').count()
 
         return {
-            'bank_accounts_count': bank_accounts_count,
-            'cash_accounts_count': cash_accounts_count,
-            'petty_cash_count': petty_cash_count,
-            'wallets_count': wallets_count,
-            'operational_balance': operational_balance,
+            'bank_accounts_count': b_agg['bank_cnt'] or 0,
+            'cash_accounts_count': b_agg['cash_cnt'] or 0,
+            'petty_cash_count': b_agg['petty_cnt'] or 0,
+            'wallets_count': b_agg['wallet_cnt'] or 0,
+            'operational_balance': b_agg['op_bal'] or Decimal('0.0000'),
             'uncleared_cheques_amount': uncleared_cheques,
             'unreconciled_bank_lines_count': unreconciled_bank_lines,
             'cash_count_variances_count': cash_count_variances
         }
 
     @classmethod
-    def get_profitability_snapshot(cls, company) -> Dict[str, Any]:
+    def get_profitability_snapshot(cls, company, unattributed_count: int = None) -> Dict[str, Any]:
         """
-        Surfaces S-4J Profitability snapshot.
+        Surfaces S-4J Profitability snapshot using fast SQL-aggregated profitability methods.
         """
         from finance.services.profitability_service import ProfitabilityService
 
         site_prof = ProfitabilityService.get_site_profitability(company)
         client_prof = ProfitabilityService.get_client_profitability(company)
         contract_prof = ProfitabilityService.get_contract_profitability(company)
-        unattributed = ProfitabilityService.get_unattributed_financial_lines(company)
+        unattributed_cnt = (
+            unattributed_count
+            if unattributed_count is not None
+            else ProfitabilityService.get_unattributed_financial_lines_count(company)
+        )
 
         top_clients = sorted(client_prof, key=lambda x: x.get('net_profit', 0), reverse=True)[:3]
         top_contracts = sorted(contract_prof, key=lambda x: x.get('net_profit', 0), reverse=True)[:3]
@@ -581,7 +654,7 @@ class ExecutiveFinanceDashboardService:
             'most_profitable_sites': top_sites,
             'low_margin_contracts_count': len(low_margin_contracts),
             'loss_making_sites_count': len(loss_sites),
-            'unattributed_lines_count': len(unattributed)
+            'unattributed_lines_count': unattributed_cnt
         }
 
     @classmethod
@@ -619,14 +692,19 @@ class ExecutiveFinanceDashboardService:
         }
 
     @classmethod
-    def get_action_center(cls, company) -> List[Dict[str, Any]]:
+    def get_action_center(cls, company, unattributed_count: int = None) -> List[Dict[str, Any]]:
         """
         Generates actionable items queue with navigation routing targets.
         Does NOT auto-execute financial actions.
         """
         actions = []
 
-        unissued_sheets = ClientInvoice.objects.filter(company=company, status='DRAFT').count()
+        inv_counts = ClientInvoice.objects.filter(company=company, is_deleted=False).aggregate(
+            drafts=Count('id', filter=Q(status='DRAFT')),
+            overdue=Count('id', filter=Q(due_date__lt=date.today(), status__in=['ISSUED', 'PARTIALLY_PAID'])),
+            followups=Count('id', filter=Q(recovery_status=RecoveryStatus.UNDER_FOLLOWUP)),
+        )
+        unissued_sheets = inv_counts['drafts'] or 0
         if unissued_sheets > 0:
             actions.append({
                 'id': 'invoices_awaiting_issue',
@@ -638,7 +716,7 @@ class ExecutiveFinanceDashboardService:
                 'description': f"{unissued_sheets} draft client invoice(s) are waiting to be posted and issued."
             })
 
-        overdue_invs = ClientInvoice.objects.filter(company=company, due_date__lt=date.today(), status__in=['ISSUED', 'PARTIALLY_PAID']).count()
+        overdue_invs = inv_counts['overdue'] or 0
         if overdue_invs > 0:
             actions.append({
                 'id': 'overdue_receivables',
@@ -650,7 +728,7 @@ class ExecutiveFinanceDashboardService:
                 'description': f"{overdue_invs} invoice(s) are overdue and require payment collection follow-up."
             })
 
-        followups_due = ClientInvoice.objects.filter(company=company, recovery_status=RecoveryStatus.UNDER_FOLLOWUP).count()
+        followups_due = inv_counts['followups'] or 0
         if followups_due > 0:
             actions.append({
                 'id': 'recovery_followups_due',
@@ -739,16 +817,45 @@ class ExecutiveFinanceDashboardService:
                 })
 
         from finance.services.profitability_service import ProfitabilityService
-        unattributed = ProfitabilityService.get_unattributed_financial_lines(company)
-        if len(unattributed) > 0:
+        unattributed_cnt = (
+            unattributed_count
+            if unattributed_count is not None
+            else ProfitabilityService.get_unattributed_financial_lines_count(company)
+        )
+        if unattributed_cnt > 0:
             actions.append({
                 'id': 'unattributed_profitability_lines',
                 'title': 'Unattributed Revenue / Expense GL Lines',
-                'count': len(unattributed),
+                'count': unattributed_cnt,
                 'severity': 'LOW',
                 'category': 'PROFITABILITY',
                 'target_tab': 'profitability',
-                'description': f"{len(unattributed)} posted GL line(s) missing site/contract dimensions."
+                'description': f"{unattributed_cnt} posted GL line(s) missing site/contract dimensions."
             })
 
         return actions
+
+    @classmethod
+    def get_dashboard_bundle(cls, company, start_date: date = None, end_date: date = None) -> Dict[str, Any]:
+        """
+        Single-request consolidated bundle returning all 11 Executive Dashboard sections
+        while sharing intermediate SQL results (eliminating 11 parallel HTTP round-trips).
+        """
+        from finance.services.profitability_service import ProfitabilityService
+
+        ap_totals = cls._get_ap_totals(company)
+        unattributed_cnt = ProfitabilityService.get_unattributed_financial_lines_count(company)
+
+        return {
+            'overview': cls.get_executive_dashboard(company, start_date=start_date, end_date=end_date, ap_totals=ap_totals),
+            'financial_health': cls.get_financial_health_summary(company, ap_totals=ap_totals),
+            'trends': cls.get_revenue_expense_trend(company),
+            'receivables_snapshot': cls.get_receivables_snapshot(company),
+            'payables_snapshot': cls.get_payables_snapshot(company, ap_totals=ap_totals),
+            'payroll_snapshot': cls.get_payroll_snapshot(company),
+            'tax_snapshot': cls.get_tax_snapshot(company),
+            'treasury_snapshot': cls.get_treasury_snapshot(company),
+            'profitability_snapshot': cls.get_profitability_snapshot(company, unattributed_count=unattributed_cnt),
+            'accounting_health': cls.get_accounting_health(company),
+            'action_center': cls.get_action_center(company, unattributed_count=unattributed_cnt),
+        }
