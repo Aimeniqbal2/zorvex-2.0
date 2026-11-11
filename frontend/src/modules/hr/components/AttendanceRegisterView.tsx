@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import apiClient from '../../../api/client';
+import { apiClient } from '../../../api/client';
 
 export interface AttendanceRegisterViewProps {
     onBack?: () => void;
@@ -186,7 +186,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
         setLoading(true);
         setError('');
         try {
-            const res = await apiClient.get('/hrm/workforce-attendance/register/', {
+            const res = await apiClient.get('/api/hrm/workforce-attendance/register/', {
                 params: buildQueryParams(),
             });
             setData(res.data);
@@ -208,7 +208,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                 ...buildQueryParams(),
                 export_format: format,
             };
-            const res = await apiClient.get('/hrm/workforce-attendance/export-register/', {
+            const res = await apiClient.get('/api/hrm/workforce-attendance/export-register/', {
                 params,
                 responseType: 'blob',
             });

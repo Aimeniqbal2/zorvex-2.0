@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { useIndustry, useAppStore } from '../../stores/appStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { EmployeeList } from './components/EmployeeList';
 import { DesignationList } from './components/DesignationList';
 import { DepartmentList } from './components/DepartmentList';
@@ -50,6 +51,7 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
     const { isSecurity: storeIsSecurity } = useIndustry();
     const isSecurity = propIsSecurity !== undefined ? propIsSecurity : storeIsSecurity;
     const { company } = useAppStore();
+    const { openTab } = useWorkspaceStore();
 
     const [activeTab, setActiveTab] = useState<TabId>('EMPLOYEES');
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -65,7 +67,21 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
             case 'DEPARTMENTS':
                 return <DepartmentList />;
             case 'ATTENDANCE_REGISTER':
-                return <AttendanceRegisterView />;
+                return (
+                    <AttendanceRegisterView
+                        onOpenStandaloneTab={() =>
+                            openTab({
+                                code: 'attendance_register',
+                                name: 'Attendance Registry',
+                                icon: 'bx-calendar-check',
+                                route: '/attendance-register',
+                                category: 'Operations',
+                                minRole: 'manager',
+                                engine: 'security_ops',
+                            })
+                        }
+                    />
+                );
             case 'ATTENDANCE':
                 return <AttendanceList />;
             case 'SHIFTS':
