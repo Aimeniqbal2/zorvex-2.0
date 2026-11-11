@@ -165,6 +165,7 @@ export const DesktopDashboard: React.FC = () => {
             'fast_costing': 'fast_costing',
             'monthly_muster': 'monthly_muster',
             'attendance_register': 'attendance_register',
+            'attendance_registry': 'attendance_registry',
             'reports': 'reports',
             'settings': 'settings'
         };
@@ -246,7 +247,7 @@ export const DesktopDashboard: React.FC = () => {
                             icon="bx-calendar-check"
                             label="Attendance Registry"
                             color="#0284c7"
-                            onClick={() => openModule('attendance_register')}
+                            onClick={() => openModule('attendance_registry')}
                         />
                     )}
                     <QuickAction

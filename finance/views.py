@@ -123,11 +123,22 @@ class BaseFinanceViewSet(TenantModelViewSet):
     def get_company(self):
         from erp_core.middleware import get_current_company
         from companies.models import Company
+        company_id = (
+            get_current_company()
+            or (self.request.META.get('HTTP_X_COMPANY_ID') if hasattr(self.request, 'META') else None)
+            or getattr(self.request.user, 'company_id', None)
+        )
+        if company_id:
+            comp = Company.objects.filter(id=company_id).first()
+            if comp:
+                return comp
         if hasattr(self.request.user, 'company') and self.request.user.company:
             return self.request.user.company
-        company_id = get_current_company() or (self.request.META.get('HTTP_X_COMPANY_ID') if hasattr(self.request, 'META') else None) or getattr(self.request.user, 'company_id', None)
-        if company_id:
-            return Company.objects.filter(id=company_id).first()
+        if getattr(self.request.user, 'is_superuser', False):
+            from platform_core.views import _get_company_for_user
+            comp, _ = _get_company_for_user(self.request)
+            if comp:
+                return comp
         return None
 
     def _get_company(self, request=None):
@@ -2172,6 +2183,7 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         """
         from collections import defaultdict
         from decimal import Decimal
+        from django.utils import timezone
         from hrm.models import Employee, AttendanceStatus
         from operations.models import (
             DailyDutyPay, DutyType, Deployment,
@@ -2193,6 +2205,7 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         ) = self._resolve_payroll_month(company, month_param)
 
         ensure_open_period_and_foundation(company, period_end)
+        ensure_open_period_and_foundation(company, timezone.now().date())
 
         # Fetch all DailyDutyPay records in this period
         duty_pays = list(DailyDutyPay.objects.filter(
@@ -2459,6 +2472,7 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
         ) = self._resolve_payroll_month(company, month_param)
 
         ensure_open_period_and_foundation(company, period_end)
+        ensure_open_period_and_foundation(company, timezone.now().date())
 
         # Find employees with attendance in this month who don't yet have a FINALIZED PayrollRun
         dp_emp_ids = set(
@@ -2595,6 +2609,7 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
             selected_month, _, _, _, period_start, period_end, _
         ) = self._resolve_payroll_month(company, month_param)
         ensure_open_period_and_foundation(company, period_end)
+        ensure_open_period_and_foundation(company, timezone.now().date())
 
         treasury_acc = None
         if treasury_account_id:

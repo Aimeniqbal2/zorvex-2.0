@@ -10,17 +10,27 @@ class TenantModelViewSet(viewsets.ModelViewSet):
     - Soft-deletes on destroy() — sets is_deleted=True instead of hard DELETE.
     - Read isolation handled by TenantManager + is_deleted filter globally.
     """
-    def perform_create(self, serializer):
+    def _get_company_id(self, request=None):
         from erp_core.middleware import get_current_company
         from rest_framework.exceptions import ValidationError
-        company_id = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
-        if not company_id and getattr(self.request.user, 'is_superuser', False):
+        req = request or self.request
+        user = getattr(req, 'user', None)
+        company_id = (
+            get_current_company()
+            or req.META.get('HTTP_X_COMPANY_ID')
+            or getattr(user, 'company_id', None)
+        )
+        if not company_id and user and getattr(user, 'is_superuser', False):
             from platform_core.views import _get_company_for_user
-            comp, _ = _get_company_for_user(self.request)
+            comp, _ = _get_company_for_user(req)
             if comp:
                 company_id = comp.id
         if not company_id:
             raise ValidationError({"detail": "Company context is required for this operation."})
+        return company_id
+
+    def perform_create(self, serializer):
+        company_id = self._get_company_id(self.request)
         serializer.save(company_id=company_id)
 
     def get_queryset(self):
@@ -34,17 +44,7 @@ class TenantModelViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             return qs.none()
 
-        from erp_core.middleware import get_current_company
-        from rest_framework.exceptions import ValidationError
-        company_id = get_current_company() or self.request.META.get('HTTP_X_COMPANY_ID') or getattr(self.request.user, 'company_id', None)
-        if not company_id and getattr(user, 'is_superuser', False):
-            from platform_core.views import _get_company_for_user
-            comp, _ = _get_company_for_user(self.request)
-            if comp:
-                company_id = comp.id
-        if not company_id:
-            raise ValidationError({"detail": "Company context is required for this operation."})
-
+        company_id = self._get_company_id(self.request)
         return qs.filter(company_id=company_id)
 
     def destroy(self, request, *args, **kwargs):

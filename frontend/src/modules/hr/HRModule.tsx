@@ -71,10 +71,10 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
                     <AttendanceRegisterView
                         onOpenStandaloneTab={() =>
                             openTab({
-                                code: 'attendance_register',
+                                code: 'attendance_registry',
                                 name: 'Attendance Registry',
                                 icon: 'bx-calendar-check',
-                                route: '/attendance-register',
+                                route: '/attendance-registry',
                                 category: 'Operations',
                                 minRole: 'manager',
                                 engine: 'security_ops',

@@ -1092,7 +1092,7 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='register')
     def register(self, request):
-        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        company_id = self._get_company_id(request)
         from hrm.services.attendance_register_service import AttendanceRegisterService
         data = AttendanceRegisterService.get_attendance_register(
             company_id=company_id,
@@ -1128,7 +1128,7 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export-register')
     def export_register(self, request):
-        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        company_id = self._get_company_id(request)
         from hrm.services.attendance_register_service import AttendanceRegisterService
         data = AttendanceRegisterService.get_attendance_register(
             company_id=company_id,

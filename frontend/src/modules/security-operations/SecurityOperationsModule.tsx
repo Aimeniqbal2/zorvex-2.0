@@ -20,16 +20,18 @@ import { QAInspectionsView } from './components/QAInspectionsView';
 import { CorrectiveActionsView } from './components/CorrectiveActionsView';
 import { SecurityReportsWorkspace } from './components/SecurityReportsWorkspace';
 import { MonthlyMusterSheetTab } from './components/MonthlyMusterSheetTab';
-import { AttendanceRegisterView } from '../hr/components/AttendanceRegisterView';
+import { AttendanceRegisterView } from './components/AttendanceRegisterView';
+import { AttendanceRegisterView as MasterAttendanceRegistryView } from '../hr/components/AttendanceRegisterView';
 import { EmployeeInfoView } from './components/EmployeeInfoView';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import './styles/securityOperations.css';
 
-type Tab = 'monthly_muster' | 'attendance_register' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'employee_info' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
+type Tab = 'monthly_muster' | 'attendance_register' | 'attendance_registry' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'employee_info' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
 
 const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'monthly_muster', label: 'Monthly Duty Muster', icon: 'bx-spreadsheet' },
-    { id: 'attendance_register', label: 'Attendance Registry', icon: 'bx-calendar-check' },
+    { id: 'attendance_register', label: 'Attendance Register & Ledger', icon: 'bx-history' },
+    { id: 'attendance_registry', label: 'Attendance Registry', icon: 'bx-calendar-check' },
     { id: 'employee_info', label: 'Employee Info', icon: 'bx-id-card' },
     { id: 'overview', label: 'Control Center', icon: 'bx-radar' },
     { id: 'advanced_ops', label: 'Advanced Ops & Dispatch', icon: 'bx-broadcast' },
@@ -71,7 +73,19 @@ export const SecurityOperationsModule: React.FC = () => {
             return;
         }
         if (tabId === 'attendance_register') {
-            setActiveTab('attendance_register');
+            openTab({
+                code: 'attendance_register',
+                name: 'Attendance Register & Ledger',
+                icon: 'bx-history',
+                route: '/attendance-register',
+                category: 'Operations',
+                minRole: 'manager',
+                engine: 'security_ops'
+            });
+            return;
+        }
+        if (tabId === 'attendance_registry') {
+            setActiveTab('attendance_registry');
             return;
         }
         setActiveTab(tabId);
@@ -82,15 +96,17 @@ export const SecurityOperationsModule: React.FC = () => {
             case 'monthly_muster':
                 return <MonthlyMusterSheetTab onBack={() => setActiveTab('overview')} />;
             case 'attendance_register':
+                return <AttendanceRegisterView onBack={() => setActiveTab('overview')} />;
+            case 'attendance_registry':
                 return (
-                    <AttendanceRegisterView
+                    <MasterAttendanceRegistryView
                         onBack={() => setActiveTab('overview')}
                         onOpenStandaloneTab={() =>
                             openTab({
-                                code: 'attendance_register',
+                                code: 'attendance_registry',
                                 name: 'Attendance Registry',
                                 icon: 'bx-calendar-check',
-                                route: '/attendance-register',
+                                route: '/attendance-registry',
                                 category: 'Operations',
                                 minRole: 'manager',
                                 engine: 'security_ops',

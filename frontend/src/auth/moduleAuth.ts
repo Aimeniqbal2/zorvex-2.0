@@ -27,7 +27,7 @@ export function isModuleAuthorized(
     }
 
     // 3. Backend Module State - if the backend explicitly granted it via Custom Access or Full Company, allow it!
-    if (module.code === 'attendance_register') {
+    if (module.code === 'attendance_registry') {
         if (enabledModules.security_ops || enabledModules.operations || enabledModules.hr || enabledModules.guards_staff) {
             return true;
         }

@@ -281,15 +281,20 @@ class AttendanceRegisterService:
         jumps_qs = JumpRecord.objects.filter(
             company_id=company_id,
             is_deleted=False,
-            start_date__lte=end_date,
-        ).filter(
-            Q(end_date__gte=start_date) | Q(end_date__isnull=True)
+            absent_since__lte=end_date,
         )
         emp_jump_dates = defaultdict(list)
+        active_jump_statuses = {
+            JumpRecordStatus.ACTIVE_JUMP,
+            JumpRecordStatus.OSL_PENDING,
+            JumpRecordStatus.ACKNOWLEDGED,
+        }
         for j in jumps_qs:
-            if j.status != JumpRecordStatus.CLEARED:
-                j_end = j.end_date or end_date
-                emp_jump_dates[str(j.employee_id)].append((j.start_date, j_end, j))
+            if j.status in active_jump_statuses:
+                end_dt_raw = j.reinstated_at or j.resolved_at
+                j_end = end_dt_raw.date() if end_dt_raw else end_date
+                if j_end >= start_date:
+                    emp_jump_dates[str(j.employee_id)].append((j.absent_since, j_end, j))
 
         # 3. Filter employees (Active employees OR anyone with recorded attendance in this period)
         qs = Employee.objects.filter(
@@ -297,7 +302,7 @@ class AttendanceRegisterService:
             is_deleted=False,
         ).filter(
             Q(is_active=True, employment_status='ACTIVE') | Q(id__in=marked_emp_ids)
-        ).select_related('department', 'designation', 'employment')
+        ).select_related('department', 'designation')
 
         if employee_id:
             qs = qs.filter(id=employee_id)

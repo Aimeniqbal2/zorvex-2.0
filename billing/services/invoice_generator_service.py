@@ -213,14 +213,14 @@ class InvoiceGeneratorService:
         }
 
         return {
-            'invoice_id': invoice.id,
+            'invoice_id': str(invoice.id),
             'invoice_number': invoice.invoice_number,
             'invoice_date': invoice.invoice_date.isoformat() if invoice.invoice_date else "",
             'due_date': invoice.due_date.isoformat() if invoice.due_date else "",
             'billing_month': invoice.billing_month,
             'period_start': invoice.period_start.isoformat() if invoice.period_start else "",
             'period_end': invoice.period_end.isoformat() if invoice.period_end else "",
-            'currency': invoice.currency,
+            'currency': invoice.currency.code if invoice.currency else 'PKR',
             'payment_terms': invoice.payment_terms,
             'status': invoice.status,
             'status_display': invoice.get_status_display(),
@@ -233,7 +233,7 @@ class InvoiceGeneratorService:
             'paid_amount': float(invoice.paid_amount),
             'balance_due': float(invoice.grand_total - invoice.paid_amount),
             'company': {
-                'id': company.id,
+                'id': str(company.id) if company else '',
                 'name': company.name,
                 'ntn': getattr(company, 'tax_number', '') or getattr(company, 'ntn', ''),
                 'strn': getattr(company, 'strn', '') or getattr(sec_cfg, 'pra_sales_tax_registration', ''),

@@ -42,7 +42,7 @@ class BasePurchasingViewSet(TenantModelViewSet):
     required_write_permissions = ['purchasing.write', 'finance.write', 'security_finance.write']
 
     def perform_create(self, serializer):
-        serializer.save(company_id=self.request.user.company_id)
+        serializer.save(company_id=self._get_company_id(self.request))
 
 
 class ProcurementTagViewSet(BasePurchasingViewSet):
@@ -469,7 +469,7 @@ class ProcurementDocumentViewSet(BasePurchasingViewSet):
             status_filter = request.query_params.get('status')
             search = request.query_params.get('search')
             results = get_accounts_payable_list(
-                company_id=request.user.company_id,
+                company_id=self._get_company_id(request),
                 vendor_id=vendor_id,
                 status_filter=status_filter,
                 search=search
@@ -887,7 +887,7 @@ class VendorPaymentViewSet(BasePurchasingViewSet):
 
         try:
             payment = create_vendor_payment(
-                company_id=request.user.company_id,
+                company_id=self._get_company_id(request),
                 vendor_id=vendor_id,
                 payment_date=payment_date,
                 amount=amount,

@@ -622,9 +622,12 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         lines_by_client_loc = defaultdict(list)
         lines_by_client_unscoped = defaultdict(list)
         for sl in service_lines:
+            if not getattr(sl, 'location_id', None) and (not getattr(sl, 'proposal_version', None) or not getattr(sl.proposal_version, 'proposal_id', None)):
+                continue
             cid = str(sl.location.customer_id) if sl.location_id else str(sl.proposal_version.proposal.customer_id)
             if sl.location_id and sl.location.name:
-                lines_by_client_loc[(cid, sl.location.name.strip().lower())].append(sl)
+                norm_name = ' '.join(sl.location.name.lower().split())
+                lines_by_client_loc[(cid, norm_name)].append(sl)
             else:
                 lines_by_client_unscoped[cid].append(sl)
 
@@ -689,7 +692,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         for site in sites:
             cid = str(site.crm_entity_id)
             sid = str(site.id)
-            loc_key = (cid, (site.name or '').strip().lower())
+            loc_key = (cid, ' '.join((site.name or '').lower().split()))
             site_lines = lines_by_client_loc.get(loc_key, [])
 
             # Find matching contract for site
@@ -879,10 +882,10 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         and invoicing status per client location for the billing month.
         """
         from companies.models import Company
-        company_id = self._get_company_id(request)
-        company = Company.objects.get(id=company_id)
-        billing_month = request.query_params.get('month') or request.query_params.get('billing_month')
         try:
+            company_id = self._get_company_id(request)
+            company = Company.objects.get(id=company_id)
+            billing_month = request.query_params.get('month') or request.query_params.get('billing_month')
             data = self._build_crm_billing_preview(company, billing_month)
             return Response(data, status=status.HTTP_200_OK)
         except Exception as e:
@@ -907,9 +910,13 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         from finance.models import SecurityFinanceConfiguration
         from finance.services.period_service import ensure_open_period_and_foundation
 
-        company_id = self._get_company_id(request)
-        company = Company.objects.get(id=company_id)
-        ensure_open_period_and_foundation(company, timezone.now().date())
+        try:
+            company_id = self._get_company_id(request)
+            company = Company.objects.get(id=company_id)
+            ensure_open_period_and_foundation(company, timezone.now().date())
+        except Exception as e:
+            logger.exception("Auto-sync company/period resolution failed: %s", e)
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         billing_month = request.data.get('billing_month')
         months_list = request.data.get('months')
@@ -934,7 +941,8 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         created_invoices = []
         skipped_count = 0
 
-        with transaction.atomic():
+        try:
+          with transaction.atomic():
             for bm in months_to_sync:
                 preview = self._build_crm_billing_preview(company, bm)
                 yr, mo = map(int, preview['billing_month'].split('-'))
@@ -1093,13 +1101,16 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     )
                     created_invoices.append(inv)
 
-        return Response({
-            'success': True,
-            'created_count': len(created_invoices),
-            'skipped_count': skipped_count,
-            'months_synced': months_to_sync,
-            'invoices': ClientInvoiceSerializer(created_invoices, many=True).data
-        }, status=status.HTTP_200_OK)
+          return Response({
+              'success': True,
+              'created_count': len(created_invoices),
+              'skipped_count': skipped_count,
+              'months_synced': months_to_sync,
+              'invoices': ClientInvoiceSerializer(created_invoices, many=True).data
+          }, status=status.HTTP_200_OK)
+        except Exception as e:
+          logger.exception("Error inside auto_sync_month: %s", e)
+          return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], url_path='switch-calculation-mode')
     def switch_calculation_mode(self, request, pk=None):
@@ -1268,7 +1279,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         due_date_str = request.data.get('due_date')
         payment_terms = request.data.get('payment_terms', 'NET_30')
         group_by = request.data.get('group_by', 'PER_LOCATION')  # 'PER_LOCATION' | 'CONSOLIDATED'
-        tax_rate = Decimal(str(request.data.get('tax_rate', '0.00')))
+        tax_rate = Decimal(str(request.data.get('tax_rate') or '0.00'))
         services = request.data.get('services', [])
         initial_status = str(request.data.get('initial_status', ClientInvoiceStatus.ISSUED)).upper()
         if initial_status not in [ClientInvoiceStatus.DRAFT, ClientInvoiceStatus.ISSUED]:

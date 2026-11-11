@@ -26,7 +26,8 @@ import { SecurityFinanceModule } from '../../industries/security/finance/Securit
 import { SecurityReportsWorkspace } from '../../modules/security-operations/components/SecurityReportsWorkspace';
 import { SecurityInventoryWorkspace } from '../../modules/security-operations/components/SecurityInventoryWorkspace';
 import { MonthlyMusterSheetTab } from '../../modules/security-operations/components/MonthlyMusterSheetTab';
-import { AttendanceRegisterView } from '../../modules/hr/components/AttendanceRegisterView';
+import { AttendanceRegisterView as OperationsAttendanceLedgerView } from '../../modules/security-operations/components/AttendanceRegisterView';
+import { AttendanceRegisterView as MasterAttendanceRegistryView } from '../../modules/hr/components/AttendanceRegisterView';
 import { FastCostingGridTab } from '../../industries/security/crm/components/FastCostingGridTab';
 import { SettingsWorkspace } from '../desktop/SettingsWorkspace';
 
@@ -132,7 +133,12 @@ export const WorkspaceManager: React.FC = () => {
                                 activateTab('operations');
                             }} />
                         ) : tab.moduleCode === 'attendance_register' ? (
-                            <AttendanceRegisterView
+                            <OperationsAttendanceLedgerView onBack={() => {
+                                closeTab(tab.id);
+                                activateTab('operations');
+                            }} />
+                        ) : tab.moduleCode === 'attendance_registry' ? (
+                            <MasterAttendanceRegistryView
                                 isStandalone
                                 onBack={() => {
                                     closeTab(tab.id);

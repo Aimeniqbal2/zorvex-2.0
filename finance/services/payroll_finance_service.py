@@ -148,6 +148,21 @@ class PayrollFinanceService:
         # 4. Resolve Payroll Payable Control Account
         ap_account = config.payroll_payable_account if config else None
         if not ap_account:
+            ap_account = (
+                ChartOfAccount.objects.filter(
+                    company=company, account_code__in=['2110', '2100', '2200'],
+                    is_active=True, is_header=False, allow_posting=True
+                ).first()
+                or ChartOfAccount.objects.filter(
+                    company=company, account_type=AccountType.LIABILITY,
+                    account_name__icontains='payroll', is_active=True, is_header=False, allow_posting=True
+                ).first()
+                or ChartOfAccount.objects.filter(
+                    company=company, account_type=AccountType.LIABILITY,
+                    is_active=True, is_header=False, allow_posting=True
+                ).first()
+            )
+        if not ap_account:
             blocking_reasons.append("Missing Payroll Payable control account in Finance Configuration.")
         elif str(ap_account.company_id) != str(company.id):
             blocking_reasons.append(f"Configured Payroll Payable account {ap_account.account_code} belongs to a different company.")
