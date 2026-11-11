@@ -3,7 +3,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
 import { Badge } from '../../../components/ui/Badge';
 import { useToastStore } from '../../../stores/toastStore';
-import { apiClient } from '../api';
+import { apiClient, createTemporaryService, updateTemporaryService, fetchAllActiveEmployees, filterAssignableEmployees } from '../api';
 import type {
     TemporaryServiceRequest,
     TemporaryServiceLine,
@@ -11,7 +11,6 @@ import type {
     TemporaryServiceLineType,
     TemporaryServiceStatus
 } from '../types';
-import { createTemporaryService, updateTemporaryService } from '../api';
 
 interface TemporaryServiceModalProps {
     isOpen: boolean;
@@ -80,26 +79,10 @@ const SearchableGuardSelect: React.FC<SearchableGuardSelectProps> = ({ value, em
         };
     }, [isOpen]);
 
-    const filtered = useMemo(() => {
-        if (!search.trim()) {
-            return employees.slice(0, 50);
-        }
-        const q = search.toLowerCase().trim();
-        const qNoZero = q.replace(/^0+/, '');
-        return employees.filter(emp => {
-            const code = (emp.display_code || emp.employee_code || '').toLowerCase();
-            const prevCode = (emp.previous_employee_code || '').toLowerCase();
-            const codeNoZero = code.replace(/^0+/, '');
-            const fullName = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
-            const desig = (emp.designation_name || '').toLowerCase();
-
-            return code.includes(q) ||
-                (qNoZero && codeNoZero.includes(qNoZero)) ||
-                prevCode.includes(q) ||
-                fullName.includes(q) ||
-                desig.includes(q);
-        }).slice(0, 60);
-    }, [employees, search]);
+    const filtered = useMemo(
+        () => filterAssignableEmployees(employees, search, 60).items,
+        [employees, search]
+    );
 
     return (
         <div ref={containerRef} style={{ position: 'relative', width: '100%', minWidth: '240px' }}>
@@ -413,9 +396,8 @@ export const TemporaryServiceModal: React.FC<TemporaryServiceModalProps> = ({
             return;
         }
 
-        apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=2000')
-            .then(res => {
-                const emps = res.data.results || res.data || [];
+        fetchAllActiveEmployees()
+            .then(emps => {
                 cachedEmployees = emps;
                 setEmployees(emps);
             })

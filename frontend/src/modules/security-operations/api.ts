@@ -1446,6 +1446,139 @@ export const runAutoAttendance = async (params?: { target_date?: string; fill_mo
     return response.data;
 };
 
+/**
+ * Fetches all active employees across all pagination pages so guard assignment search
+ * never misses personnel beyond page 1 (e.g. > 500 or > 1000 employees).
+ */
+export const fetchAllActiveEmployees = async (): Promise<any[]> => {
+    const pageSize = 2000;
+    const all: any[] = [];
+    const seen = new Set<string>();
+    let page = 1;
+    const maxPages = 25;
+
+    while (page <= maxPages) {
+        const res = await apiClient.get('/api/hrm/employees/', {
+            params: { status: 'ACTIVE', page_size: pageSize, page },
+        });
+        const data = res.data;
+        const batch: any[] = Array.isArray(data) ? data : (data?.results || []);
+        for (const emp of batch) {
+            const key = String(emp?.id ?? '');
+            if (key && !seen.has(key)) {
+                seen.add(key);
+                all.push(emp);
+            }
+        }
+        if (Array.isArray(data) || !data?.next || batch.length === 0) {
+            break;
+        }
+        page += 1;
+    }
+    return all;
+};
+
+/**
+ * Server-side employee search fallback used if a newly created employee isn't in memory yet.
+ */
+export const searchActiveEmployees = async (search: string, limit = 100): Promise<any[]> => {
+    const q = search.trim();
+    if (!q) return [];
+    const res = await apiClient.get('/api/hrm/employees/', {
+        params: { status: 'ACTIVE', search: q, page_size: Math.min(limit, 2000) },
+    });
+    return Array.isArray(res.data) ? res.data : (res.data?.results || []);
+};
+
+/**
+ * Ranks and filters assignable guards across code variants, full name, father name, designation, and CNIC.
+ */
+export const filterAssignableEmployees = (
+    employees: any[],
+    query: string,
+    limit = 100
+): { items: any[]; totalMatches: number } => {
+    const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!normalizedQuery) {
+        return { items: employees.slice(0, limit), totalMatches: employees.length };
+    }
+
+    const tokens = normalizedQuery.split(' ').filter(Boolean);
+    const qNoZero = normalizedQuery.replace(/^0+/, '');
+    const qCnic = normalizedQuery.replace(/[-\s]/g, '');
+
+    const scored: Array<{ emp: any; score: number }> = [];
+
+    for (const emp of employees) {
+        const prevCode = (emp.previous_employee_code || '').toLowerCase();
+        const prevNoZero = prevCode.replace(/^0+/, '');
+        const dispCode = (emp.display_code || '').toLowerCase();
+        const dispNoZero = dispCode.replace(/^0+/, '');
+        const empCode = (emp.employee_code || '').toLowerCase();
+        const empNoZero = empCode.replace(/^0+/, '');
+        const fullName = `${emp.first_name || ''} ${emp.middle_name || ''} ${emp.last_name || ''} ${emp.full_name || ''}`
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+        const fatherName = (emp.father_name || '').toLowerCase();
+        const desig = (emp.designation_name || emp.designation?.name || '').toLowerCase();
+        const cnic = (emp.cnic_number || emp.cnic || '').toLowerCase();
+        const cnicClean = cnic.replace(/[-\s]/g, '');
+        const phone = (emp.phone || emp.telephone_number || '').toLowerCase();
+        const city = (emp.city || '').toLowerCase();
+
+        const exactCodeMatch =
+            prevCode === normalizedQuery ||
+            dispCode === normalizedQuery ||
+            empCode === normalizedQuery ||
+            (qNoZero !== '' && (prevNoZero === qNoZero || dispNoZero === qNoZero || empNoZero === qNoZero));
+
+        const codeIncludes =
+            prevCode.includes(normalizedQuery) ||
+            dispCode.includes(normalizedQuery) ||
+            empCode.includes(normalizedQuery) ||
+            (qNoZero !== '' && (
+                (prevNoZero !== '' && prevNoZero.includes(qNoZero)) ||
+                (dispNoZero !== '' && dispNoZero.includes(qNoZero)) ||
+                (empNoZero !== '' && empNoZero.includes(qNoZero))
+            ));
+
+        const haystack = `${fullName} ${fatherName} ${prevCode} ${dispCode} ${empCode} ${desig} ${cnic} ${phone} ${city}`;
+        const allTokensMatch = tokens.every((t) => {
+            const tNoZero = t.replace(/^0+/, '');
+            const tClean = t.replace(/[-\s]/g, '');
+            return (
+                haystack.includes(t) ||
+                (tNoZero !== '' && (prevNoZero.includes(tNoZero) || dispNoZero.includes(tNoZero) || empNoZero.includes(tNoZero))) ||
+                (tClean !== '' && cnicClean.includes(tClean))
+            );
+        });
+
+        const directMatch =
+            exactCodeMatch ||
+            codeIncludes ||
+            (qCnic !== '' && cnicClean.includes(qCnic)) ||
+            allTokensMatch;
+
+        if (!directMatch) continue;
+
+        let score = 1;
+        if (exactCodeMatch) score = 100;
+        else if (prevCode.startsWith(normalizedQuery) || dispCode.startsWith(normalizedQuery) || empCode.startsWith(normalizedQuery)) score = 80;
+        else if (codeIncludes) score = 60;
+        else if (fullName.startsWith(normalizedQuery)) score = 40;
+        else if (fullName.includes(normalizedQuery)) score = 25;
+
+        scored.push({ emp, score });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return {
+        items: scored.slice(0, limit).map((x) => x.emp),
+        totalMatches: scored.length,
+    };
+};
+
 // Re-export apiClient for modal components
 export { apiClient } from '../../api/client';
 

@@ -110,9 +110,26 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-utils': ['axios', 'zustand', 'lucide-react'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (
+            id.includes('/react/') ||
+            id.includes('/react-dom/') ||
+            id.includes('/react-router-dom/') ||
+            id.includes('\\react\\') ||
+            id.includes('\\react-dom\\') ||
+            id.includes('\\react-router-dom\\')
+          ) {
+            return 'vendor-react';
+          }
+          if (
+            id.includes('/axios/') ||
+            id.includes('/zustand/') ||
+            id.includes('\\axios\\') ||
+            id.includes('\\zustand\\')
+          ) {
+            return 'vendor-utils';
+          }
         },
       },
     },

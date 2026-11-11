@@ -5,7 +5,9 @@ import {
     saveTemporaryMusterAttendance,
     assignTemporaryGuards,
     unassignTemporaryGuard,
-    apiClient
+    fetchAllActiveEmployees,
+    searchActiveEmployees,
+    filterAssignableEmployees,
 } from '../api';
 import type {
     TemporaryMusterServiceBlock,
@@ -102,6 +104,8 @@ export const TemporaryServicesMusterSection: React.FC<TemporaryServicesMusterSec
     // Quick Assign Guard Modal state
     const [assignTargetService, setAssignTargetService] = useState<TemporaryMusterServiceBlock | null>(null);
     const [allEmployees, setAllEmployees] = useState<any[]>([]);
+    const [loadingEmployees, setLoadingEmployees] = useState<boolean>(false);
+    const [searchingRemoteEmployees, setSearchingRemoteEmployees] = useState<boolean>(false);
     const [selectedRequirementIndex, setSelectedRequirementIndex] = useState<number>(0);
     const [guardSearch, setGuardSearch] = useState<string>('');
     const [isAssigning, setIsAssigning] = useState<boolean>(false);
@@ -125,18 +129,22 @@ export const TemporaryServicesMusterSection: React.FC<TemporaryServicesMusterSec
         loadData();
     }, [loadData]);
 
-    // Load employees for quick assign
-    useEffect(() => {
-        const loadStaffDependencies = async () => {
-            try {
-                const empRes = await apiClient.get('/api/hrm/employees/?status=ACTIVE&page_size=500').catch(() => ({ data: [] }));
-                setAllEmployees(empRes.data?.results || empRes.data || []);
-            } catch (err) {
-                console.error('Failed loading staff dependencies', err);
-            }
-        };
-        loadStaffDependencies();
+    // Load all active employees across all pages for quick assign
+    const loadAllEmployees = useCallback(async () => {
+        try {
+            setLoadingEmployees(true);
+            const list = await fetchAllActiveEmployees();
+            setAllEmployees(list);
+        } catch (err) {
+            console.error('Failed loading staff dependencies', err);
+        } finally {
+            setLoadingEmployees(false);
+        }
     }, []);
+
+    useEffect(() => {
+        loadAllEmployees();
+    }, [loadAllEmployees]);
 
     // Toggle collapse for service block
     const toggleCollapse = (id: string) => {
@@ -267,6 +275,9 @@ export const TemporaryServicesMusterSection: React.FC<TemporaryServicesMusterSec
         setAssignTargetService(svc);
         setSelectedRequirementIndex(0);
         setGuardSearch('');
+        if (allEmployees.length === 0 && !loadingEmployees) {
+            loadAllEmployees();
+        }
     };
 
     // Current service manpower requirements list
@@ -288,31 +299,43 @@ export const TemporaryServicesMusterSection: React.FC<TemporaryServicesMusterSec
 
     const activeReq = reqList[selectedRequirementIndex] || reqList[0];
 
-    // Filtered personnel matching guardSearch query
-    const filteredEmployees = useMemo(() => {
-        if (!guardSearch.trim()) return allEmployees.slice(0, 30);
-        const q = guardSearch.toLowerCase().trim();
-        const qNoZero = q.replace(/^0+/, '');
-        return allEmployees.filter(e => {
-            const prevCode = (e.previous_employee_code || '').toLowerCase();
-            const prevCodeNoZero = prevCode.replace(/^0+/, '');
-            const dispCode = (e.display_code || '').toLowerCase();
-            const dispCodeNoZero = dispCode.replace(/^0+/, '');
-            const empCode = (e.employee_code || '').toLowerCase();
-            const empCodeNoZero = empCode.replace(/^0+/, '');
-            const nameStr = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase();
+    // Filtered personnel matching guardSearch query across all loaded employees
+    const filteredEmployeeResult = useMemo(
+        () => filterAssignableEmployees(allEmployees, guardSearch, 100),
+        [allEmployees, guardSearch]
+    );
+    const filteredEmployees = filteredEmployeeResult.items;
 
-            return (
-                prevCode.includes(q) ||
-                (qNoZero && prevCodeNoZero.includes(qNoZero)) ||
-                dispCode.includes(q) ||
-                (dispCodeNoZero && dispCodeNoZero.includes(qNoZero)) ||
-                empCode.includes(q) ||
-                (qNoZero && empCodeNoZero.includes(qNoZero)) ||
-                nameStr.includes(q)
-            );
-        }).slice(0, 30);
-    }, [allEmployees, guardSearch]);
+    // Debounced backend search fallback when local list has no match (e.g. newly added guard)
+    useEffect(() => {
+        const q = guardSearch.trim();
+        if (!assignTargetService || loadingEmployees || q.length < 2 || filteredEmployeeResult.totalMatches > 0) {
+            return;
+        }
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                setSearchingRemoteEmployees(true);
+                const matches = await searchActiveEmployees(q, 100);
+                if (!cancelled && matches.length > 0) {
+                    setAllEmployees(prev => {
+                        const existingIds = new Set(prev.map(e => String(e.id)));
+                        const fresh = matches.filter(m => !existingIds.has(String(m.id)));
+                        return fresh.length > 0 ? [...prev, ...fresh] : prev;
+                    });
+                }
+            } catch {
+                // Keep UI responsive if transient network error occurs
+            } finally {
+                if (!cancelled) setSearchingRemoteEmployees(false);
+            }
+        }, 250);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [assignTargetService, guardSearch, loadingEmployees, filteredEmployeeResult.totalMatches]);
 
     // Deploy guard to site roster for this requirement
     const handleDeployGuard = async (emp: any, req: any) => {
@@ -1352,12 +1375,21 @@ export const TemporaryServicesMusterSection: React.FC<TemporaryServicesMusterSec
 
                         {/* Workforce Personnel Search Input */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
-                                Search Personnel to Assign:
-                            </label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
+                                    Search Personnel to Assign:
+                                </label>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 600 }}>
+                                    {loadingEmployees
+                                        ? 'Loading active personnel...'
+                                        : filteredEmployeeResult.totalMatches > filteredEmployees.length
+                                            ? `Showing ${filteredEmployees.length} of ${filteredEmployeeResult.totalMatches} matches (${allEmployees.length} active)`
+                                            : `${filteredEmployeeResult.totalMatches} of ${allEmployees.length} active employees`}
+                                </span>
+                            </div>
                             <input
                                 type="text"
-                                placeholder="🔍 Search by Employee Code (e.g. 009450) or Name..."
+                                placeholder="🔍 Search by Employee Code (e.g. 009450), Name, Designation, or CNIC..."
                                 value={guardSearch}
                                 onChange={(e) => setGuardSearch(e.target.value)}
                                 autoFocus
@@ -1414,7 +1446,9 @@ export const TemporaryServicesMusterSection: React.FC<TemporaryServicesMusterSec
                             ))}
                             {filteredEmployees.length === 0 && (
                                 <div style={{ textAlign: 'center', padding: '24px', color: 'var(--color-text-muted, #64748b)', fontSize: '0.85rem' }}>
-                                    No personnel found matching "{guardSearch}".
+                                    {(loadingEmployees || searchingRemoteEmployees)
+                                        ? 'Searching personnel directory...'
+                                        : `No personnel found matching "${guardSearch}".`}
                                 </div>
                             )}
                         </div>

@@ -9,7 +9,9 @@ import {
     getAutoAttendanceConfig, 
     updateAutoAttendanceConfig, 
     runAutoAttendance, 
-    apiClient 
+    fetchAllActiveEmployees,
+    searchActiveEmployees,
+    filterAssignableEmployees,
 } from '../api';
 import type { AutoAttendanceConfig } from '../api';
 import { useToastStore } from '../../../stores/toastStore';
@@ -247,6 +249,8 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
     const [activeAddSiteId, setActiveAddSiteId] = useState<string | null>(null);
     const [selectedRequirementIndex, setSelectedRequirementIndex] = useState<number>(0);
     const [allEmployees, setAllEmployees] = useState<any[]>([]);
+    const [loadingEmployees, setLoadingEmployees] = useState<boolean>(false);
+    const [searchingRemoteEmployees, setSearchingRemoteEmployees] = useState<boolean>(false);
     const [guardSearch, setGuardSearch] = useState<string>('');
 
     // Import Excel Modal state
@@ -477,19 +481,62 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
         loadMusterData();
     }, [year, month]);
 
-    // Preload active employees for guard search modal
+    // Preload all active employees across all pages for guard search modal
+    const loadAllEmployees = async () => {
+        try {
+            setLoadingEmployees(true);
+            const list = await fetchAllActiveEmployees();
+            setAllEmployees(list);
+        } catch (err) {
+            console.error('Failed to preload workforce:', err);
+        } finally {
+            setLoadingEmployees(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchEmployeesList = async () => {
-            try {
-                const res = await apiClient.get('/api/hrm/employees/?page_size=1000&status=ACTIVE');
-                const list = res.data?.results || res.data || [];
-                setAllEmployees(list);
-            } catch (err) {
-                console.error('Failed to preload workforce:', err);
-            }
-        };
-        fetchEmployeesList();
+        loadAllEmployees();
     }, []);
+
+    useEffect(() => {
+        if (activeAddSiteId && allEmployees.length === 0 && !loadingEmployees) {
+            loadAllEmployees();
+        }
+    }, [activeAddSiteId]);
+
+    const filteredModalEmployeesResult = useMemo(
+        () => filterAssignableEmployees(allEmployees, guardSearch, 100),
+        [allEmployees, guardSearch]
+    );
+
+    useEffect(() => {
+        const q = guardSearch.trim();
+        if (!activeAddSiteId || loadingEmployees || q.length < 2 || filteredModalEmployeesResult.totalMatches > 0) {
+            return;
+        }
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                setSearchingRemoteEmployees(true);
+                const matches = await searchActiveEmployees(q, 100);
+                if (!cancelled && matches.length > 0) {
+                    setAllEmployees(prev => {
+                        const existingIds = new Set(prev.map(e => String(e.id)));
+                        const fresh = matches.filter(m => !existingIds.has(String(m.id)));
+                        return fresh.length > 0 ? [...prev, ...fresh] : prev;
+                    });
+                }
+            } catch {
+                // Ignore transient errors during background lookup
+            } finally {
+                if (!cancelled) setSearchingRemoteEmployees(false);
+            }
+        }, 250);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [activeAddSiteId, guardSearch, loadingEmployees, filteredModalEmployeesResult.totalMatches]);
 
     // Filtered sites: first filter by site dropdown, then by search query
     const filteredSites = useMemo(() => {
@@ -2641,12 +2688,21 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                             {/* Workforce Personnel Search Input */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
-                                    Search Personnel to Assign:
-                                </label>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
+                                        Search Personnel to Assign:
+                                    </label>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)', fontWeight: 600 }}>
+                                        {loadingEmployees
+                                            ? 'Loading active personnel...'
+                                            : filteredModalEmployeesResult.totalMatches > filteredModalEmployeesResult.items.length
+                                                ? `Showing ${filteredModalEmployeesResult.items.length} of ${filteredModalEmployeesResult.totalMatches} matches (${allEmployees.length} active)`
+                                                : `${filteredModalEmployeesResult.totalMatches} of ${allEmployees.length} active employees`}
+                                    </span>
+                                </div>
                                 <input
                                     type="text"
-                                    placeholder="🔍 Search by Employee Code (e.g. 009450) or Name..."
+                                    placeholder="🔍 Search by Employee Code (e.g. 009450), Name, Designation, or CNIC..."
                                     value={guardSearch}
                                     onChange={(e) => setGuardSearch(e.target.value)}
                                     autoFocus
@@ -2656,31 +2712,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
                             {/* Filtered Direct Workforce Personnel List */}
                             <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-                                {allEmployees
-                                    .filter(e => {
-                                        if (!guardSearch.trim()) return true;
-                                        const q = guardSearch.toLowerCase().trim();
-                                        const qNoZero = q.replace(/^0+/, '');
-                                        const prevCode = (e.previous_employee_code || '').toLowerCase();
-                                        const prevCodeNoZero = prevCode.replace(/^0+/, '');
-                                        const dispCode = (e.display_code || '').toLowerCase();
-                                        const dispCodeNoZero = dispCode.replace(/^0+/, '');
-                                        const empCode = (e.employee_code || '').toLowerCase();
-                                        const empCodeNoZero = empCode.replace(/^0+/, '');
-                                        const nameStr = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase();
-
-                                        return (
-                                            prevCode.includes(q) ||
-                                            (qNoZero && prevCodeNoZero.includes(qNoZero)) ||
-                                            dispCode.includes(q) ||
-                                            (dispCodeNoZero && dispCodeNoZero.includes(qNoZero)) ||
-                                            empCode.includes(q) ||
-                                            (qNoZero && empCodeNoZero.includes(qNoZero)) ||
-                                            nameStr.includes(q)
-                                        );
-                                    })
-                                    .slice(0, 30)
-                                    .map(emp => (
+                                {filteredModalEmployeesResult.items.map(emp => (
                                         <div
                                             key={emp.id}
                                             onClick={() => handleAddGuardToSite(emp, activeReq)}
@@ -2699,6 +2731,13 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                             </button>
                                         </div>
                                     ))}
+                                {filteredModalEmployeesResult.items.length === 0 && (
+                                    <div style={{ textAlign: 'center', padding: '24px', color: 'var(--color-text-muted, #64748b)', fontSize: '0.85rem' }}>
+                                        {(loadingEmployees || searchingRemoteEmployees)
+                                            ? 'Searching personnel directory...'
+                                            : `No personnel found matching "${guardSearch}".`}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
