@@ -152,7 +152,7 @@ class AttendanceRegisterService:
         # 2. Fetch live Operations Monthly Duty Muster (DailyDutyPay) & HRM WorkforceAttendance
         #    for the whole company in [start_date, end_date] first so we know which employees have
         #    actual attendance in this period and can build cross-location stacked cells accurately.
-        from operations.models import DailyDutyPay, Deployment
+        from operations.models import DailyDutyPay, Deployment, OperationalSite
 
         ddp_rows = DailyDutyPay.objects.filter(
             company_id=company_id,
@@ -258,7 +258,7 @@ class AttendanceRegisterService:
             'site__crm_entity_id',
             'shift_id',
             'shift__name',
-            'is_replacement',
+            'duty_roster__is_replacement',
             'notes',
         )
 
@@ -301,7 +301,7 @@ class AttendanceRegisterService:
                 'site': site_name,
                 'post': '',
                 'shift': shift_name,
-                'is_replacement': bool(wa['is_replacement']),
+                'is_replacement': bool(wa.get('duty_roster__is_replacement')),
                 'notes': (wa['notes'] or '').strip(),
                 'source': 'HRM',
             }
@@ -319,11 +319,12 @@ class AttendanceRegisterService:
             JumpRecordStatus.ACKNOWLEDGED,
         }
         for j in jumps_qs:
-            if j.status in active_jump_statuses:
+            if j.status in active_jump_statuses and j.absent_since:
                 end_dt_raw = j.reinstated_at or j.resolved_at
-                j_end = end_dt_raw.date() if end_dt_raw else end_date
+                j_end = end_dt_raw.date() if hasattr(end_dt_raw, 'date') else (end_dt_raw or end_date)
+                j_start = j.absent_since.date() if hasattr(j.absent_since, 'date') else j.absent_since
                 if j_end >= start_date:
-                    emp_jump_dates[str(j.employee_id)].append((j.absent_since, j_end, j))
+                    emp_jump_dates[str(j.employee_id)].append((j_start, j_end, j))
 
         # 3. Filter employees (Active employees OR anyone with recorded attendance in this period)
         qs = Employee.objects.filter(
@@ -397,7 +398,7 @@ class AttendanceRegisterService:
             for dep_emp_id, site_name in Deployment.objects.filter(
                 company_id=company_id,
                 is_deleted=False,
-                is_active=True,
+                status='ACTIVE',
                 site__is_deleted=False,
                 employee_id__in=[e.id for e in employees],
             ).values_list('employee_id', 'site__name'):
@@ -602,14 +603,14 @@ class AttendanceRegisterService:
                 company_id=company_id,
                 is_deleted=False,
                 is_active=True,
-            ).select_related('crm_entity').order_by('name')
+            ).filter(
+                Q(crm_entity__isnull=True) | Q(crm_entity__is_deleted=False, crm_entity__active=True)
+            ).values('id', 'name', 'crm_entity__name').order_by('name')
             for s in sites_qs:
-                if getattr(s, 'crm_entity', None) and (s.crm_entity.is_deleted or not s.crm_entity.active):
-                    continue
                 sites_list.append({
-                    'id': str(s.id),
-                    'name': s.name,
-                    'client_name': s.crm_entity.name if s.crm_entity else '',
+                    'id': str(s['id']),
+                    'name': s['name'],
+                    'client_name': s['crm_entity__name'] or '',
                 })
         except Exception:
             pass

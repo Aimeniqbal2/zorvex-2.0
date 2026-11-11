@@ -1120,7 +1120,7 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
             or 'OPERATION'
         )
         try:
-            from erp_core.models import Company
+            from companies.models import Company
             data['company_name'] = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
         except Exception:
             data['company_name'] = ''
@@ -1157,7 +1157,7 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
         if export_format in ('xlsx', 'excel'):
             company_name = ''
             try:
-                from erp_core.models import Company
+                from companies.models import Company
                 company_name = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
             except Exception:
                 pass
