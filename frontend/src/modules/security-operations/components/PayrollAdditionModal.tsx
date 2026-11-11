@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { apiClient, createPayrollAddition } from '../api';
+import React, { useState, useEffect, useMemo } from 'react';
+import { createPayrollAddition, fetchAllActiveEmployees, filterAssignableEmployees } from '../api';
 import type { EmployeeOption, PayrollAdditionType, PayrollAdditionFrequency } from '../types';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
@@ -20,6 +20,7 @@ export const PayrollAdditionModal: React.FC<Props> = ({
 }) => {
     const today = new Date().toISOString().split('T')[0];
     const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+    const [empSearch, setEmpSearch] = useState('');
     const [loadingDropdowns, setLoadingDropdowns] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export const PayrollAdditionModal: React.FC<Props> = ({
     useEffect(() => {
         if (isOpen) {
             fetchEmployees();
+            setEmpSearch('');
             setFormData({
                 employee: preselectedEmployeeId || '',
                 addition_type: 'ALLOWANCE',
@@ -59,14 +61,23 @@ export const PayrollAdditionModal: React.FC<Props> = ({
     const fetchEmployees = async () => {
         setLoadingDropdowns(true);
         try {
-            const res = await apiClient.get('/api/hrm/employees/?limit=100');
-            setEmployees(res.data.results || res.data || []);
+            const list = await fetchAllActiveEmployees();
+            setEmployees(list);
         } catch (err) {
             console.error('Failed to load employees', err);
         } finally {
             setLoadingDropdowns(false);
         }
     };
+
+    const filteredEmployees = useMemo(() => {
+        const res = filterAssignableEmployees(employees, empSearch, 250).items;
+        if (formData.employee && !res.some((e: any) => String(e.id) === String(formData.employee))) {
+            const chosen = employees.find((e: any) => String(e.id) === String(formData.employee));
+            if (chosen) return [chosen, ...res];
+        }
+        return res;
+    }, [employees, empSearch, formData.employee]);
 
     const handleChange = (field: string, value: any) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -135,8 +146,25 @@ export const PayrollAdditionModal: React.FC<Props> = ({
 
                 <div>
                     <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary, #94a3b8)', marginBottom: '4px' }}>
-                        Employee *
+                        Employee * ({employees.length} active)
                     </label>
+                    <input
+                        type="text"
+                        placeholder="Filter by code (e.g. 009399) or name..."
+                        value={empSearch}
+                        onChange={(e) => setEmpSearch(e.target.value)}
+                        style={{
+                            width: '100%',
+                            padding: '6px 10px',
+                            marginBottom: '6px',
+                            background: 'var(--color-surface, #1e293b)',
+                            border: '1px solid var(--color-border, #334155)',
+                            borderRadius: '6px',
+                            color: 'var(--color-text, #f8fafc)',
+                            fontSize: '12px',
+                            boxSizing: 'border-box'
+                        }}
+                    />
                     <select
                         style={{
                             width: '100%',
@@ -152,9 +180,9 @@ export const PayrollAdditionModal: React.FC<Props> = ({
                         disabled={loadingDropdowns}
                     >
                         <option value="">-- Select Employee --</option>
-                        {employees.map(emp => (
+                        {filteredEmployees.map((emp: any) => (
                             <option key={emp.id} value={emp.id}>
-                                {emp.first_name} {emp.last_name} {emp.designation_name ? `(${emp.designation_name})` : ''}
+                                {emp.display_code || emp.previous_employee_code || emp.employee_code || 'EMP'} — {emp.first_name} {emp.last_name} {emp.designation_name ? `(${emp.designation_name})` : ''}
                             </option>
                         ))}
                     </select>

@@ -599,8 +599,8 @@ class PayrollRulesService:
                     notes="Unlinked advance deduction instruction"
                 ))
 
-        # Also auto-detect any unpaid/approved advances set with recovery_method=PAYROLL_DEDUCTION
-        # that don't already have explicit deductions
+        # Also auto-detect any paid advances flagged for payroll deduction that are due
+        # in or before this payroll period and don't already have explicit deductions.
         auto_advances = EmployeeAdvance.objects.filter(
             company_id=company_id,
             employee=emp,
@@ -609,11 +609,18 @@ class PayrollRulesService:
             payroll_deduction_ready=True,
             outstanding_balance__gt=Decimal('0.00'),
             is_deleted=False
-        ).exclude(id__in=[d.advance_id for d in adv_deductions if d.advance_id])
+        ).filter(
+            Q(expected_settlement_date__lte=p_end) |
+            (Q(expected_settlement_date__isnull=True) & Q(advance_date__lte=p_end))
+        ).exclude(id__in=[d.advance_id for d in adv_deductions if d.advance_id]).order_by('advance_date', 'created_at')
 
+        non_advance_deductions = _quantize_decimal(
+            calc.total_statutory_deductions + calc.patrolling_deduction + calc.insurance_deduction + calc.other_deductions_amount
+        )
         for a_adv in auto_advances:
-            # Auto-recover up to outstanding balance
-            recoverable = min(a_adv.outstanding_balance, calc.gross_earnings - advance_recovery_sum)
+            # Cap auto-recovery so it never exceeds available net pay after statutory/other deductions
+            available_pay = max(Decimal('0.00'), calc.gross_earnings - non_advance_deductions - advance_recovery_sum)
+            recoverable = min(a_adv.outstanding_balance, available_pay)
             if recoverable > Decimal('0.00'):
                 rec_amt = _quantize_decimal(recoverable)
                 advance_recovery_sum += rec_amt

@@ -1823,8 +1823,87 @@ export async function configurePettyCashCustodian(data: {
 }
 
 export async function fetchEmployees(): Promise<any[]> {
-  const resp = await axios.get('/api/hrm/employees/', getAuthHeaders());
+  const pageSize = 2000;
+  const all: any[] = [];
+  const seen = new Set<string>();
+  let page = 1;
+  const maxPages = 25;
+
+  while (page <= maxPages) {
+    const resp = await axios.get('/api/hrm/employees/', {
+      ...getAuthHeaders(),
+      params: { status: 'ACTIVE', page_size: pageSize, page }
+    });
+    const data = resp.data;
+    const batch: any[] = Array.isArray(data) ? data : (data?.results || []);
+    for (const emp of batch) {
+      const key = String(emp?.id ?? '');
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        all.push(emp);
+      }
+    }
+    if (Array.isArray(data) || !data?.next || batch.length === 0) {
+      break;
+    }
+    page += 1;
+  }
+  return all;
+}
+
+export async function toggleEmployeeAdvancePayrollDeduction(
+  id: string,
+  payroll_deduction_ready?: boolean
+): Promise<{ status: string; advance: EmployeeAdvanceItem }> {
+  const resp = await axios.post(
+    `${API_BASE}/employee-advances/${id}/toggle_payroll_deduction/`,
+    payroll_deduction_ready !== undefined ? { payroll_deduction_ready } : {},
+    getAuthHeaders()
+  );
+  return resp.data;
+}
+
+export interface FinancePayrollDeductionItem {
+  id: string;
+  employee: string;
+  employee_name?: string;
+  employee_code?: string;
+  deduction_type: 'PATROLLING' | 'INSURANCE' | 'ADVANCE_RECOVERY' | 'UNIFORM' | 'FINE' | 'OTHER';
+  deduction_type_label?: string;
+  frequency: 'ONE_TIME' | 'RECURRING';
+  frequency_label?: string;
+  name: string;
+  amount: string;
+  effective_date?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  advance?: string | null;
+  advance_number?: string;
+  is_active: boolean;
+  is_approved: boolean;
+  is_frozen: boolean;
+  notes?: string;
+  created_at?: string;
+}
+
+export async function fetchFinancePayrollDeductions(params?: Record<string, any>): Promise<FinancePayrollDeductionItem[]> {
+  const opsBase = getApiBaseUrl() + '/api/operations';
+  const resp = await axios.get(`${opsBase}/payroll-deductions/`, {
+    ...getAuthHeaders(),
+    params: { page_size: 200, ...params }
+  });
   return resp.data.results || resp.data;
+}
+
+export async function createFinancePayrollDeduction(data: Record<string, any>): Promise<FinancePayrollDeductionItem> {
+  const opsBase = getApiBaseUrl() + '/api/operations';
+  const resp = await axios.post(`${opsBase}/payroll-deductions/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function deleteFinancePayrollDeduction(id: string): Promise<void> {
+  const opsBase = getApiBaseUrl() + '/api/operations';
+  await axios.delete(`${opsBase}/payroll-deductions/${id}/`, getAuthHeaders());
 }
 
 export async function fetchOperationalSites(): Promise<any[]> {

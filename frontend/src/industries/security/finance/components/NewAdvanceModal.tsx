@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { EmployeeAdvanceItem } from '../api';
 import { createEmployeeAdvance } from '../api';
 
@@ -6,22 +6,54 @@ interface NewAdvanceModalProps {
   employees: any[];
   onClose: () => void;
   onSuccess: (advance: EmployeeAdvanceItem) => void;
+  defaultRecoveryMethod?: string;
+  preselectedEmployeeId?: string;
 }
 
 export const NewAdvanceModal: React.FC<NewAdvanceModalProps> = ({
   employees,
   onClose,
-  onSuccess
+  onSuccess,
+  defaultRecoveryMethod = 'EXPENSE_SETTLEMENT',
+  preselectedEmployeeId = ''
 }) => {
-  const [employee, setEmployee] = useState('');
+  const [employee, setEmployee] = useState(preselectedEmployeeId);
+  const [empSearch, setEmpSearch] = useState('');
   const [advanceType, setAdvanceType] = useState('SALARY_ADVANCE');
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState(new Date().toISOString().split('T')[0]);
   const [expectedSettlementDate, setExpectedSettlementDate] = useState('');
-  const [recoveryMethod, setRecoveryMethod] = useState('EXPENSE_SETTLEMENT');
+  const [recoveryMethod, setRecoveryMethod] = useState(defaultRecoveryMethod);
+  const [payrollDeductionReady, setPayrollDeductionReady] = useState(defaultRecoveryMethod === 'PAYROLL_DEDUCTION');
   const [purpose, setPurpose] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const filteredEmployees = useMemo(() => {
+    const q = empSearch.trim().toLowerCase();
+    const list = !q
+      ? employees
+      : employees.filter((emp) => {
+          const code = `${emp.display_code || ''} ${emp.employee_code || ''} ${emp.previous_employee_code || ''}`.toLowerCase();
+          const name = `${emp.first_name || ''} ${emp.middle_name || ''} ${emp.last_name || ''}`.toLowerCase();
+          return code.includes(q) || name.includes(q);
+        });
+    const sliced = list.slice(0, 250);
+    if (employee && !sliced.some((e) => String(e.id) === String(employee))) {
+      const chosen = employees.find((e) => String(e.id) === String(employee));
+      if (chosen) return [chosen, ...sliced];
+    }
+    return sliced;
+  }, [employees, empSearch, employee]);
+
+  const handleRecoveryChange = (val: string) => {
+    setRecoveryMethod(val);
+    if (val === 'PAYROLL_DEDUCTION') {
+      setPayrollDeductionReady(true);
+    } else if (val !== 'MIXED') {
+      setPayrollDeductionReady(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +78,7 @@ export const NewAdvanceModal: React.FC<NewAdvanceModalProps> = ({
         advance_date: advanceDate,
         expected_settlement_date: expectedSettlementDate || undefined,
         recovery_method: recoveryMethod,
+        payroll_deduction_ready: payrollDeductionReady,
         purpose,
         submit_now: true
       };
@@ -134,8 +167,25 @@ export const NewAdvanceModal: React.FC<NewAdvanceModalProps> = ({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '6px', fontWeight: 500 }}>
-                Employee *
+                Employee * ({employees.length} active)
               </label>
+              <input
+                type="text"
+                value={empSearch}
+                onChange={e => setEmpSearch(e.target.value)}
+                placeholder="Search code (e.g. 009399) or name..."
+                style={{
+                  width: '100%',
+                  padding: '7px 10px',
+                  marginBottom: '6px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border, #333a48)',
+                  background: 'var(--color-background, #14171f)',
+                  color: '#fff',
+                  fontSize: '0.82rem',
+                  boxSizing: 'border-box'
+                }}
+              />
               <select
                 value={employee}
                 onChange={e => setEmployee(e.target.value)}
@@ -151,9 +201,9 @@ export const NewAdvanceModal: React.FC<NewAdvanceModalProps> = ({
                 }}
               >
                 <option value="">-- Select Employee --</option>
-                {employees.map(emp => (
+                {filteredEmployees.map(emp => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.first_name} {emp.last_name} ({emp.employee_code || 'EMP'})
+                    {emp.display_code || emp.previous_employee_code || emp.employee_code || 'EMP'} — {emp.first_name} {emp.last_name}
                   </option>
                 ))}
               </select>
@@ -216,7 +266,7 @@ export const NewAdvanceModal: React.FC<NewAdvanceModalProps> = ({
               </label>
               <select
                 value={recoveryMethod}
-                onChange={e => setRecoveryMethod(e.target.value)}
+                onChange={e => handleRecoveryChange(e.target.value)}
                 style={{
                   width: '100%',
                   padding: '10px 12px',
@@ -230,10 +280,36 @@ export const NewAdvanceModal: React.FC<NewAdvanceModalProps> = ({
                 <option value="EXPENSE_SETTLEMENT">Expense Voucher Settlement</option>
                 <option value="PAYROLL_DEDUCTION">Monthly Payroll Deduction</option>
                 <option value="CASH_RETURN">Cash Return to Treasury</option>
-                <option value="MIXED">Mixed (Expenses + Cash Return)</option>
+                <option value="MIXED">Mixed (Expenses + Cash Return / Payroll)</option>
               </select>
             </div>
           </div>
+
+          {(recoveryMethod === 'PAYROLL_DEDUCTION' || recoveryMethod === 'MIXED') && (
+            <div style={{
+              padding: '10px 12px',
+              background: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              color: '#6ee7b7',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px'
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={payrollDeductionReady}
+                  onChange={e => setPayrollDeductionReady(e.target.checked)}
+                />
+                <span>Auto-deduct from next payroll salary once disbursed (PAID)</span>
+              </label>
+              <span style={{ color: '#cbd5e1', fontSize: '0.75rem' }}>
+                Once approved & disbursed, this advance automatically deducts in the payroll month matching <strong>Expected Settlement Date</strong> (or <strong>Advance Date</strong> if left blank). For monthly installments, leave this unchecked or create recurring Advance Recovery deductions.
+              </span>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>

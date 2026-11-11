@@ -33,7 +33,8 @@ class EmployeeAdvanceService:
         purpose: str = '',
         bank_account: Optional[BankAccount] = None,
         user=None,
-        submit_now: bool = False
+        submit_now: bool = False,
+        payroll_deduction_ready: Optional[bool] = None,
     ) -> EmployeeAdvance:
         """
         Creates an employee advance request.
@@ -50,6 +51,11 @@ class EmployeeAdvanceService:
 
         adv_date = advance_date or timezone.now().date()
         status = AdvanceStatus.PENDING_APPROVAL if submit_now else AdvanceStatus.DRAFT
+        is_payroll_ready = (
+            bool(payroll_deduction_ready)
+            if payroll_deduction_ready is not None
+            else (recovery_method == AdvanceRecoveryMethod.PAYROLL_DEDUCTION)
+        )
 
         advance = EmployeeAdvance.objects.create(
             company=company,
@@ -65,6 +71,7 @@ class EmployeeAdvanceService:
             purpose=purpose,
             status=status,
             bank_account=bank_account,
+            payroll_deduction_ready=is_payroll_ready,
             created_by=user
         )
         return advance
@@ -174,6 +181,8 @@ class EmployeeAdvanceService:
         advance.voucher = voucher
         advance.status = AdvanceStatus.PAID
         advance.outstanding_balance = advance.amount
+        if advance.recovery_method == AdvanceRecoveryMethod.PAYROLL_DEDUCTION and not advance.payroll_deduction_ready:
+            advance.payroll_deduction_ready = True
         advance.paid_by = user
         advance.paid_at = timezone.now()
         if not advance.approved_by:

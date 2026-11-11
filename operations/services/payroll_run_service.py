@@ -499,30 +499,67 @@ class PayrollRunService:
             ps.save(update_fields=['status', 'is_frozen'])
 
         # 4. Advance Recovery Settlement (Commit exactly once)
+        from django.db.models import Q
+        import uuid as _uuid
         advances_recovered_total = Decimal('0.00')
         if not payroll_run.advances_settled:
             for calc in calcs:
                 if calc.advance_recovery_amount > Decimal('0.00'):
-                    active_advances = EmployeeAdvance.objects.filter(
-                        company=company,
-                        employee=calc.employee,
-                        recovery_method__in=[AdvanceRecoveryMethod.PAYROLL_DEDUCTION, AdvanceRecoveryMethod.MIXED],
-                        status=AdvanceStatus.PAID
-                    ).order_by('advance_date', 'created_at')
-
                     remaining = calc.advance_recovery_amount
-                    for adv in active_advances:
+                    # First settle exact advances referenced in ADVANCE_RECOVERY calculation lines
+                    for adv_line in calc.lines.filter(line_type='ADVANCE_RECOVERY', is_deleted=False):
                         if remaining <= Decimal('0.00'):
                             break
-                        can_settle = min(adv.outstanding_balance, remaining)
-                        if can_settle > Decimal('0.00'):
-                            adv.settled_amount += can_settle
-                            adv.outstanding_balance = max(Decimal('0.00'), adv.amount - adv.settled_amount - adv.returned_amount)
-                            if adv.outstanding_balance <= Decimal('0.0001'):
-                                adv.status = AdvanceStatus.SETTLED
-                            adv.save(update_fields=['settled_amount', 'outstanding_balance', 'status'])
-                            remaining -= can_settle
-                            advances_recovered_total += can_settle
+                        if not adv_line.reference_id:
+                            continue
+                        try:
+                            adv_uuid = _uuid.UUID(str(adv_line.reference_id))
+                        except ValueError:
+                            continue
+                        adv = EmployeeAdvance.objects.filter(
+                            pk=adv_uuid,
+                            company=company,
+                            employee=calc.employee,
+                            status=AdvanceStatus.PAID,
+                            is_deleted=False
+                        ).first()
+                        if adv and adv.outstanding_balance > Decimal('0.00'):
+                            can_settle = min(adv.outstanding_balance, Decimal(str(adv_line.amount or 0)), remaining)
+                            if can_settle > Decimal('0.00'):
+                                adv.settled_amount += can_settle
+                                adv.outstanding_balance = max(Decimal('0.00'), adv.amount - adv.settled_amount - adv.returned_amount)
+                                if adv.outstanding_balance <= Decimal('0.0001'):
+                                    adv.status = AdvanceStatus.SETTLED
+                                adv.save(update_fields=['settled_amount', 'outstanding_balance', 'status'])
+                                remaining -= can_settle
+                                advances_recovered_total += can_settle
+
+                    # Fallback FIFO settlement for any remaining advance recovery amount
+                    if remaining > Decimal('0.00'):
+                        active_advances = EmployeeAdvance.objects.filter(
+                            company=company,
+                            employee=calc.employee,
+                            recovery_method__in=[AdvanceRecoveryMethod.PAYROLL_DEDUCTION, AdvanceRecoveryMethod.MIXED],
+                            status=AdvanceStatus.PAID,
+                            outstanding_balance__gt=Decimal('0.00'),
+                            is_deleted=False
+                        ).filter(
+                            Q(expected_settlement_date__lte=calc.period_end) |
+                            (Q(expected_settlement_date__isnull=True) & Q(advance_date__lte=calc.period_end))
+                        ).order_by('advance_date', 'created_at')
+
+                        for adv in active_advances:
+                            if remaining <= Decimal('0.00'):
+                                break
+                            can_settle = min(adv.outstanding_balance, remaining)
+                            if can_settle > Decimal('0.00'):
+                                adv.settled_amount += can_settle
+                                adv.outstanding_balance = max(Decimal('0.00'), adv.amount - adv.settled_amount - adv.returned_amount)
+                                if adv.outstanding_balance <= Decimal('0.0001'):
+                                    adv.status = AdvanceStatus.SETTLED
+                                adv.save(update_fields=['settled_amount', 'outstanding_balance', 'status'])
+                                remaining -= can_settle
+                                advances_recovered_total += can_settle
 
             payroll_run.advances_settled = True
             payroll_run.save(update_fields=['advances_settled'])

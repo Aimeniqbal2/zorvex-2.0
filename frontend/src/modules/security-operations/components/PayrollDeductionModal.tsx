@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { apiClient, createPayrollDeduction } from '../api';
+import React, { useState, useEffect, useMemo } from 'react';
+import { apiClient, createPayrollDeduction, fetchAllActiveEmployees, filterAssignableEmployees } from '../api';
 import type { EmployeeOption, PayrollDeductionType, PayrollDeductionFrequency } from '../types';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
@@ -20,6 +20,8 @@ export const PayrollDeductionModal: React.FC<Props> = ({
 }) => {
     const today = new Date().toISOString().split('T')[0];
     const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+    const [empSearch, setEmpSearch] = useState('');
+    const [employeeAdvances, setEmployeeAdvances] = useState<any[]>([]);
     const [loadingDropdowns, setLoadingDropdowns] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -33,12 +35,15 @@ export const PayrollDeductionModal: React.FC<Props> = ({
         effective_date: today,
         effective_from: today,
         effective_to: '',
+        advance: '',
         notes: ''
     });
 
     useEffect(() => {
         if (isOpen) {
             fetchEmployees();
+            setEmpSearch('');
+            setEmployeeAdvances([]);
             setFormData({
                 employee: preselectedEmployeeId || '',
                 deduction_type: 'PATROLLING',
@@ -48,17 +53,45 @@ export const PayrollDeductionModal: React.FC<Props> = ({
                 effective_date: today,
                 effective_from: today,
                 effective_to: '',
+                advance: '',
                 notes: ''
             });
             setError(null);
         }
     }, [isOpen, preselectedEmployeeId]);
 
+    useEffect(() => {
+        if (!isOpen || formData.deduction_type !== 'ADVANCE_RECOVERY' || !formData.employee) {
+            setEmployeeAdvances([]);
+            return;
+        }
+        let cancelled = false;
+        apiClient
+            .get('/api/finance/employee-advances/', {
+                params: { employee: formData.employee, status: 'PAID' },
+            })
+            .then((res) => {
+                if (cancelled) return;
+                const list = res.data?.results || res.data || [];
+                setEmployeeAdvances(
+                    Array.isArray(list)
+                        ? list.filter((a: any) => parseFloat(String(a.outstanding_balance || 0)) > 0)
+                        : []
+                );
+            })
+            .catch(() => {
+                if (!cancelled) setEmployeeAdvances([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, formData.deduction_type, formData.employee]);
+
     const fetchEmployees = async () => {
         setLoadingDropdowns(true);
         try {
-            const res = await apiClient.get('/api/hrm/employees/?limit=100');
-            setEmployees(res.data.results || res.data || []);
+            const list = await fetchAllActiveEmployees();
+            setEmployees(list);
         } catch (err) {
             console.error('Failed to load employees', err);
         } finally {
@@ -66,8 +99,30 @@ export const PayrollDeductionModal: React.FC<Props> = ({
         }
     };
 
+    const filteredEmployees = useMemo(() => {
+        const res = filterAssignableEmployees(employees, empSearch, 250).items;
+        if (formData.employee && !res.some((e: any) => String(e.id) === String(formData.employee))) {
+            const chosen = employees.find((e: any) => String(e.id) === String(formData.employee));
+            if (chosen) return [chosen, ...res];
+        }
+        return res;
+    }, [employees, empSearch, formData.employee]);
+
     const handleChange = (field: string, value: any) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
+        setFormData(prev => {
+            const next = { ...prev, [field]: value };
+            if (field === 'employee' || (field === 'deduction_type' && value !== 'ADVANCE_RECOVERY')) {
+                next.advance = '';
+            }
+            if (field === 'advance' && value) {
+                const adv = employeeAdvances.find((a: any) => String(a.id) === String(value));
+                if (adv) {
+                    if (!prev.name.trim()) next.name = `Advance Recovery: ${adv.advance_number}`;
+                    if (!prev.amount) next.amount = String(adv.outstanding_balance || '');
+                }
+            }
+            return next;
+        });
     };
 
     const handleSave = async () => {
@@ -97,6 +152,7 @@ export const PayrollDeductionModal: React.FC<Props> = ({
                 effective_date: formData.frequency === 'ONE_TIME' ? formData.effective_date : null,
                 effective_from: formData.frequency === 'RECURRING' ? formData.effective_from : null,
                 effective_to: formData.frequency === 'RECURRING' && formData.effective_to ? formData.effective_to : null,
+                advance: formData.deduction_type === 'ADVANCE_RECOVERY' && formData.advance ? formData.advance : null,
                 is_approved: true,
                 is_active: true,
                 notes: formData.notes
@@ -104,7 +160,7 @@ export const PayrollDeductionModal: React.FC<Props> = ({
             onSaved();
             onClose();
         } catch (err: any) {
-            setError(err.response?.data?.error || err.message || 'Failed to save deduction instruction');
+            setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to save deduction instruction');
         } finally {
             setIsSaving(false);
         }
@@ -132,8 +188,25 @@ export const PayrollDeductionModal: React.FC<Props> = ({
 
                 <div>
                     <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary, #94a3b8)', marginBottom: '4px' }}>
-                        Employee *
+                        Employee * ({employees.length} active)
                     </label>
+                    <input
+                        type="text"
+                        placeholder="Filter by code (e.g. 009399) or name..."
+                        value={empSearch}
+                        onChange={(e) => setEmpSearch(e.target.value)}
+                        style={{
+                            width: '100%',
+                            padding: '6px 10px',
+                            marginBottom: '6px',
+                            background: 'var(--color-surface, #1e293b)',
+                            border: '1px solid var(--color-border, #334155)',
+                            borderRadius: '6px',
+                            color: 'var(--color-text, #f8fafc)',
+                            fontSize: '12px',
+                            boxSizing: 'border-box'
+                        }}
+                    />
                     <select
                         style={{
                             width: '100%',
@@ -149,9 +222,9 @@ export const PayrollDeductionModal: React.FC<Props> = ({
                         disabled={loadingDropdowns}
                     >
                         <option value="">-- Select Employee --</option>
-                        {employees.map(emp => (
+                        {filteredEmployees.map((emp: any) => (
                             <option key={emp.id} value={emp.id}>
-                                {emp.first_name} {emp.last_name} {emp.designation_name ? `(${emp.designation_name})` : ''}
+                                {emp.display_code || emp.previous_employee_code || emp.employee_code || 'EMP'} — {emp.first_name} {emp.last_name} {emp.designation_name ? `(${emp.designation_name})` : ''}
                             </option>
                         ))}
                     </select>
@@ -206,6 +279,38 @@ export const PayrollDeductionModal: React.FC<Props> = ({
                         </select>
                     </div>
                 </div>
+
+                {formData.deduction_type === 'ADVANCE_RECOVERY' && (
+                    <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary, #94a3b8)', marginBottom: '4px' }}>
+                            Link to Disbursed Advance (Optional — settles advance balance automatically)
+                        </label>
+                        <select
+                            style={{
+                                width: '100%',
+                                padding: '8px 12px',
+                                background: 'var(--color-surface, #1e293b)',
+                                border: '1px solid var(--color-border, #334155)',
+                                borderRadius: '6px',
+                                color: 'var(--color-text, #f8fafc)',
+                                fontSize: '13px'
+                            }}
+                            value={formData.advance}
+                            onChange={(e) => handleChange('advance', e.target.value)}
+                        >
+                            <option value="">
+                                {employeeAdvances.length > 0
+                                    ? '-- Select Active Advance (or leave unlinked) --'
+                                    : '-- No active unpaid PAID advances found for employee --'}
+                            </option>
+                            {employeeAdvances.map((adv: any) => (
+                                <option key={adv.id} value={adv.id}>
+                                    {adv.advance_number} — Bal: PKR {parseFloat(String(adv.outstanding_balance || 0)).toLocaleString()} ({adv.advance_date})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
 
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
                     <div>

@@ -1450,7 +1450,10 @@ class SecurityFinanceConfigurationViewSet(BaseFinanceViewSet):
 # ==============================================================================
 # PHASE S-4E: EXPENSES, PETTY CASH, EMPLOYEE CLAIMS & ADVANCES
 # ==============================================================================
-from .models import ExpenseCategory, Expense, ExpenseAllocation, EmployeeAdvance, PettyCashCustodian
+from .models import (
+    ExpenseCategory, Expense, ExpenseAllocation, EmployeeAdvance,
+    AdvanceStatus, AdvanceRecoveryMethod, PettyCashCustodian
+)
 from .serializers import (
     ExpenseCategorySerializer, ExpenseSerializer, ExpenseAllocationSerializer,
     EmployeeAdvanceSerializer, PettyCashCustodianSerializer
@@ -1654,7 +1657,48 @@ class EmployeeAdvanceViewSet(BaseFinanceViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(company=self.get_company(), created_by=self.request.user)
+        submit_raw = self.request.data.get('submit_now')
+        submit_now = (
+            submit_raw.strip().lower() in ('true', '1', 'yes')
+            if isinstance(submit_raw, str)
+            else bool(submit_raw)
+        )
+        recovery_method = serializer.validated_data.get('recovery_method', AdvanceRecoveryMethod.EXPENSE_SETTLEMENT)
+        extra_kwargs = {
+            'company': self.get_company(),
+            'created_by': self.request.user,
+        }
+        req_status = serializer.validated_data.get('status')
+        if submit_now and (not req_status or req_status == AdvanceStatus.DRAFT):
+            extra_kwargs['status'] = AdvanceStatus.PENDING_APPROVAL
+
+        if 'payroll_deduction_ready' not in self.request.data or self.request.data.get('payroll_deduction_ready') is None:
+            extra_kwargs['payroll_deduction_ready'] = (recovery_method == AdvanceRecoveryMethod.PAYROLL_DEDUCTION)
+
+        serializer.save(**extra_kwargs)
+
+    @action(detail=True, methods=['post'])
+    def toggle_payroll_deduction(self, request, pk=None):
+        """
+        Enables or disables automatic payroll recovery for a paid employee advance.
+        """
+        advance = self.get_object()
+        ready_val = request.data.get('payroll_deduction_ready')
+        if ready_val is None:
+            new_ready = not advance.payroll_deduction_ready
+        elif isinstance(ready_val, str):
+            new_ready = ready_val.strip().lower() in ('true', '1', 'yes')
+        else:
+            new_ready = bool(ready_val)
+
+        advance.payroll_deduction_ready = new_ready
+        if new_ready and advance.recovery_method not in (AdvanceRecoveryMethod.PAYROLL_DEDUCTION, AdvanceRecoveryMethod.MIXED):
+            advance.recovery_method = AdvanceRecoveryMethod.PAYROLL_DEDUCTION
+        advance.save(update_fields=['payroll_deduction_ready', 'recovery_method', 'updated_at'])
+        return Response({
+            'status': 'Payroll deduction recovery updated',
+            'advance': self.get_serializer(advance).data,
+        })
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
@@ -2349,20 +2393,24 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
 
         adv_by_emp = defaultdict(Decimal)
         auto_adv_by_emp = defaultdict(list)
-        for adv_id, adv_emp_id, adv_num, adv_bal, adv_st, adv_method, adv_ready in EmployeeAdvance.objects.filter(
+        for adv_id, adv_emp_id, adv_num, adv_bal, adv_st, adv_method, adv_ready, adv_date, adv_expected in EmployeeAdvance.objects.filter(
             company=company, employee_id__in=emp_id_list,
             status=AdvanceStatus.PAID, is_deleted=False
         ).values_list(
             'id', 'employee_id', 'advance_number', 'outstanding_balance',
-            'status', 'recovery_method', 'payroll_deduction_ready'
+            'status', 'recovery_method', 'payroll_deduction_ready',
+            'advance_date', 'expected_settlement_date'
         ):
             bal = Decimal(str(adv_bal or 0))
             eid = str(adv_emp_id)
             adv_by_emp[eid] += bal
+            due_date = adv_expected or adv_date
+            is_due_for_period = (due_date is None or due_date <= period_end)
             if (
                 adv_ready
                 and bal > Decimal('0.00')
                 and adv_method in (AdvanceRecoveryMethod.PAYROLL_DEDUCTION, AdvanceRecoveryMethod.MIXED)
+                and is_due_for_period
             ):
                 auto_adv_by_emp[eid].append((adv_id, adv_num, bal))
 
@@ -2644,7 +2692,8 @@ class PayrollAccountingIntegrationViewSet(BaseFinanceViewSet):
                 for a_id, _a_num, a_bal in auto_adv_by_emp.get(eid, ()):
                     if a_id in explicit_adv_ids:
                         continue
-                    recoverable = min(a_bal, gross - adv_rec)
+                    available_pay = max(Decimal('0.00'), gross - stat_total - other_ded_sum - adv_rec)
+                    recoverable = min(a_bal, available_pay)
                     if recoverable > Decimal('0.00'):
                         adv_rec += _q2(recoverable)
 

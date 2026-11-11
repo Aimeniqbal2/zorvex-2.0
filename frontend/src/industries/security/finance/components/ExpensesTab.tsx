@@ -20,6 +20,8 @@ import {
   approveEmployeeAdvance,
   rejectEmployeeAdvance,
   payEmployeeAdvance,
+  submitEmployeeAdvance,
+  toggleEmployeeAdvancePayrollDeduction,
   createExpenseCategory
 } from '../api';
 import { NewExpenseModal } from './NewExpenseModal';
@@ -120,6 +122,24 @@ export const ExpensesTab: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleSubmitAdvance = async (id: string) => {
+    try {
+      await submitEmployeeAdvance(id);
+      loadData();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || err?.response?.data?.error || err.message);
+    }
+  };
+
+  const handleTogglePayrollDeduct = async (id: string, nextVal: boolean) => {
+    try {
+      await toggleEmployeeAdvancePayrollDeduction(id, nextVal);
+      loadData();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || err?.response?.data?.error || err.message);
+    }
+  };
 
   const handleApproveAdvance = async (id: string) => {
     try {
@@ -962,6 +982,11 @@ export const ExpensesTab: React.FC = () => {
                         <td style={{ padding: '12px 16px' }}>
                           <div>{adv.advance_type.replace(/_/g, ' ')}</div>
                           <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{adv.purpose || '-'}</div>
+                          <div style={{ fontSize: '0.7rem', color: adv.payroll_deduction_ready ? '#10b981' : '#94a3b8', marginTop: '2px' }}>
+                            Recovery: {adv.recovery_method.replace(/_/g, ' ')}
+                            {adv.payroll_deduction_ready ? ' • Auto Payroll Deduct ON' : ''}
+                            {adv.expected_settlement_date ? ` • Due ${adv.expected_settlement_date}` : ''}
+                          </div>
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
                           {parseFloat(adv.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -971,7 +996,24 @@ export const ExpensesTab: React.FC = () => {
                         </td>
                         <td style={{ padding: '12px 16px' }}>{getStatusBadge(adv.status)}</td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                            {adv.status === 'DRAFT' && (
+                              <button
+                                onClick={() => handleSubmitAdvance(adv.id)}
+                                style={{
+                                  background: '#0284c7',
+                                  border: 'none',
+                                  color: '#fff',
+                                  borderRadius: '4px',
+                                  padding: '4px 8px',
+                                  fontSize: '0.75rem',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Submit
+                              </button>
+                            )}
+
                             {adv.status === 'PENDING_APPROVAL' && (
                               <>
                                 <button
@@ -1027,21 +1069,39 @@ export const ExpensesTab: React.FC = () => {
                             )}
 
                             {adv.status === 'PAID' && parseFloat(adv.outstanding_balance) > 0 && (
-                              <button
-                                onClick={() => setSettlingAdvance(adv)}
-                                style={{
-                                  background: '#3b82f6',
-                                  border: 'none',
-                                  color: '#fff',
-                                  borderRadius: '4px',
-                                  padding: '4px 10px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 600,
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Settle Advance
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => handleTogglePayrollDeduct(adv.id, !adv.payroll_deduction_ready)}
+                                  style={{
+                                    background: adv.payroll_deduction_ready ? '#059669' : 'transparent',
+                                    border: '1px solid #10b981',
+                                    color: adv.payroll_deduction_ready ? '#fff' : '#10b981',
+                                    borderRadius: '4px',
+                                    padding: '4px 8px',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Toggle automatic recovery from monthly payroll salary"
+                                >
+                                  {adv.payroll_deduction_ready ? 'Payroll Deduct: ON' : 'Enable Payroll Deduct'}
+                                </button>
+                                <button
+                                  onClick={() => setSettlingAdvance(adv)}
+                                  style={{
+                                    background: '#3b82f6',
+                                    border: 'none',
+                                    color: '#fff',
+                                    borderRadius: '4px',
+                                    padding: '4px 10px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Settle Advance
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
