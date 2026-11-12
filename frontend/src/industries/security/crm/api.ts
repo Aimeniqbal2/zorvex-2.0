@@ -1242,10 +1242,14 @@ export interface CostingSettings {
     sessi_percentage: number;
     admin_charges_percentage: number;
     insurance_percentage: number;
+    four_hrs_ot_amount?: number;
+    site_allowance_amount?: number;
     eobi_default_enabled: boolean;
     sessi_default_enabled: boolean;
     admin_charges_default_enabled: boolean;
     insurance_default_enabled: boolean;
+    four_hrs_ot_default_enabled?: boolean;
+    site_allowance_default_enabled?: boolean;
 }
 
 export const fetchCostingSettings = async (): Promise<CostingSettings> => {

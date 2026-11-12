@@ -23,15 +23,17 @@ import { MonthlyMusterSheetTab } from './components/MonthlyMusterSheetTab';
 import { AttendanceRegisterView } from './components/AttendanceRegisterView';
 import { AttendanceRegisterView as MasterAttendanceRegistryView } from '../hr/components/AttendanceRegisterView';
 import { EmployeeInfoView } from './components/EmployeeInfoView';
+import { OperationsAdvanceSheetTab } from './components/OperationsAdvanceSheetTab';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import './styles/securityOperations.css';
 
-type Tab = 'monthly_muster' | 'attendance_register' | 'attendance_registry' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'employee_info' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
+type Tab = 'monthly_muster' | 'attendance_register' | 'attendance_registry' | 'advance_sheets' | 'overview' | 'advanced_ops' | 'sites' | 'contracts' | 'deployments' | 'employee_info' | 'duties' | 'roster' | 'attendance' | 'daily_pay' | 'payroll_prep' | 'payroll_runs' | 'extra_duties' | 'equipment_issues' | 'incidents' | 'daily_activity' | 'billing' | 'staffing' | 'temporary_services' | 'qa_inspections' | 'qa_actions' | 'reports';
 
 const TABS: { id: Tab, label: string, icon: string }[] = [
     { id: 'monthly_muster', label: 'Monthly Duty Muster', icon: 'bx-spreadsheet' },
     { id: 'attendance_register', label: 'Attendance Register & Ledger', icon: 'bx-history' },
     { id: 'attendance_registry', label: 'Attendance Registry', icon: 'bx-calendar-check' },
+    { id: 'advance_sheets', label: 'Advance Sheets', icon: 'bx-wallet' },
     { id: 'employee_info', label: 'Employee Info', icon: 'bx-id-card' },
     { id: 'overview', label: 'Control Center', icon: 'bx-radar' },
     { id: 'advanced_ops', label: 'Advanced Ops & Dispatch', icon: 'bx-broadcast' },
@@ -140,6 +142,8 @@ export const SecurityOperationsModule: React.FC = () => {
                 return <DeploymentsView />;
             case 'employee_info':
                 return <EmployeeInfoView />;
+            case 'advance_sheets':
+                return <OperationsAdvanceSheetTab />;
             case 'duties':
                 return <DutyAssignmentsView />;
             case 'roster':

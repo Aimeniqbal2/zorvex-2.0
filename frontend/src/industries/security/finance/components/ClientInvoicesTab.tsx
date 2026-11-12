@@ -958,7 +958,7 @@ export const ClientInvoicesTab: React.FC = () => {
                     if (doc) {
                       doc.open();
                       doc.write(
-                        `<!DOCTYPE html><html><head><title>Invoice ${previewContext?.invoice?.invoice_number || previewContext?.invoice_number || ''}</title><style>@page{size:A4;margin:10mm;}body{margin:0;background:#fff;color:#0f172a;-webkit-print-color-adjust:exact;print-color-adjust:exact;}</style></head><body>${el.innerHTML}</body></html>`
+                        `<!DOCTYPE html><html><head><title>Invoice ${previewContext?.invoice?.invoice_number || previewContext?.invoice_number || ''}</title><style>@page{size:A4;margin:10mm;}body{margin:0;background:#fff;color:#0f172a;-webkit-print-color-adjust:exact;print-color-adjust:exact;}thead{display:table-header-group !important;}tr{page-break-inside:avoid !important;break-inside:avoid !important;}</style></head><body>${el.innerHTML}</body></html>`
                       );
                       doc.close();
                       setTimeout(() => {

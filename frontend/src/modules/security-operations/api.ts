@@ -1582,6 +1582,141 @@ export const filterAssignableEmployees = (
 // Re-export apiClient for modal components
 export { apiClient } from '../../api/client';
 
+// ==============================================================================
+// OPERATIONS -> FINANCE MONTHLY ADVANCE SHEETS
+// ==============================================================================
+
+export interface OpsAdvanceBuilderRow {
+  serial_no: number;
+  employee_id: string;
+  oss_code: string;
+  employee_name: string;
+  father_name: string;
+  designation_name: string;
+  location_deployed: string;
+  draft_amount: number;
+  notes: string;
+  submitted_total: number;
+  paid_total: number;
+  pending_total: number;
+  rejected_total: number;
+  latest_payment_status: 'PENDING' | 'PAID' | 'REJECTED' | null;
+  latest_deduction_status: 'NOT_DEDUCTED' | 'CLEARED' | null;
+}
+
+export interface OpsAdvanceBuilderResponse {
+  month: string;
+  current_month: string;
+  available_months: string[];
+  period_start: string;
+  period_end: string;
+  employee_count: number;
+  total_draft_amount: number;
+  total_submitted_amount: number;
+  existing_sheets: Array<{
+    id: string;
+    sheet_number: string;
+    status: string;
+    total_employees: number;
+    total_requested_amount: number;
+    total_paid_amount: number;
+  }>;
+  rows: OpsAdvanceBuilderRow[];
+}
+
+export interface OpsAdvanceSheetLine {
+  id: string;
+  advance_sheet: string;
+  employee: string;
+  serial_no: number;
+  oss_code: string;
+  employee_name: string;
+  father_name: string;
+  designation_name: string;
+  location_deployed: string;
+  amount: number | string;
+  payment_status: 'PENDING' | 'PAID' | 'REJECTED';
+  paid_at?: string | null;
+  payment_reference: string;
+  voucher_number?: string;
+  rejection_reason: string;
+  deduction_status: 'NOT_DEDUCTED' | 'CLEARED';
+  deduction_status_label?: string;
+  cleared_in_sheet_number?: string;
+  notes: string;
+}
+
+export interface OpsAdvanceSheetItem {
+  id: string;
+  sheet_number: string;
+  month: string;
+  title: string;
+  period_start: string;
+  period_end: string;
+  status: 'SUBMITTED' | 'PARTIALLY_PROCESSED' | 'PROCESSED';
+  prepared_by_name: string;
+  total_employees: number;
+  total_requested_amount: number | string;
+  total_paid_amount: number | string;
+  total_rejected_amount: number | string;
+  pending_count?: number;
+  paid_count?: number;
+  rejected_count?: number;
+  cleared_count?: number;
+  notes: string;
+  created_at: string;
+  branding?: {
+    company_name?: string;
+    logo_url?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+  };
+  lines?: OpsAdvanceSheetLine[];
+}
+
+export const fetchOpsAdvanceBuilder = async (month?: string): Promise<OpsAdvanceBuilderResponse> => {
+  const res = await apiClient.get('/api/operations/advance-sheets/live-builder/', {
+    params: month ? { month } : undefined,
+  });
+  return res.data;
+};
+
+export const updateOpsAdvanceDraft = async (data: {
+  month: string;
+  employee_id: string;
+  amount: number;
+  notes?: string;
+}) => {
+  const res = await apiClient.post('/api/operations/advance-sheets/update-draft/', data);
+  return res.data as { success: boolean; amount: number };
+};
+
+export const makeOpsAdvanceSheet = async (data: {
+  month: string;
+  overrides?: Array<{ employee_id: string; amount: number; notes?: string }>;
+  notes?: string;
+}): Promise<OpsAdvanceSheetItem> => {
+  const res = await apiClient.post('/api/operations/advance-sheets/make-sheet/', data);
+  return res.data;
+};
+
+export const fetchOpsAdvanceSheets = async (): Promise<OpsAdvanceSheetItem[]> => {
+  const res = await apiClient.get('/api/operations/advance-sheets/');
+  return Array.isArray(res.data) ? res.data : (res.data?.results || []);
+};
+
+export const fetchOpsAdvanceSheetDetail = async (sheetId: string): Promise<OpsAdvanceSheetItem> => {
+  const res = await apiClient.get(`/api/operations/advance-sheets/${sheetId}/`);
+  return res.data;
+};
+
+export const deleteOpsAdvanceSheet = async (sheetId: string) => {
+  const res = await apiClient.delete(`/api/operations/advance-sheets/${sheetId}/`);
+  return res.data as { success: boolean };
+};
+
+
 
 
 

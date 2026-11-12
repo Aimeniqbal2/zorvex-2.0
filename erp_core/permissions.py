@@ -50,6 +50,17 @@ class RolePermission(BasePermission):
                 return False # strictly enforce if view has required_permissions defined
             # If no req_perms defined, allow fallback to legacy for now
 
+        # When no granular CompanyRole is attached, honor explicit Custom Module access for module-scoped views
+        req_module = getattr(view, 'required_module', None)
+        if req_module and getattr(request.user, 'access_mode', 'FULL_COMPANY') == 'CUSTOM':
+            allowed_codes = [req_module]
+            if req_module in ('security_ops', 'operations'):
+                allowed_codes.extend(['operations', 'security_ops', 'guards_staff'])
+            elif req_module in ('finance', 'security_finance'):
+                allowed_codes.extend(['finance', 'security_finance'])
+            if request.user.custom_module_access.filter(module__code__in=allowed_codes, enabled=True).exists():
+                return True
+
         # For safe GET methods — allow all authenticated company members
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             allowed_reads = getattr(

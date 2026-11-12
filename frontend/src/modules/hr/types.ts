@@ -165,6 +165,12 @@ export interface Employee {
     iban?: string;
     wallet_provider?: string;
     wallet_number?: string;
+    doc_charges_enabled?: boolean;
+    doc_charges_amount?: number | string;
+    doc_charges_month?: string;
+    doc_charges_paid?: boolean;
+    doc_charges_paid_at?: string | null;
+    doc_charges_status?: 'NONE' | 'PENDING' | 'PAID';
 }
 
 export interface Employment {

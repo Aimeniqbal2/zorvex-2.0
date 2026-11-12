@@ -39,6 +39,7 @@ class TenantMiddleware:
         if path.startswith('/api/auth/'):
             try:
                 return self.get_response(request)
+                return self.post_request(response)
             finally:
                 if hasattr(_thread_locals, 'company'):
                     del _thread_locals.company

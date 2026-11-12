@@ -101,6 +101,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         is_guard_vaccine: false,
         is_guard_apsa_verified: false,
         visible_for_activity: true,
+        doc_charges_enabled: false,
+        doc_charges_amount: '0',
+        doc_charges_month: new Date().toISOString().slice(0, 7),
+        doc_charges_paid: false,
         payment_method: 'BANK_TRANSFER',
         bank_name: '',
         account_title: '',
@@ -219,6 +223,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 is_guard_vaccine: false,
                 is_guard_apsa_verified: false,
                 visible_for_activity: true,
+                doc_charges_enabled: false,
+                doc_charges_amount: '0',
+                doc_charges_month: new Date().toISOString().slice(0, 7),
+                doc_charges_paid: false,
                 payment_method: 'BANK_TRANSFER',
                 bank_name: '',
                 account_title: '',
@@ -596,6 +604,17 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             delete payload.user;
             delete payload.crm_entity;
             delete payload.branch;
+            delete payload.doc_charges_status;
+            delete payload.doc_charges_paid;
+            delete payload.doc_charges_paid_at;
+
+            if (!payload.doc_charges_enabled) {
+                payload.doc_charges_amount = '0';
+                payload.doc_charges_month = '';
+            } else {
+                payload.doc_charges_amount = String(Number(payload.doc_charges_amount || 0));
+                payload.doc_charges_month = String(payload.doc_charges_month || '').slice(0, 7);
+            }
 
             if (photoRemoved && !photoFile) {
                 payload.photograph = null;
@@ -1458,6 +1477,95 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                                             </span>
                                         </div>
                                     </div>
+                                </div>
+
+                                {/* Doc Charges Payroll Deduction Switch */}
+                                <div style={{
+                                    marginTop: '14px',
+                                    padding: '12px 14px',
+                                    borderRadius: '8px',
+                                    border: `1px solid ${formData.doc_charges_enabled ? '#f59e0b' : 'var(--color-border)'}`,
+                                    background: formData.doc_charges_enabled ? 'rgba(245, 158, 11, 0.05)' : 'var(--color-surface-secondary)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '12px'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                                        <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '13px' }}>
+                                                <i className="bx bx-receipt" style={{ color: '#d97706' }}></i>
+                                                <span>Documentation Charges Deduction (Payroll)</span>
+                                                {formData.doc_charges_enabled && (
+                                                    <span style={{
+                                                        fontSize: '11px',
+                                                        fontWeight: 700,
+                                                        padding: '2px 8px',
+                                                        borderRadius: '99px',
+                                                        background: (formData.doc_charges_paid || (employee as any)?.doc_charges_paid) ? '#dcfce7' : '#fef3c7',
+                                                        color: (formData.doc_charges_paid || (employee as any)?.doc_charges_paid) ? '#15803d' : '#b45309',
+                                                        border: `1px solid ${(formData.doc_charges_paid || (employee as any)?.doc_charges_paid) ? '#86efac' : '#fde68a'}`
+                                                    }}>
+                                                        {(formData.doc_charges_paid || (employee as any)?.doc_charges_paid) ? 'PAID IN PAYROLL' : 'PENDING DEDUCTION'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                                When enabled, deducts the specified Doc Charges automatically ONLY in the selected payroll month.
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData({
+                                                ...formData,
+                                                doc_charges_enabled: !formData.doc_charges_enabled,
+                                                doc_charges_month: formData.doc_charges_month || new Date().toISOString().slice(0, 7)
+                                            })}
+                                            style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '8px',
+                                                padding: '6px 12px',
+                                                borderRadius: '99px',
+                                                border: '1px solid var(--color-border)',
+                                                cursor: 'pointer',
+                                                fontWeight: 700,
+                                                fontSize: '12px',
+                                                background: formData.doc_charges_enabled ? '#059669' : 'var(--color-surface)',
+                                                color: formData.doc_charges_enabled ? '#fff' : 'var(--color-text-muted)',
+                                            }}
+                                        >
+                                            <span>{formData.doc_charges_enabled ? 'ON' : 'OFF'}</span>
+                                        </button>
+                                    </div>
+
+                                    {formData.doc_charges_enabled && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                                            <div className="form-field">
+                                                <label className="form-label">Deduction Month *</label>
+                                                <input
+                                                    type="month"
+                                                    className="input-base"
+                                                    value={(formData.doc_charges_month || '').slice(0, 7)}
+                                                    onChange={(e) => setFormData({ ...formData, doc_charges_month: e.target.value })}
+                                                    required={!!formData.doc_charges_enabled}
+                                                />
+                                            </div>
+                                            <div className="form-field">
+                                                <label className="form-label">Doc Charges Amount (PKR) *</label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="1"
+                                                    className="input-base"
+                                                    placeholder="e.g. 2000"
+                                                    value={formData.doc_charges_amount ?? ''}
+                                                    onChange={(e) => setFormData({ ...formData, doc_charges_amount: e.target.value })}
+                                                    required={!!formData.doc_charges_enabled}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

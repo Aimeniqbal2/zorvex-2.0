@@ -1348,25 +1348,48 @@ class PayslipViewSet(TenantModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='toggle-hold')
     def toggle_hold(self, request, pk=None):
-        payslip = self.get_object()
-        payslip.is_stop_payment = not payslip.is_stop_payment
-        if payslip.is_stop_payment:
-            payslip.stop_payment_reason = request.data.get('reason', 'Payment hold placed')
-            payslip.stop_payment_at = timezone.now()
-            payslip.stop_payment_by = request.user
-        else:
-            payslip.stop_payment_reason = ''
-            payslip.stop_payment_at = None
-            payslip.stop_payment_by = None
-        payslip.save()
-        return Response(PayslipSerializer(payslip).data, status=status.HTTP_200_OK)
+        company_id = (
+            (request.META.get('HTTP_X_COMPANY_ID') if hasattr(request, 'META') else None)
+            or get_current_company()
+            or getattr(request.user, 'company_id', None)
+        )
+        payslip = Payslip.objects.filter(id=pk, is_deleted=False).first()
+        if payslip:
+            payslip.is_stop_payment = not payslip.is_stop_payment
+            if payslip.is_stop_payment:
+                payslip.stop_payment_reason = request.data.get('reason', 'Payment hold placed')
+                payslip.stop_payment_at = timezone.now()
+                payslip.stop_payment_by = request.user
+            else:
+                payslip.stop_payment_reason = ''
+                payslip.stop_payment_at = None
+                payslip.stop_payment_by = None
+            payslip.save()
+            return Response(PayslipSerializer(payslip).data, status=status.HTTP_200_OK)
+
+        # Fallback: toggle hold on finalized SalarySheetLine
+        from finance.services.salary_sheet_service import SalarySheetService
+        from companies.models import Company
+        company = Company.objects.filter(id=company_id).first() if company_id else None
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            res = SalarySheetService.toggle_line_hold(company, request.user, pk, reason=request.data.get('reason', 'Payment hold placed'))
+            return Response(res, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
-        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        company_id = (
+            (request.META.get('HTTP_X_COMPANY_ID') if hasattr(request, 'META') else None)
+            or get_current_company()
+            or getattr(request.user, 'company_id', None)
+        )
         from hrm.services.payslip_report_service import PayslipReportService
         data = PayslipReportService.get_payslip_report(
             company_id=company_id,
+            month=request.query_params.get('month'),
             date_from=request.query_params.get('date_from'),
             date_to=request.query_params.get('date_to'),
             month_from=request.query_params.get('month_from'),
@@ -1381,16 +1404,22 @@ class PayslipViewSet(TenantModelViewSet):
             is_paid=request.query_params.get('is_paid', 'BOTH'),
             is_stop_payment=request.query_params.get('is_stop_payment', 'BOTH'),
             account_type=request.query_params.get('account_type', 'ALL'),
+            mode_of_payment=request.query_params.get('mode_of_payment'),
             in_main_payroll=request.query_params.get('in_main_payroll', 'true').lower() in ('true', '1')
         )
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='export-report')
     def export_report(self, request):
-        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        company_id = (
+            (request.META.get('HTTP_X_COMPANY_ID') if hasattr(request, 'META') else None)
+            or get_current_company()
+            or getattr(request.user, 'company_id', None)
+        )
         from hrm.services.payslip_report_service import PayslipReportService
         data = PayslipReportService.get_payslip_report(
             company_id=company_id,
+            month=request.query_params.get('month'),
             date_from=request.query_params.get('date_from'),
             date_to=request.query_params.get('date_to'),
             month_from=request.query_params.get('month_from'),
@@ -1405,6 +1434,7 @@ class PayslipViewSet(TenantModelViewSet):
             is_paid=request.query_params.get('is_paid', 'BOTH'),
             is_stop_payment=request.query_params.get('is_stop_payment', 'BOTH'),
             account_type=request.query_params.get('account_type', 'ALL'),
+            mode_of_payment=request.query_params.get('mode_of_payment'),
             in_main_payroll=request.query_params.get('in_main_payroll', 'true').lower() in ('true', '1')
         )
         csv_content = PayslipReportService.export_payslip_report_csv(data)
@@ -1415,11 +1445,16 @@ class PayslipViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='bulk-print')
     def bulk_print(self, request):
-        company_id = get_current_company() or getattr(request.user, 'company_id', None)
+        company_id = (
+            (request.META.get('HTTP_X_COMPANY_ID') if hasattr(request, 'META') else None)
+            or get_current_company()
+            or getattr(request.user, 'company_id', None)
+        )
         payslip_ids = request.data.get('payslip_ids', [])
         from hrm.services.payslip_report_service import PayslipReportService
         data = PayslipReportService.get_payslip_report(
             company_id=company_id,
+            month=request.data.get('month'),
             is_paid='BOTH',
             is_stop_payment='BOTH',
             account_type='ALL',
@@ -1427,7 +1462,10 @@ class PayslipViewSet(TenantModelViewSet):
         )
         if payslip_ids:
             p_set = set(str(pid) for pid in payslip_ids)
-            data['rows'] = [r for r in data['rows'] if str(r['payslip_id']) in p_set]
+            data['rows'] = [
+                r for r in data['rows']
+                if str(r.get('payslip_id')) in p_set or str(r.get('line_id')) in p_set or str(r.get('id')) in p_set
+            ]
         return Response(data, status=status.HTTP_200_OK)
 
 class PayslipLineViewSet(TenantModelViewSet):

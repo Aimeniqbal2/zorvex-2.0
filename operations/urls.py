@@ -26,7 +26,8 @@ from .views import (
     MonthlyMusterFreezeMonthView,
     MonthlyMusterUnfreezeMonthView,
     MonthlyMusterAutoAttendanceConfigView,
-    MonthlyMusterRunAutoAttendanceView
+    MonthlyMusterRunAutoAttendanceView,
+    OperationsAdvanceSheetViewSet
 )
 
 router = DefaultRouter()
@@ -77,6 +78,7 @@ router.register(r'qa-inspections', QAInspectionViewSet, basename='qa-inspection'
 router.register(r'qa-responses', QAInspectionResponseViewSet, basename='qa-response')
 router.register(r'qa-findings', QAFindingViewSet, basename='qa-finding')
 router.register(r'corrective-actions', CorrectiveActionViewSet, basename='corrective-action')
+router.register(r'advance-sheets', OperationsAdvanceSheetViewSet, basename='operations-advance-sheet')
 
 urlpatterns = [
     path('dashboard/', SecurityOperationsDashboardView.as_view(), name='security-dashboard'),

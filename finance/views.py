@@ -3905,3 +3905,196 @@ class ExecutiveFinanceDashboardViewSet(BaseFinanceViewSet):
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ==============================================================================
+# SALARY SHEET ENGINE & CONFIGURABLE PAYMENT MODES
+# ==============================================================================
+
+from .models import FinancePaymentMode, SalarySheet, SalarySheetLine
+from .serializers import (
+    FinancePaymentModeSerializer,
+    SalarySheetListSerializer,
+    SalarySheetDetailSerializer,
+)
+from .services.salary_sheet_service import SalarySheetService
+
+
+class FinancePaymentModeViewSet(BaseFinanceViewSet):
+    queryset = FinancePaymentMode.objects.filter(is_deleted=False)
+    serializer_class = FinancePaymentModeSerializer
+    search_fields = ['name', 'code', 'description']
+
+    def get_queryset(self):
+        company = self.get_company()
+        qs = FinancePaymentMode.objects.filter(is_deleted=False)
+        if company:
+            qs = qs.filter(company=company)
+        return qs.order_by('-is_default', 'name')
+
+    def perform_create(self, serializer):
+        company = self.get_company()
+        instance = serializer.save(company=company)
+        if instance.is_default:
+            FinancePaymentMode.objects.filter(
+                company=company, is_deleted=False
+            ).exclude(id=instance.id).update(is_default=False)
+
+    def perform_update(self, serializer):
+        company = self.get_company()
+        instance = serializer.save()
+        if instance.is_default:
+            FinancePaymentMode.objects.filter(
+                company=company, is_deleted=False
+            ).exclude(id=instance.id).update(is_default=False)
+
+
+class SalarySheetViewSet(BaseFinanceViewSet):
+    queryset = SalarySheet.objects.filter(is_deleted=False)
+    serializer_class = SalarySheetListSerializer
+    search_fields = ['sheet_number', 'month', 'title']
+
+    def get_queryset(self):
+        company = self.get_company()
+        qs = SalarySheet.objects.filter(is_deleted=False)
+        if company:
+            qs = qs.filter(company=company)
+        if getattr(self, 'action', None) == 'retrieve':
+            qs = qs.prefetch_related('lines')
+        return qs.order_by('-month', '-created_at')
+
+    def get_serializer_class(self):
+        if getattr(self, 'action', None) in ('retrieve', 'make_sheet'):
+            return SalarySheetDetailSerializer
+        return SalarySheetListSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        company = self.get_company()
+        try:
+            res = SalarySheetService.delete_salary_sheet(company, kwargs.get('pk'))
+            return Response(res, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='live-preview')
+    def live_preview(self, request):
+        company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        month = request.query_params.get('month')
+        try:
+            data = SalarySheetService.build_live_salary_sheet_preview(company, month)
+            return Response(data)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='update-draft')
+    def update_draft(self, request):
+        company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            res = SalarySheetService.update_draft_line(company, request.user, request.data)
+            return Response(res)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='make-sheet')
+    def make_sheet(self, request):
+        company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        month = request.data.get('month')
+        overrides = request.data.get('overrides') or []
+        notes = request.data.get('notes', '')
+        try:
+            sheet = SalarySheetService.make_salary_sheet(company, request.user, month, overrides=overrides, notes=notes)
+            serializer = SalarySheetDetailSerializer(sheet, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='pay')
+    def pay(self, request, pk=None):
+        company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            res = SalarySheetService.pay_salary_sheet_lines(
+                company=company,
+                user=request.user,
+                sheet_id=pk,
+                line_ids=request.data.get('line_ids'),
+                treasury_account_id=request.data.get('treasury_account_id'),
+                payment_date_str=request.data.get('payment_date'),
+                payment_reference=request.data.get('payment_reference', ''),
+                notes=request.data.get('notes', ''),
+            )
+            return Response(res)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='toggle-line-hold')
+    def toggle_line_hold(self, request):
+        company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        line_id = request.data.get('line_id')
+        reason = request.data.get('reason', '')
+        try:
+            res = SalarySheetService.toggle_line_hold(company, request.user, line_id, reason=reason)
+            return Response(res)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ==============================================================================
+# FINANCE ADVANCE SHEETS APPROVAL / PAY / REJECT VIEWSET
+# ==============================================================================
+
+from .models import AdvanceSheet
+from .serializers import AdvanceSheetListSerializer, AdvanceSheetDetailSerializer
+from .services.advance_sheet_service import AdvanceSheetService
+
+
+class AdvanceSheetViewSet(BaseFinanceViewSet):
+    queryset = AdvanceSheet.objects.filter(is_deleted=False)
+    serializer_class = AdvanceSheetListSerializer
+    search_fields = ['sheet_number', 'month', 'title']
+
+    def get_queryset(self):
+        company = self.get_company()
+        qs = AdvanceSheet.objects.filter(is_deleted=False)
+        if company:
+            qs = qs.filter(company=company)
+        if getattr(self, 'action', None) == 'retrieve':
+            qs = qs.prefetch_related('lines', 'lines__voucher', 'lines__treasury_account', 'lines__cleared_in_salary_sheet')
+        return qs.order_by('-month', '-created_at')
+
+    def get_serializer_class(self):
+        if getattr(self, 'action', None) == 'retrieve':
+            return AdvanceSheetDetailSerializer
+        return AdvanceSheetListSerializer
+
+    @action(detail=True, methods=['post'], url_path='process-lines')
+    def process_lines(self, request, pk=None):
+        company = self.get_company()
+        if not company:
+            return Response({'detail': 'Company context required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            res = AdvanceSheetService.process_lines(
+                company=company,
+                user=request.user,
+                sheet_id=pk,
+                action_type=request.data.get('action', ''),
+                line_ids=request.data.get('line_ids'),
+                treasury_account_id=request.data.get('treasury_account_id'),
+                payment_date_str=request.data.get('payment_date'),
+                payment_reference=request.data.get('payment_reference', ''),
+                rejection_reason=request.data.get('rejection_reason', ''),
+            )
+            return Response(res, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+

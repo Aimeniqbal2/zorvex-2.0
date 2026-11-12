@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { useAuthStore } from '../../../auth/authStore';
+import { useAppStore } from '../../../stores/appStore';
 import { VendorList } from './components/VendorList';
 import { VendorWorkspace } from './components/VendorWorkspace';
 import { PurchaseOrderList } from './components/PurchaseOrderList';
@@ -15,6 +16,7 @@ import { getPurchasingDashboardKPIs, type PurchasingDashboardKPIs } from './api'
 
 export const SecurityPurchasingModule: React.FC = () => {
     const { user } = useAuthStore();
+    const { enabledModules, userModules } = useAppStore();
     const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
     const [selectedPoId, setSelectedPoId] = useState<string | null>(null);
     const [activeSection, setActiveSection] = useState<'orders' | 'vendors' | 'receipts' | 'bills' | 'reports'>('orders');
@@ -27,7 +29,16 @@ export const SecurityPurchasingModule: React.FC = () => {
     const [kpis, setKpis] = useState<PurchasingDashboardKPIs | null>(null);
     const [loadingKpis, setLoadingKpis] = useState(false);
 
-    const canViewPurchasing = user?.permissions?.includes('purchasing.read') || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'manager';
+    const hasModuleGrant =
+        Boolean(enabledModules?.purchasing) ||
+        userModules.includes('purchasing');
+
+    const canViewPurchasing =
+        hasModuleGrant ||
+        user?.permissions?.includes('purchasing.read') ||
+        user?.role === 'admin' ||
+        user?.role === 'super_admin' ||
+        user?.role === 'manager';
 
     const loadKPIs = async () => {
         setLoadingKpis(true);

@@ -23,7 +23,8 @@ from .views import (
     VendorWithholdingRecordViewSet, TaxPaymentVoucherViewSet, TaxAdjustmentViewSet,
     GeneralLedgerViewSet, AllocationProfileViewSet, FinancialStatementsViewSet, ProfitabilityViewSet,
     CashCountViewSet, SubledgerReconciliationViewSet, ControlExceptionViewSet, YearEndClosingViewSet,
-    ExecutiveFinanceDashboardViewSet
+    ExecutiveFinanceDashboardViewSet,
+    FinancePaymentModeViewSet, SalarySheetViewSet, AdvanceSheetViewSet
 )
 
 router = DefaultRouter()
@@ -87,6 +88,9 @@ router.register(r'voucher-lines', FinancialVoucherLineViewSet, basename='financi
 router.register(r'cheques', ChequeViewSet, basename='cheque')
 router.register(r'bank-statements', BankStatementViewSet, basename='bankstatement')
 router.register(r'security-finance-config', SecurityFinanceConfigurationViewSet, basename='securityfinanceconfig')
+router.register(r'payment-modes', FinancePaymentModeViewSet, basename='financepaymentmode')
+router.register(r'salary-sheets', SalarySheetViewSet, basename='salarysheet')
+router.register(r'advance-sheets', AdvanceSheetViewSet, basename='advancesheet')
 
 urlpatterns = [
     path('', include(router.urls)),

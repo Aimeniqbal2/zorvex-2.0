@@ -4,17 +4,22 @@ import {
   updateSecurityFinanceConfig,
   fetchChartOfAccounts,
   fetchBankAccounts,
+  fetchFinancePaymentModes,
 } from '../api';
 import type {
   SecurityFinanceConfiguration,
   ChartOfAccount,
   BankAccount,
+  FinancePaymentMode,
 } from '../api';
+import { PaymentModesModal } from './PaymentModesModal';
 
 export const FinanceSetupTab: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [paymentModes, setPaymentModes] = useState<FinancePaymentMode[]>([]);
+  const [modesModalOpen, setModesModalOpen] = useState<boolean>(false);
 
   const [config, setConfig] = useState<SecurityFinanceConfiguration>({
     accounts_receivable_account: null,
@@ -474,7 +479,31 @@ export const FinanceSetupTab: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (paymentModes.length === 0) {
+                    fetchFinancePaymentModes().then(setPaymentModes).catch(() => {});
+                  }
+                  setModesModalOpen(true);
+                }}
+                style={{
+                  padding: '9px 18px',
+                  background: 'var(--color-surface-secondary, #1e293b)',
+                  color: 'var(--color-text, #f8fafc)',
+                  border: '1px solid var(--color-border, #334155)',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <i className="bx bx-credit-card" style={{ marginRight: '6px' }}></i>
+                Manage Salary Payment Modes {paymentModes.length > 0 ? `(${paymentModes.length})` : ''}
+              </button>
+            </div>
             <button
               type="submit"
               disabled={saving}
@@ -495,6 +524,11 @@ export const FinanceSetupTab: React.FC = () => {
           </div>
         </form>
       )}
+      <PaymentModesModal
+        isOpen={modesModalOpen}
+        onClose={() => setModesModalOpen(false)}
+        onUpdated={(list) => setPaymentModes(list)}
+      />
     </div>
   );
 };

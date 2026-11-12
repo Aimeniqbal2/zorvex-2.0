@@ -4,14 +4,25 @@ import { DocumentList } from './components/DocumentList';
 import { ApprovalHistoryList } from './components/ApprovalHistoryList';
 import { PendingApprovalsList } from './components/PendingApprovalsList';
 import { useAuthStore } from '../../auth/authStore';
+import { useAppStore } from '../../stores/appStore';
 
 export const PurchasingModule: React.FC = () => {
     const [activeTab, setActiveTab] = useState<string>('PURCHASE_REQUEST');
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const { user } = useAuthStore();
-    
-    // Capability checking
-    const canViewPurchasing = user?.permissions?.includes('purchasing.read') || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'manager';
+    const { enabledModules, userModules } = useAppStore();
+
+    // Capability checking (honors explicit Custom Module grants alongside legacy roles)
+    const hasModuleGrant =
+        Boolean(enabledModules?.purchasing) ||
+        userModules.includes('purchasing');
+
+    const canViewPurchasing =
+        hasModuleGrant ||
+        user?.permissions?.includes('purchasing.read') ||
+        user?.role === 'admin' ||
+        user?.role === 'super_admin' ||
+        user?.role === 'manager';
 
     if (!canViewPurchasing) {
         return (

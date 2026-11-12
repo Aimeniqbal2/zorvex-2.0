@@ -328,6 +328,22 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
+    page-break-inside: auto;
+  }
+  thead {
+    display: table-header-group !important;
+  }
+  tbody {
+    display: table-row-group !important;
+  }
+  tfoot {
+    display: table-footer-group !important;
+  }
+  .banner-th {
+    border: none !important;
+    background: #ffffff !important;
+    padding: 0 0 4px 0 !important;
+    text-align: left !important;
   }
   th, td {
     border: 1px solid #64748b;
@@ -428,12 +444,16 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
 </style>
 </head>
 <body>
-  <div class="sheet-header">
-    <div class="sheet-title">Active Employees</div>
-    <div class="sheet-meta">${companyTitle}Period: ${escapeHtml(periodLabel)} | Location: ${escapeHtml(siteLabel)} | Count: ${data.rows.length} | Read-Only Operations Muster Register</div>
-  </div>
   <table>
     <thead>
+      <tr>
+        <th colspan="${data.days_header.length + 4}" class="banner-th">
+          <div class="sheet-header">
+            <div class="sheet-title">Active Employees</div>
+            <div class="sheet-meta">${companyTitle}Period: ${escapeHtml(periodLabel)} | Location: ${escapeHtml(siteLabel)} | Count: ${data.rows.length} | Read-Only Operations Muster Register</div>
+          </div>
+        </th>
+      </tr>
       <tr>
         <th class="code-col">Code</th>
         <th class="name-col">Employee Name</th>

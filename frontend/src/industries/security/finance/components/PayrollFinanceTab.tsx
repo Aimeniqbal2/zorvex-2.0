@@ -8,8 +8,6 @@ import type {
   PayrollAccountingPreviewItem,
   LiveAttendanceSalariesResponse,
   LiveAttendanceEmployeeSalaryRow,
-  EmployeeAdvanceItem,
-  FinancePayrollDeductionItem,
 } from '../api';
 import {
   fetchPayrollIntegrations,
@@ -22,21 +20,12 @@ import {
   fetchLiveAttendanceSalaries,
   finalizeAndSyncPayrollMonth,
   payGuardSalaries,
-  fetchEmployeeAdvances,
-  approveEmployeeAdvance,
-  payEmployeeAdvance,
-  submitEmployeeAdvance,
-  toggleEmployeeAdvancePayrollDeduction,
-  fetchEmployees,
-  fetchFinancePayrollDeductions,
-  deleteFinancePayrollDeduction,
 } from '../api';
 import { PayrollAccountingPreviewModal } from './PayrollAccountingPreviewModal';
 import { SalaryBatchWorkspaceModal } from './SalaryBatchWorkspaceModal';
 import { NewSalaryBatchModal } from './NewSalaryBatchModal';
 import { PayrollMappingsModal } from './PayrollMappingsModal';
-import { NewAdvanceModal } from './NewAdvanceModal';
-import { PayrollDeductionModal } from '../../../../modules/security-operations/components/PayrollDeductionModal';
+import { SalarySheetWorkspace } from './SalarySheetWorkspace';
 
 interface PayrollFinanceTabProps {
   bankAccounts?: BankAccount[];
@@ -61,23 +50,9 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'LIVE_SALARIES' | 'INTEGRATIONS' | 'BATCHES' | 'DEDUCTIONS_ADVANCES'>('LIVE_SALARIES');
+  const [activeSubTab, setActiveSubTab] = useState<'SALARY_SHEETS' | 'LIVE_SALARIES' | 'INTEGRATIONS' | 'BATCHES'>('SALARY_SHEETS');
   const skipNextMonthEffectRef = useRef(false);
   const initialLoadedRef = useRef(false);
-
-  // Deductions & Employee Advances state (lazy-loaded)
-  const [deductionsList, setDeductionsList] = useState<FinancePayrollDeductionItem[]>([]);
-  const [advancesList, setAdvancesList] = useState<EmployeeAdvanceItem[]>([]);
-  const [employeesList, setEmployeesList] = useState<any[]>([]);
-  const [loadingAdjustments, setLoadingAdjustments] = useState(false);
-  const [deductionModalOpen, setDeductionModalOpen] = useState(false);
-  const [preselectEmpId, setPreselectEmpId] = useState<string>('');
-  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
-  const [disbursingAdvance, setDisbursingAdvance] = useState<EmployeeAdvanceItem | null>(null);
-  const [advBankId, setAdvBankId] = useState<string>('');
-  const [advPayMethod, setAdvPayMethod] = useState<string>('BANK_TRANSFER');
-  const [advPayRef, setAdvPayRef] = useState<string>('');
-  const [advSaving, setAdvSaving] = useState(false);
 
   // Pay Guard Salary Modal
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -174,117 +149,6 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
     }
     loadData(selectedMonth, initialLoadedRef.current);
   }, [selectedMonth]);
-
-  const loadDeductionsAndAdvances = async () => {
-    try {
-      setLoadingAdjustments(true);
-      const [dedRes, advRes] = await Promise.all([
-        fetchFinancePayrollDeductions().catch(() => []),
-        fetchEmployeeAdvances().catch(() => []),
-      ]);
-      setDeductionsList(Array.isArray(dedRes) ? dedRes : []);
-      setAdvancesList(Array.isArray(advRes) ? advRes : []);
-    } finally {
-      setLoadingAdjustments(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeSubTab === 'DEDUCTIONS_ADVANCES') {
-      loadDeductionsAndAdvances();
-    }
-  }, [activeSubTab]);
-
-  const ensureEmployeesLoaded = async () => {
-    if (employeesList.length > 0) return;
-    try {
-      const emps = await fetchEmployees();
-      setEmployeesList(Array.isArray(emps) ? emps : []);
-    } catch (err) {
-      console.error('Failed to load employees for advance modal:', err);
-    }
-  };
-
-  const openNewDeductionModal = (empId = '') => {
-    setPreselectEmpId(empId);
-    setDeductionModalOpen(true);
-  };
-
-  const openNewAdvanceModal = async (empId = '') => {
-    setPreselectEmpId(empId);
-    await ensureEmployeesLoaded();
-    setAdvanceModalOpen(true);
-  };
-
-  const refreshAfterAdjustment = async () => {
-    const activeMonth = liveData?.month || (selectedMonth !== 'AUTO' ? selectedMonth : undefined);
-    await Promise.all([
-      loadData(activeMonth, true),
-      loadDeductionsAndAdvances(),
-    ]);
-  };
-
-  const handleDeleteDeduction = async (id: string) => {
-    if (!confirm('Remove this payroll deduction instruction?')) return;
-    try {
-      await deleteFinancePayrollDeduction(id);
-      await refreshAfterAdjustment();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err?.response?.data?.error || err.message || 'Failed to delete deduction.');
-    }
-  };
-
-  const handleSubmitAdvanceRow = async (id: string) => {
-    try {
-      await submitEmployeeAdvance(id);
-      await loadDeductionsAndAdvances();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err.message || 'Failed to submit advance.');
-    }
-  };
-
-  const handleApproveAdvanceRow = async (id: string) => {
-    try {
-      await approveEmployeeAdvance(id);
-      await loadDeductionsAndAdvances();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err.message || 'Failed to approve advance.');
-    }
-  };
-
-  const handleToggleAdvancePayroll = async (id: string, nextVal: boolean) => {
-    try {
-      await toggleEmployeeAdvancePayrollDeduction(id, nextVal);
-      await refreshAfterAdjustment();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err.message || 'Failed to update payroll recovery toggle.');
-    }
-  };
-
-  const handleConfirmAdvanceDisburse = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!disbursingAdvance) return;
-    const bankId = advBankId || bankAccounts[0]?.id;
-    if (!bankId) {
-      alert('Please configure an active Bank or Cash Treasury account first.');
-      return;
-    }
-    try {
-      setAdvSaving(true);
-      await payEmployeeAdvance(disbursingAdvance.id, {
-        bank_account: bankId,
-        payment_method: advPayMethod,
-        reference: advPayRef || undefined,
-      });
-      setDisbursingAdvance(null);
-      setAdvPayRef('');
-      await refreshAfterAdjustment();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err?.response?.data?.error || err.message || 'Failed to disburse advance.');
-    } finally {
-      setAdvSaving(false);
-    }
-  };
 
   const handleFinalizeMonth = async () => {
     const monthToFinalize = liveData?.month || (selectedMonth !== 'AUTO' ? selectedMonth : '');
@@ -490,44 +354,6 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
           </select>
 
           <button
-            onClick={() => openNewDeductionModal()}
-            style={{
-              padding: '8px 14px',
-              borderRadius: '6px',
-              background: 'rgba(220, 38, 38, 0.08)',
-              border: '1px solid rgba(220, 38, 38, 0.35)',
-              color: '#dc2626',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '5px',
-            }}
-          >
-            + Add Deduction
-          </button>
-
-          <button
-            onClick={() => openNewAdvanceModal()}
-            style={{
-              padding: '8px 14px',
-              borderRadius: '6px',
-              background: 'rgba(2, 132, 199, 0.08)',
-              border: '1px solid rgba(2, 132, 199, 0.35)',
-              color: '#0284c7',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '5px',
-            }}
-          >
-            + Record Advance
-          </button>
-
-          <button
             onClick={() => setMappingsModalOpen(true)}
             style={{
               padding: '8px 14px',
@@ -682,6 +508,22 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
       {/* Sub-tab Navigation */}
       <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--color-border, #e2e8f0)', paddingBottom: '2px', flexWrap: 'wrap' }}>
         <button
+          onClick={() => setActiveSubTab('SALARY_SHEETS')}
+          style={{
+            padding: '8px 16px',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeSubTab === 'SALARY_SHEETS' ? '2px solid #0284c7' : '2px solid transparent',
+            color: activeSubTab === 'SALARY_SHEETS' ? '#0284c7' : 'var(--color-text-muted, #64748b)',
+            fontWeight: 700,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+          }}
+        >
+          Monthly Salary Sheets
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('LIVE_SALARIES')}
           style={{
             padding: '8px 16px',
@@ -728,23 +570,14 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
         >
           Salary Payment Batches ({batches.length})
         </button>
-
-        <button
-          onClick={() => setActiveSubTab('DEDUCTIONS_ADVANCES')}
-          style={{
-            padding: '8px 16px',
-            background: 'transparent',
-            border: 'none',
-            borderBottom: activeSubTab === 'DEDUCTIONS_ADVANCES' ? '2px solid #0284c7' : '2px solid transparent',
-            color: activeSubTab === 'DEDUCTIONS_ADVANCES' ? '#0284c7' : 'var(--color-text-muted, #64748b)',
-            fontWeight: 600,
-            fontSize: '0.9rem',
-            cursor: 'pointer',
-          }}
-        >
-          Deductions &amp; Advances
-        </button>
       </div>
+
+      {/* Sub-tab 0: Monthly Salary Sheet Builder & Archive */}
+      {activeSubTab === 'SALARY_SHEETS' && (
+        <SalarySheetWorkspace
+          onOpenGlMappings={() => setMappingsModalOpen(true)}
+        />
+      )}
 
       {/* Sub-tab 1: Live Operations Attendance Salaries */}
       {activeSubTab === 'LIVE_SALARIES' && (
@@ -1200,320 +1033,6 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
         </div>
       )}
 
-      {/* Sub-tab 4: Deductions & Employee Advances */}
-      {activeSubTab === 'DEDUCTIONS_ADVANCES' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div
-            style={{
-              background: 'rgba(2, 132, 199, 0.06)',
-              border: '1px solid rgba(2, 132, 199, 0.22)',
-              borderRadius: '10px',
-              padding: '14px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '12px',
-            }}
-          >
-            <div style={{ fontSize: '0.84rem', color: 'var(--color-text, #0f172a)', lineHeight: 1.5 }}>
-              <strong>How Payroll Deductions &amp; Advances Work:</strong> Record <strong>One-Time / Recurring Deductions</strong> (Uniform, Fine, Patrolling, Insurance, Advance Installments) or disburse <strong>Employee Advances</strong> set to <strong>Monthly Payroll Deduction</strong>. Any active deduction or paid advance due on or before the selected payroll month automatically deducts in <strong>Employee Attendance Salaries</strong> and settles upon <strong>Approve &amp; Finalize Salaries</strong> / <strong>Pay Salary</strong>.
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => openNewDeductionModal()}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: '#dc2626',
-                  color: '#ffffff',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                + Record Deduction
-              </button>
-              <button
-                onClick={() => openNewAdvanceModal()}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: '#0284c7',
-                  color: '#ffffff',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                + Request Salary Advance
-              </button>
-              <button
-                onClick={loadDeductionsAndAdvances}
-                disabled={loadingAdjustments}
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--color-border, #cbd5e1)',
-                  background: 'var(--color-surface, #ffffff)',
-                  color: 'var(--color-text, #0f172a)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {loadingAdjustments ? 'Refreshing...' : '↻ Refresh'}
-              </button>
-            </div>
-          </div>
-
-          {/* Section A: Employee Advances */}
-          <div
-            style={{
-              background: 'var(--color-surface, #ffffff)',
-              borderRadius: '10px',
-              border: '1px solid var(--color-border, #e2e8f0)',
-              overflowX: 'auto',
-            }}
-          >
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--color-border, #e2e8f0)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
-                  Employee Advances ({advancesList.length})
-                </h3>
-                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted, #64748b)', marginTop: '2px' }}>
-                  Approve → Disburse (creates Treasury Voucher) → Auto-Deducts in payroll month of Expected Settlement Date (or Advance Date).
-                </div>
-              </div>
-            </div>
-
-            {loadingAdjustments && advancesList.length === 0 ? (
-              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-muted, #64748b)' }}>Loading employee advances...</div>
-            ) : advancesList.length === 0 ? (
-              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-muted, #64748b)' }}>
-                No employee advances recorded yet. Click <strong>+ Request Salary Advance</strong> above to issue one.
-              </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ background: 'var(--color-surface-secondary, #f8fafc)', textAlign: 'left', borderBottom: '1px solid var(--color-border, #e2e8f0)' }}>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Advance #</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Employee</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Date &amp; Due</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Recovery Method</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)', textAlign: 'right' }}>Total (PKR)</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)', textAlign: 'right' }}>Outstanding (PKR)</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Status</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)', textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {advancesList.map((adv) => {
-                    const outBal = parseFloat(String(adv.outstanding_balance || 0));
-                    return (
-                      <tr key={adv.id} style={{ borderBottom: '1px solid var(--color-border, #e2e8f0)' }}>
-                        <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0284c7' }}>{adv.advance_number}</td>
-                        <td style={{ padding: '10px 14px' }}>
-                          <div style={{ fontWeight: 600, color: 'var(--color-text, #0f172a)' }}>{adv.employee_name || 'Employee'}</div>
-                          <div style={{ fontSize: '0.73rem', color: 'var(--color-text-muted, #64748b)' }}>
-                            {adv.employee_code || ''} {adv.purpose ? `• ${adv.purpose}` : ''}
-                          </div>
-                        </td>
-                        <td style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)', fontSize: '0.8rem' }}>
-                          <div>Issued: {adv.advance_date}</div>
-                          {adv.expected_settlement_date && <div>Due: {adv.expected_settlement_date}</div>}
-                        </td>
-                        <td style={{ padding: '10px 14px', fontSize: '0.8rem' }}>
-                          <div style={{ fontWeight: 500, color: 'var(--color-text, #0f172a)' }}>
-                            {adv.recovery_method.replace(/_/g, ' ')}
-                          </div>
-                          {adv.payroll_deduction_ready && (
-                            <span style={{ fontSize: '0.7rem', color: '#16a34a', fontWeight: 600 }}>Auto-Payroll ON</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>
-                          {parseFloat(String(adv.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: outBal > 0 ? '#d97706' : '#16a34a' }}>
-                          {outBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '10px 14px' }}>
-                          <span style={{
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: '10px',
-                            background: adv.status === 'SETTLED' || adv.status === 'PAID' ? 'rgba(34, 197, 94, 0.14)' : 'rgba(234, 179, 8, 0.15)',
-                            color: adv.status === 'SETTLED' || adv.status === 'PAID' ? '#16a34a' : '#d97706',
-                          }}>
-                            {adv.status.replace(/_/g, ' ')}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                            {adv.status === 'DRAFT' && (
-                              <button
-                                onClick={() => handleSubmitAdvanceRow(adv.id)}
-                                style={{ padding: '4px 10px', borderRadius: '5px', border: 'none', background: '#0284c7', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
-                              >
-                                Submit
-                              </button>
-                            )}
-                            {adv.status === 'PENDING_APPROVAL' && (
-                              <button
-                                onClick={() => handleApproveAdvanceRow(adv.id)}
-                                style={{ padding: '4px 10px', borderRadius: '5px', border: 'none', background: '#16a34a', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
-                              >
-                                Approve
-                              </button>
-                            )}
-                            {adv.status === 'APPROVED' && (
-                              <button
-                                onClick={() => {
-                                  setDisbursingAdvance(adv);
-                                  setAdvBankId(bankAccounts[0]?.id || '');
-                                }}
-                                style={{ padding: '4px 10px', borderRadius: '5px', border: 'none', background: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
-                              >
-                                Disburse Advance
-                              </button>
-                            )}
-                            {adv.status === 'PAID' && outBal > 0 && (
-                              <button
-                                onClick={() => handleToggleAdvancePayroll(adv.id, !adv.payroll_deduction_ready)}
-                                style={{
-                                  padding: '4px 8px',
-                                  borderRadius: '5px',
-                                  border: '1px solid #16a34a',
-                                  background: adv.payroll_deduction_ready ? '#16a34a' : 'transparent',
-                                  color: adv.payroll_deduction_ready ? '#fff' : '#16a34a',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                {adv.payroll_deduction_ready ? 'Auto-Deduct: ON' : 'Enable Auto-Deduct'}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {/* Section B: Configured Payroll Deductions */}
-          <div
-            style={{
-              background: 'var(--color-surface, #ffffff)',
-              borderRadius: '10px',
-              border: '1px solid var(--color-border, #e2e8f0)',
-              overflowX: 'auto',
-            }}
-          >
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--color-border, #e2e8f0)' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text, #0f172a)' }}>
-                Configured Payroll Deductions ({deductionsList.length})
-              </h3>
-              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted, #64748b)', marginTop: '2px' }}>
-                One-time (next/selected month) and monthly recurring deductions for Patrolling, Uniform, Fines, Insurance, and Advance Installments.
-              </div>
-            </div>
-
-            {loadingAdjustments && deductionsList.length === 0 ? (
-              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-muted, #64748b)' }}>Loading payroll deductions...</div>
-            ) : deductionsList.length === 0 ? (
-              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-muted, #64748b)' }}>
-                No payroll deductions configured yet. Click <strong>+ Record Deduction</strong> above to add one.
-              </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ background: 'var(--color-surface-secondary, #f8fafc)', textAlign: 'left', borderBottom: '1px solid var(--color-border, #e2e8f0)' }}>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Employee</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Type</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Description</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>Frequency &amp; Effective Date</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)', textAlign: 'right' }}>Amount (PKR)</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)' }}>State</th>
-                    <th style={{ padding: '10px 14px', color: 'var(--color-text-muted, #64748b)', textAlign: 'right' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deductionsList.map((ded) => (
-                    <tr key={ded.id} style={{ borderBottom: '1px solid var(--color-border, #e2e8f0)' }}>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontWeight: 600, color: 'var(--color-text, #0f172a)' }}>{ded.employee_name || 'Employee'}</div>
-                        <div style={{ fontSize: '0.73rem', color: 'var(--color-text-muted, #64748b)' }}>{ded.employee_code || ''}</div>
-                      </td>
-                      <td style={{ padding: '10px 14px', fontSize: '0.8rem', fontWeight: 600, color: '#dc2626' }}>
-                        {ded.deduction_type_label || ded.deduction_type}
-                        {ded.advance_number && (
-                          <div style={{ fontSize: '0.7rem', color: '#0284c7' }}>Linked: {ded.advance_number}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontWeight: 500, color: 'var(--color-text, #0f172a)' }}>{ded.name}</div>
-                        {ded.notes && <div style={{ fontSize: '0.73rem', color: 'var(--color-text-muted, #64748b)' }}>{ded.notes}</div>}
-                      </td>
-                      <td style={{ padding: '10px 14px', fontSize: '0.8rem', color: 'var(--color-text-muted, #64748b)' }}>
-                        <div>{ded.frequency_label || ded.frequency}</div>
-                        <div>
-                          {ded.frequency === 'ONE_TIME'
-                            ? ded.effective_date || '—'
-                            : `${ded.effective_from || 'Start'} → ${ded.effective_to || 'Ongoing'}`}
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>
-                        PKR {parseFloat(String(ded.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <span style={{
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          padding: '2px 8px',
-                          borderRadius: '10px',
-                          background: ded.is_frozen ? 'rgba(148, 163, 184, 0.2)' : 'rgba(34, 197, 94, 0.14)',
-                          color: ded.is_frozen ? '#64748b' : '#16a34a',
-                        }}>
-                          {ded.is_frozen ? 'Applied & Frozen' : ded.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                        {!ded.is_frozen ? (
-                          <button
-                            onClick={() => handleDeleteDeduction(ded.id)}
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: '5px',
-                              border: '1px solid #ef4444',
-                              background: 'transparent',
-                              color: '#ef4444',
-                              fontSize: '0.75rem',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Remove
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)' }}>Locked</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Modal: Pay Selected Guard(s) Salary */}
       {payModalOpen && (
         <div
@@ -1670,124 +1189,6 @@ export const PayrollFinanceTab: React.FC<PayrollFinanceTabProps> = ({
         onClose={() => setMappingsModalOpen(false)}
         chartOfAccounts={chartOfAccounts}
       />
-
-      {deductionModalOpen && (
-        <PayrollDeductionModal
-          isOpen={deductionModalOpen}
-          onClose={() => setDeductionModalOpen(false)}
-          onSaved={refreshAfterAdjustment}
-          preselectedEmployeeId={preselectEmpId || undefined}
-        />
-      )}
-
-      {advanceModalOpen && (
-        <NewAdvanceModal
-          employees={employeesList}
-          defaultRecoveryMethod="PAYROLL_DEDUCTION"
-          preselectedEmployeeId={preselectEmpId}
-          onClose={() => setAdvanceModalOpen(false)}
-          onSuccess={() => {
-            setAdvanceModalOpen(false);
-            setActiveSubTab('DEDUCTIONS_ADVANCES');
-            refreshAfterAdjustment();
-          }}
-        />
-      )}
-
-      {disbursingAdvance && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.65)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1060,
-            padding: '20px',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--color-surface, #ffffff)',
-              color: 'var(--color-text, #0f172a)',
-              borderRadius: '12px',
-              border: '1px solid var(--color-border, #e2e8f0)',
-              width: '100%',
-              maxWidth: '460px',
-              padding: '20px',
-            }}
-          >
-            <h3 style={{ margin: '0 0 6px', fontSize: '16px', fontWeight: 700 }}>Disburse Employee Advance</h3>
-            <p style={{ margin: '0 0 14px', fontSize: '13px', color: 'var(--color-text-muted, #64748b)' }}>
-              Advance <strong>{disbursingAdvance.advance_number}</strong> for <strong>{disbursingAdvance.employee_name}</strong> —{' '}
-              <strong style={{ color: '#0284c7' }}>PKR {parseFloat(String(disbursingAdvance.amount || 0)).toLocaleString()}</strong>
-            </p>
-            <form onSubmit={handleConfirmAdvanceDisburse} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>
-                  Source Bank / Cash Account *
-                </label>
-                <select
-                  value={advBankId}
-                  onChange={(e) => setAdvBankId(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border, #cbd5e1)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #0f172a)', fontSize: '13px' }}
-                >
-                  {bankAccounts.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.account_title} ({b.account_type}) — Bal: PKR {Number(b.current_balance || 0).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>
-                  Payment Method
-                </label>
-                <select
-                  value={advPayMethod}
-                  onChange={(e) => setAdvPayMethod(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border, #cbd5e1)', background: 'var(--color-surface, #ffffff)', color: 'var(--color-text, #0f172a)', fontSize: '13px' }}
-                >
-                  <option value="BANK_TRANSFER">Bank Transfer / Online</option>
-                  <option value="CASH">Cash</option>
-                  <option value="CHEQUE">Cheque</option>
-                  <option value="DIRECT_DEPOSIT">Direct Deposit</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>
-                  Reference / Cheque #
-                </label>
-                <input
-                  type="text"
-                  value={advPayRef}
-                  onChange={(e) => setAdvPayRef(e.target.value)}
-                  placeholder="Optional payment reference"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--color-border, #cbd5e1)', fontSize: '13px' }}
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setDisbursingAdvance(null)}
-                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid var(--color-border, #cbd5e1)', background: 'var(--color-surface, #ffffff)', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={advSaving}
-                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#059669', color: '#ffffff', fontWeight: 600, cursor: 'pointer' }}
-                >
-                  {advSaving ? 'Disbursing...' : 'Confirm & Disburse'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

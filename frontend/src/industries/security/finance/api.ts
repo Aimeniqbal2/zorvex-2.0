@@ -3492,5 +3492,354 @@ export async function payGuardSalaries(data: {
   return resp.data;
 }
 
+// ==============================================================================
+// SALARY SHEET ENGINE & PAYMENT MODES API
+// ==============================================================================
+
+export interface FinancePaymentMode {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  is_default: boolean;
+  is_active: boolean;
+}
+
+export interface SalarySheetLocationSummary {
+  site_id?: string;
+  site_name: string;
+  regular_shifts: number;
+  ot_shifts: number;
+  label: string;
+}
+
+export interface LiveSalarySheetRow {
+  serial_no: number;
+  employee_id: string;
+  oss_code: string;
+  employee_name: string;
+  father_name: string;
+  designation_name: string;
+  department_name: string;
+  basic_salary: number;
+  four_hrs_ot_enabled: boolean;
+  four_hrs_ot_amount: number;
+  site_allowance_enabled: boolean;
+  site_allowance_amount: number;
+  total_salary: number;
+  total_shifts: number;
+  paid_shifts: number;
+  overtime_shifts: number;
+  prorated_salary: number;
+  overtime_payable: number;
+  gross_salary_payable: number;
+  doc_charges: number;
+  doc_charges_enabled: boolean;
+  doc_charges_paid: boolean;
+  eobi_amount: number;
+  eobi_enabled: boolean;
+  admin_charges: number;
+  admin_charges_enabled: boolean;
+  fine_amount: number;
+  manual_fine_amount: number;
+  insurance_amount: number;
+  insurance_enabled: boolean;
+  advance_amount: number;
+  outstanding_advance: number;
+  other_deductions: number;
+  total_deduction: number;
+  net_salary_payable: number;
+  payment_mode_id?: string | null;
+  mode_of_payment: string;
+  locations_summary: SalarySheetLocationSummary[];
+  locations_text: string;
+  primary_site_id?: string | null;
+  contact_number: string;
+  cnic_number: string;
+  cnic_issue_date?: string | null;
+}
+
+export interface CompanyBrandingInfo {
+  company_id?: string;
+  company_name?: string;
+  logo_url?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  ntn?: string;
+  strn?: string;
+}
+
+export interface LiveSalarySheetResponse {
+  month: string;
+  current_month: string;
+  previous_month: string;
+  available_months: string[];
+  period_start: string;
+  period_end: string;
+  days_in_month: number;
+  has_generated_sheet: boolean;
+  existing_sheet_id?: string | null;
+  existing_sheet_number?: string | null;
+  crm_rules: {
+    eobi_rate: number;
+    sessi_minimum_wage: number;
+    sessi_percentage: number;
+    admin_charges_percentage: number;
+    insurance_percentage: number;
+    four_hrs_ot_amount: number;
+    site_allowance_amount: number;
+    four_hrs_ot_default_enabled: boolean;
+    site_allowance_default_enabled: boolean;
+  };
+  branding: CompanyBrandingInfo;
+  payment_modes: Array<{ id: string; name: string; code: string; is_default: boolean }>;
+  totals: Record<string, number>;
+  employee_count: number;
+  rows: LiveSalarySheetRow[];
+}
+
+export interface SalarySheetLineItem {
+  id: string;
+  salary_sheet: string;
+  employee: string;
+  serial_no: number;
+  oss_code: string;
+  employee_name: string;
+  father_name: string;
+  designation_name: string;
+  department_name: string;
+  contact_number: string;
+  cnic_number: string;
+  cnic_issue_date?: string | null;
+  basic_salary: number | string;
+  four_hrs_ot_enabled: boolean;
+  four_hrs_ot_amount: number | string;
+  site_allowance_enabled: boolean;
+  site_allowance_amount: number | string;
+  total_salary: number | string;
+  total_shifts: number;
+  paid_shifts: number | string;
+  overtime_shifts: number | string;
+  prorated_salary: number | string;
+  overtime_payable: number | string;
+  gross_salary_payable: number | string;
+  doc_charges: number | string;
+  eobi_amount: number | string;
+  admin_charges: number | string;
+  fine_amount: number | string;
+  insurance_amount: number | string;
+  advance_amount: number | string;
+  other_deductions: number | string;
+  total_deduction: number | string;
+  net_salary_payable: number | string;
+  mode_of_payment: string;
+  locations_summary: SalarySheetLocationSummary[];
+  locations_text: string;
+  primary_site?: string | null;
+  payslip_number: string;
+  payment_status: 'UNPAID' | 'PAID';
+  paid_at?: string | null;
+  payment_reference: string;
+  is_stop_payment: boolean;
+  stop_payment_reason: string;
+}
+
+export interface SalarySheetItem {
+  id: string;
+  sheet_number: string;
+  month: string;
+  title: string;
+  period_start: string;
+  period_end: string;
+  days_in_month: number;
+  status: 'FINALIZED' | 'PARTIALLY_PAID' | 'PAID';
+  prepared_by_name: string;
+  total_employees: number;
+  total_basic_salary: number | string;
+  total_four_hrs_ot: number | string;
+  total_site_allowance: number | string;
+  total_salary: number | string;
+  total_overtime_payable: number | string;
+  total_gross_payable: number | string;
+  total_doc_charges: number | string;
+  total_eobi: number | string;
+  total_admin_charges: number | string;
+  total_fine: number | string;
+  total_insurance: number | string;
+  total_advance: number | string;
+  total_other_deductions: number | string;
+  total_deductions: number | string;
+  total_net_payable: number | string;
+  total_paid: number | string;
+  notes: string;
+  created_at: string;
+  branding?: CompanyBrandingInfo;
+  lines?: SalarySheetLineItem[];
+}
+
+export async function fetchFinancePaymentModes(): Promise<FinancePaymentMode[]> {
+  const resp = await axios.get(`${API_BASE}/payment-modes/`, getAuthHeaders());
+  return Array.isArray(resp.data) ? resp.data : (resp.data?.results || []);
+}
+
+export async function createFinancePaymentMode(data: Partial<FinancePaymentMode>): Promise<FinancePaymentMode> {
+  const resp = await axios.post(`${API_BASE}/payment-modes/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function updateFinancePaymentMode(id: string, data: Partial<FinancePaymentMode>): Promise<FinancePaymentMode> {
+  const resp = await axios.patch(`${API_BASE}/payment-modes/${id}/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function deleteFinancePaymentMode(id: string): Promise<void> {
+  await axios.delete(`${API_BASE}/payment-modes/${id}/`, getAuthHeaders());
+}
+
+export async function fetchLiveSalarySheet(month?: string): Promise<LiveSalarySheetResponse> {
+  const resp = await axios.get(`${API_BASE}/salary-sheets/live-preview/`, {
+    ...getAuthHeaders(),
+    params: month ? { month } : undefined,
+  });
+  return resp.data;
+}
+
+export async function updateSalaryDraftLine(data: {
+  month: string;
+  employee_id: string;
+  four_hrs_ot_enabled?: boolean;
+  site_allowance_enabled?: boolean;
+  fine_amount?: number;
+  payment_mode_id?: string | null;
+  mode_of_payment?: string;
+}): Promise<{ success: boolean }> {
+  const resp = await axios.post(`${API_BASE}/salary-sheets/update-draft/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function makeSalarySheet(data: {
+  month: string;
+  overrides?: Array<Record<string, any>>;
+  notes?: string;
+}): Promise<SalarySheetItem> {
+  const resp = await axios.post(`${API_BASE}/salary-sheets/make-sheet/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function fetchSalarySheets(): Promise<SalarySheetItem[]> {
+  const resp = await axios.get(`${API_BASE}/salary-sheets/`, getAuthHeaders());
+  return Array.isArray(resp.data) ? resp.data : (resp.data?.results || []);
+}
+
+export async function fetchSalarySheetDetail(sheetId: string): Promise<SalarySheetItem> {
+  const resp = await axios.get(`${API_BASE}/salary-sheets/${sheetId}/`, getAuthHeaders());
+  return resp.data;
+}
+
+export async function deleteSalarySheet(sheetId: string): Promise<{ success: boolean; deleted_month: string; deleted_sheet_number: string }> {
+  const resp = await axios.delete(`${API_BASE}/salary-sheets/${sheetId}/`, getAuthHeaders());
+  return resp.data;
+}
+
+export async function paySalarySheetLines(
+  sheetId: string,
+  data: {
+    line_ids?: string[];
+    treasury_account_id?: string;
+    payment_date?: string;
+    payment_reference?: string;
+    notes?: string;
+  }
+): Promise<{ success: boolean; paid_count: number; total_disbursed: number; voucher_number: string; message: string }> {
+  const resp = await axios.post(`${API_BASE}/salary-sheets/${sheetId}/pay/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+export async function toggleSalaryLineHold(lineId: string, reason?: string): Promise<{ success: boolean; is_stop_payment: boolean; stop_payment_reason: string }> {
+  const resp = await axios.post(`${API_BASE}/salary-sheets/toggle-line-hold/`, { line_id: lineId, reason: reason || '' }, getAuthHeaders());
+  return resp.data;
+}
+
+// ==============================================================================
+// ADVANCE SHEETS (FROM OPERATIONS -> FINANCE APPROVAL / PAY / REJECT)
+// ==============================================================================
+
+export interface AdvanceSheetLineItem {
+  id: string;
+  advance_sheet: string;
+  employee: string;
+  serial_no: number;
+  oss_code: string;
+  employee_name: string;
+  father_name: string;
+  designation_name: string;
+  location_deployed: string;
+  amount: number | string;
+  payment_status: 'PENDING' | 'PAID' | 'REJECTED';
+  paid_at?: string | null;
+  payment_reference: string;
+  voucher_number?: string;
+  treasury_account_title?: string;
+  rejected_at?: string | null;
+  rejection_reason: string;
+  deduction_status: 'NOT_DEDUCTED' | 'CLEARED';
+  deduction_status_label?: string;
+  cleared_in_sheet_number?: string;
+  cleared_at?: string | null;
+  notes: string;
+}
+
+export interface AdvanceSheetItem {
+  id: string;
+  sheet_number: string;
+  month: string;
+  title: string;
+  period_start: string;
+  period_end: string;
+  status: 'SUBMITTED' | 'PARTIALLY_PROCESSED' | 'PROCESSED';
+  prepared_by_name: string;
+  total_employees: number;
+  total_requested_amount: number | string;
+  total_paid_amount: number | string;
+  total_rejected_amount: number | string;
+  pending_count?: number;
+  paid_count?: number;
+  rejected_count?: number;
+  cleared_count?: number;
+  notes: string;
+  created_at: string;
+  branding?: CompanyBrandingInfo;
+  lines?: AdvanceSheetLineItem[];
+}
+
+export async function fetchFinanceAdvanceSheets(): Promise<AdvanceSheetItem[]> {
+  const resp = await axios.get(`${API_BASE}/advance-sheets/`, getAuthHeaders());
+  return Array.isArray(resp.data) ? resp.data : (resp.data?.results || []);
+}
+
+export async function fetchFinanceAdvanceSheetDetail(sheetId: string): Promise<AdvanceSheetItem> {
+  const resp = await axios.get(`${API_BASE}/advance-sheets/${sheetId}/`, getAuthHeaders());
+  return resp.data;
+}
+
+export async function processAdvanceSheetLines(
+  sheetId: string,
+  data: {
+    action: 'PAY' | 'REJECT';
+    line_ids?: string[];
+    treasury_account_id?: string;
+    payment_date?: string;
+    payment_reference?: string;
+    rejection_reason?: string;
+  }
+): Promise<{ success: boolean; action: string; processed_count: number; total_paid?: number; voucher_number?: string; message: string }> {
+  const resp = await axios.post(`${API_BASE}/advance-sheets/${sheetId}/process-lines/`, data, getAuthHeaders());
+  return resp.data;
+}
+
+
+
 
 

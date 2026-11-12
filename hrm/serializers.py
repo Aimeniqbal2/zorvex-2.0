@@ -142,6 +142,7 @@ class EmployeeSerializer(BaseTenantSerializer):
     system_id = serializers.CharField(read_only=True)
     display_code = serializers.CharField(read_only=True)
     is_blacklisted = serializers.SerializerMethodField()
+    doc_charges_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
@@ -207,10 +208,28 @@ class EmployeeSerializer(BaseTenantSerializer):
             else:
                 data['city'] = raw_city[:20]
 
+        # Normalize doc_charges fields safely
+        if 'doc_charges_amount' in data and (data['doc_charges_amount'] == '' or data['doc_charges_amount'] is None):
+            data['doc_charges_amount'] = '0'
+        if 'doc_charges_month' in data and data['doc_charges_month'] is None:
+            data['doc_charges_month'] = ''
+
         return super().to_internal_value(data)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        doc_en = attrs.get('doc_charges_enabled', getattr(self.instance, 'doc_charges_enabled', False) if self.instance else False)
+        doc_amt = attrs.get('doc_charges_amount', getattr(self.instance, 'doc_charges_amount', 0) if self.instance else 0)
+        doc_mo = attrs.get('doc_charges_month', getattr(self.instance, 'doc_charges_month', '') if self.instance else '')
+        if doc_en:
+            from decimal import Decimal
+            if not doc_mo or len(str(doc_mo).strip()) != 7:
+                raise serializers.ValidationError({'doc_charges_month': 'Please select the deduction month (YYYY-MM) when Doc Charges is enabled.'})
+            try:
+                if Decimal(str(doc_amt or 0)) <= 0:
+                    raise serializers.ValidationError({'doc_charges_amount': 'Please enter a valid positive Doc Charges amount (PKR).'})
+            except Exception:
+                raise serializers.ValidationError({'doc_charges_amount': 'Invalid Doc Charges amount.'})
         company_id = get_current_company()
         if not company_id and 'request' in self.context and self.context['request']:
             company_id = self.context['request'].META.get('HTTP_X_COMPANY_ID') or getattr(self.context['request'].user, 'company_id', None)
@@ -299,6 +318,28 @@ class EmployeeSerializer(BaseTenantSerializer):
                     })
 
         return attrs
+
+    def get_doc_charges_status(self, obj):
+        if not getattr(obj, 'doc_charges_enabled', False) or float(getattr(obj, 'doc_charges_amount', 0) or 0) <= 0:
+            return 'NONE'
+        if getattr(obj, 'doc_charges_paid', False):
+            return 'PAID'
+        try:
+            from finance.models import SalarySheetLine
+            paid_line_exists = SalarySheetLine.objects.filter(
+                company_id=obj.company_id,
+                employee_id=obj.id,
+                salary_sheet__month=obj.doc_charges_month,
+                salary_sheet__is_deleted=False,
+                is_deleted=False,
+                payment_status='PAID',
+                doc_charges__gt=0,
+            ).exists()
+            if paid_line_exists:
+                return 'PAID'
+        except Exception:
+            pass
+        return 'PENDING'
 
     def get_is_blacklisted(self, obj):
         try:

@@ -1537,10 +1537,14 @@ class SecurityCostingSettingsView(APIView):
                 sessi_percentage=Decimal('6.00'),
                 admin_charges_percentage=Decimal('5.00'),
                 insurance_percentage=Decimal('2.00'),
+                four_hrs_ot_amount=Decimal('1000.00'),
+                site_allowance_amount=Decimal('1000.00'),
                 eobi_default_enabled=False,
                 sessi_default_enabled=False,
                 admin_charges_default_enabled=False,
-                insurance_default_enabled=False
+                insurance_default_enabled=False,
+                four_hrs_ot_default_enabled=True,
+                site_allowance_default_enabled=True,
             )
         return Response(SecurityCostingSettingSerializer(setting).data, status=status.HTTP_200_OK)
 
@@ -1569,6 +1573,10 @@ class SecurityCostingSettingsView(APIView):
             setting.admin_charges_percentage = Decimal(str(data['admin_charges_percentage']))
         if 'insurance_percentage' in data and data['insurance_percentage'] is not None:
             setting.insurance_percentage = Decimal(str(data['insurance_percentage']))
+        if 'four_hrs_ot_amount' in data and data['four_hrs_ot_amount'] is not None and str(data['four_hrs_ot_amount']).strip() != '':
+            setting.four_hrs_ot_amount = Decimal(str(data['four_hrs_ot_amount']))
+        if 'site_allowance_amount' in data and data['site_allowance_amount'] is not None and str(data['site_allowance_amount']).strip() != '':
+            setting.site_allowance_amount = Decimal(str(data['site_allowance_amount']))
         if 'eobi_default_enabled' in data:
             setting.eobi_default_enabled = bool(data['eobi_default_enabled'])
         if 'sessi_default_enabled' in data:
@@ -1577,6 +1585,10 @@ class SecurityCostingSettingsView(APIView):
             setting.admin_charges_default_enabled = bool(data['admin_charges_default_enabled'])
         if 'insurance_default_enabled' in data:
             setting.insurance_default_enabled = bool(data['insurance_default_enabled'])
+        if 'four_hrs_ot_default_enabled' in data:
+            setting.four_hrs_ot_default_enabled = bool(data['four_hrs_ot_default_enabled'])
+        if 'site_allowance_default_enabled' in data:
+            setting.site_allowance_default_enabled = bool(data['site_allowance_default_enabled'])
         setting.save()
 
         apply_all = data.get('apply_to_all_locations', False)

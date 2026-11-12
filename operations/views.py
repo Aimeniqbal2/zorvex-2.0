@@ -5398,6 +5398,84 @@ class MonthlyMusterRunAutoAttendanceView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ==============================================================================
+# OPERATIONS -> FINANCE MONTHLY ADVANCE SHEETS VIEWSET
+# ==============================================================================
+
+class OperationsAdvanceSheetViewSet(BaseSecurityOpsViewSet):
+    site_filter_field = None
+    allowed_roles = ['admin', 'manager', 'staff']
+    allowed_reads = ['admin', 'manager', 'staff']
+
+    def get_queryset(self):
+        from finance.models import AdvanceSheet
+        company = self._resolve_company_obj(self.request)
+        qs = AdvanceSheet.objects.filter(company=company, is_deleted=False)
+        if getattr(self, 'action', None) == 'retrieve':
+            qs = qs.prefetch_related('lines', 'lines__voucher', 'lines__treasury_account', 'lines__cleared_in_salary_sheet')
+        return qs.order_by('-month', '-created_at')
+
+    def get_serializer_class(self):
+        from finance.serializers import AdvanceSheetListSerializer, AdvanceSheetDetailSerializer
+        if getattr(self, 'action', None) in ('retrieve', 'make_sheet'):
+            return AdvanceSheetDetailSerializer
+        return AdvanceSheetListSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        from finance.services.advance_sheet_service import AdvanceSheetService
+        company = self._resolve_company_obj(request)
+        try:
+            res = AdvanceSheetService.delete_advance_sheet(company, kwargs.get('pk'))
+            return Response(res, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='live-builder')
+    def live_builder(self, request):
+        from finance.services.advance_sheet_service import AdvanceSheetService
+        company = self._resolve_company_obj(request)
+        month = request.query_params.get('month')
+        try:
+            data = AdvanceSheetService.build_live_advance_builder(company, month)
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='update-draft')
+    def update_draft(self, request):
+        from finance.services.advance_sheet_service import AdvanceSheetService
+        company = self._resolve_company_obj(request)
+        try:
+            res = AdvanceSheetService.update_draft(
+                company=company,
+                month=request.data.get('month', ''),
+                employee_id=request.data.get('employee_id', ''),
+                amount=request.data.get('amount', 0),
+                notes=request.data.get('notes', ''),
+            )
+            return Response(res, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='make-sheet')
+    def make_sheet(self, request):
+        from finance.services.advance_sheet_service import AdvanceSheetService
+        from finance.serializers import AdvanceSheetDetailSerializer
+        company = self._resolve_company_obj(request)
+        try:
+            sheet = AdvanceSheetService.make_advance_sheet(
+                company=company,
+                user=request.user,
+                month_param=request.data.get('month', ''),
+                overrides=request.data.get('overrides') or [],
+                notes=request.data.get('notes', ''),
+            )
+            return Response(AdvanceSheetDetailSerializer(sheet, context={'request': request}).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 
 
 

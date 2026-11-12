@@ -494,8 +494,24 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
                 return (
                     <div>
                         <div style={{ fontWeight: 600 }}>{e.full_name || `${e.first_name} ${e.last_name}`}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px', flexWrap: 'wrap' }}>
                             <span>{e.cnic_number || 'No CNIC'}</span>
+                            {e.doc_charges_enabled && (
+                                <span
+                                    title={`Doc Charges (${e.doc_charges_month || ''}): Rs ${Number(e.doc_charges_amount || 0).toLocaleString()}`}
+                                    style={{
+                                        background: e.doc_charges_paid ? '#ecfdf5' : '#fffbeb',
+                                        color: e.doc_charges_paid ? '#15803d' : '#b45309',
+                                        border: `1px solid ${e.doc_charges_paid ? '#bbf7d0' : '#fde68a'}`,
+                                        padding: '0 4px',
+                                        borderRadius: '3px',
+                                        fontSize: '9.5px',
+                                        fontWeight: 700,
+                                    }}
+                                >
+                                    DOC: {e.doc_charges_paid ? 'PAID' : `PENDING (${e.doc_charges_month || ''})`}
+                                </span>
+                            )}
                             {exp?.isExpired && (
                                 <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '0 4px', borderRadius: '3px', fontSize: '9.5px', fontWeight: 700 }}>
                                     EXPIRED

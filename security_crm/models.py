@@ -1137,7 +1137,7 @@ class SecurityCostingSetting(BaseModel):
     """
     Company-wide default costing & statutory configuration parameters.
     Allows configuring master EOBI rate, SESSI minimum wage & percentage,
-    Admin charges percentage, and Insurance percentage.
+    Admin charges percentage, Insurance percentage, 4 Hrs OT, and Site Allowance.
     """
     company = models.ForeignKey('companies.Company', on_delete=models.CASCADE, related_name='security_costing_settings')
     eobi_rate = models.DecimalField(max_digits=12, decimal_places=2, default=1500, help_text="Manual EOBI rate in PKR per guard")
@@ -1145,10 +1145,14 @@ class SecurityCostingSetting(BaseModel):
     sessi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=6.00, help_text="SESSI contribution percentage")
     admin_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=5.00, help_text="Admin charges percentage")
     insurance_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=2.00, help_text="Insurance percentage")
+    four_hrs_ot_amount = models.DecimalField(max_digits=12, decimal_places=2, default=1000, help_text="Default 4 Hrs OT monthly allowance per guard (PKR)")
+    site_allowance_amount = models.DecimalField(max_digits=12, decimal_places=2, default=1000, help_text="Default Site Allowance monthly amount per guard (PKR)")
     eobi_default_enabled = models.BooleanField(default=False)
     sessi_default_enabled = models.BooleanField(default=False)
     admin_charges_default_enabled = models.BooleanField(default=False)
     insurance_default_enabled = models.BooleanField(default=False)
+    four_hrs_ot_default_enabled = models.BooleanField(default=True)
+    site_allowance_default_enabled = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['-created_at']

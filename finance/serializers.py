@@ -11,6 +11,8 @@ from .models import (
     PurchasingItemAccountMapping, PurchasingAccountingIntegration, PurchasingAccountingLinePreview,
     PayrollAccountingIntegration, PayrollEmployeeFinanceSnapshot, PayrollAccountMapping,
     EmployeePaymentDestination, SalaryPaymentBatch, SalaryPaymentBatchLine, PayrollDisbursementProviderConfig,
+    FinancePaymentMode, SalarySheet, SalarySheetLine,
+    AdvanceSheet, AdvanceSheetLine,
     TaxAuthority, CompanyTaxProfile, TaxPeriod, TaxTransaction,
     ClientWithholdingCertificate, VendorWithholdingRecord, TaxPaymentVoucher, TaxAdjustment,
     AllocationProfile, CashCount, SubledgerReconciliationSnapshot, ControlException
@@ -908,4 +910,83 @@ class ControlExceptionSerializer(BaseTenantSerializer):
         if obj.resolved_by:
             return obj.resolved_by.get_full_name() or obj.resolved_by.username or obj.resolved_by.email
         return None
+
+
+class FinancePaymentModeSerializer(BaseTenantSerializer):
+    class Meta:
+        model = FinancePaymentMode
+        fields = '__all__'
+
+
+class SalarySheetLineSerializer(BaseTenantSerializer):
+    class Meta:
+        model = SalarySheetLine
+        fields = '__all__'
+
+
+class SalarySheetListSerializer(BaseTenantSerializer):
+    class Meta:
+        model = SalarySheet
+        fields = '__all__'
+
+
+class SalarySheetDetailSerializer(BaseTenantSerializer):
+    lines = SalarySheetLineSerializer(many=True, read_only=True)
+    branding = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SalarySheet
+        fields = '__all__'
+
+    def get_branding(self, obj):
+        from finance.services.salary_sheet_service import SalarySheetService
+        return SalarySheetService.get_company_branding(obj.company)
+
+
+class AdvanceSheetLineSerializer(BaseTenantSerializer):
+    voucher_number = serializers.CharField(source='voucher.voucher_number', read_only=True)
+    treasury_account_title = serializers.CharField(source='treasury_account.account_title', read_only=True)
+    cleared_in_sheet_number = serializers.CharField(source='cleared_in_salary_sheet.sheet_number', read_only=True)
+    deduction_status_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AdvanceSheetLine
+        fields = '__all__'
+
+    def get_deduction_status_label(self, obj):
+        return 'Cleared' if obj.deduction_status == 'CLEARED' else 'Not Deducted Yet'
+
+
+class AdvanceSheetListSerializer(BaseTenantSerializer):
+    pending_count = serializers.SerializerMethodField()
+    paid_count = serializers.SerializerMethodField()
+    rejected_count = serializers.SerializerMethodField()
+    cleared_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AdvanceSheet
+        fields = '__all__'
+
+    def get_pending_count(self, obj):
+        return obj.lines.filter(payment_status='PENDING', is_deleted=False).count()
+
+    def get_paid_count(self, obj):
+        return obj.lines.filter(payment_status='PAID', is_deleted=False).count()
+
+    def get_rejected_count(self, obj):
+        return obj.lines.filter(payment_status='REJECTED', is_deleted=False).count()
+
+    def get_cleared_count(self, obj):
+        return obj.lines.filter(deduction_status='CLEARED', is_deleted=False).count()
+
+
+class AdvanceSheetDetailSerializer(AdvanceSheetListSerializer):
+    lines = AdvanceSheetLineSerializer(many=True, read_only=True)
+    branding = serializers.SerializerMethodField()
+
+    def get_branding(self, obj):
+        from finance.services.salary_sheet_service import SalarySheetService
+        return SalarySheetService.get_company_branding(obj.company)
+
+
 

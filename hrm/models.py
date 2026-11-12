@@ -190,6 +190,18 @@ class Employee(BaseModel):
     is_guard_apsa_verified = models.BooleanField(default=False)
     visible_for_activity = models.BooleanField(default=True)
 
+    # Documentation / Onboarding Charges Payroll Deduction (Configured in HR Employee Modal)
+    doc_charges_enabled = models.BooleanField(default=False)
+    doc_charges_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    doc_charges_month = models.CharField(
+        max_length=7,
+        blank=True,
+        default='',
+        help_text="YYYY-MM month in which doc charges will be automatically deducted from payroll"
+    )
+    doc_charges_paid = models.BooleanField(default=False)
+    doc_charges_paid_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['first_name', 'last_name']
         constraints = [

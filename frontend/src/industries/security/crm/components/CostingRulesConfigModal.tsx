@@ -26,11 +26,15 @@ export const CostingRulesConfigModal: React.FC<CostingRulesConfigModalProps> = (
     const [sessiPercentage, setSessiPercentage] = useState<number | string>(6.0);
     const [adminChargesPercentage, setAdminChargesPercentage] = useState<number | string>(5.0);
     const [insurancePercentage, setInsurancePercentage] = useState<number | string>(2.0);
+    const [fourHrsOtAmount, setFourHrsOtAmount] = useState<number | string>(1000);
+    const [siteAllowanceAmount, setSiteAllowanceAmount] = useState<number | string>(1000);
 
     const [eobiDefaultEnabled, setEobiDefaultEnabled] = useState(false);
     const [sessiDefaultEnabled, setSessiDefaultEnabled] = useState(false);
     const [adminChargesDefaultEnabled, setAdminChargesDefaultEnabled] = useState(false);
     const [insuranceDefaultEnabled, setInsuranceDefaultEnabled] = useState(false);
+    const [fourHrsOtDefaultEnabled, setFourHrsOtDefaultEnabled] = useState(true);
+    const [siteAllowanceDefaultEnabled, setSiteAllowanceDefaultEnabled] = useState(true);
 
     const [applyTogglesToGrid, setApplyTogglesToGrid] = useState(false);
 
@@ -46,10 +50,14 @@ export const CostingRulesConfigModal: React.FC<CostingRulesConfigModalProps> = (
                     setSessiPercentage(data.sessi_percentage ?? 6.0);
                     setAdminChargesPercentage(data.admin_charges_percentage ?? 5.0);
                     setInsurancePercentage(data.insurance_percentage ?? 2.0);
+                    setFourHrsOtAmount(data.four_hrs_ot_amount ?? 1000);
+                    setSiteAllowanceAmount(data.site_allowance_amount ?? 1000);
                     setEobiDefaultEnabled(!!data.eobi_default_enabled);
                     setSessiDefaultEnabled(!!data.sessi_default_enabled);
                     setAdminChargesDefaultEnabled(!!data.admin_charges_default_enabled);
                     setInsuranceDefaultEnabled(!!data.insurance_default_enabled);
+                    setFourHrsOtDefaultEnabled(data.four_hrs_ot_default_enabled !== undefined ? !!data.four_hrs_ot_default_enabled : true);
+                    setSiteAllowanceDefaultEnabled(data.site_allowance_default_enabled !== undefined ? !!data.site_allowance_default_enabled : true);
                 }
             } catch (err) {
                 console.warn('Could not load costing settings, using default values', err);
@@ -65,6 +73,8 @@ export const CostingRulesConfigModal: React.FC<CostingRulesConfigModalProps> = (
     const numSessiPct = Number(sessiPercentage) || 0;
     const numAdminPct = Number(adminChargesPercentage) || 0;
     const numInsPct = Number(insurancePercentage) || 0;
+    const numFourHrsOt = Number(fourHrsOtAmount) || 0;
+    const numSiteAllowance = Number(siteAllowanceAmount) || 0;
 
     const sessiPerGuard = Math.round(numMinWage * (numSessiPct / 100));
 
@@ -77,10 +87,14 @@ export const CostingRulesConfigModal: React.FC<CostingRulesConfigModalProps> = (
                 sessi_percentage: numSessiPct,
                 admin_charges_percentage: numAdminPct,
                 insurance_percentage: numInsPct,
+                four_hrs_ot_amount: numFourHrsOt,
+                site_allowance_amount: numSiteAllowance,
                 eobi_default_enabled: eobiDefaultEnabled,
                 sessi_default_enabled: sessiDefaultEnabled,
                 admin_charges_default_enabled: adminChargesDefaultEnabled,
                 insurance_default_enabled: insuranceDefaultEnabled,
+                four_hrs_ot_default_enabled: fourHrsOtDefaultEnabled,
+                site_allowance_default_enabled: siteAllowanceDefaultEnabled,
                 apply_to_all_locations: applyToAll,
                 apply_toggles: applyTogglesToGrid
             };
@@ -344,6 +358,114 @@ export const CostingRulesConfigModal: React.FC<CostingRulesConfigModalProps> = (
                                     <strong>Formula:</strong> Monthly Sale × {numInsPct}%
                                     <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>
                                         Example: ₨ 500,000 billing = <strong>₨ {Math.round(500000 * (numInsPct / 100)).toLocaleString()}</strong>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Card 5: 4 Hrs OT (Payroll Allowance) */}
+                            <div style={{
+                                padding: '14px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '10px'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(14, 165, 233, 0.12)', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <i className="bx bx-time-five" style={{ fontSize: '16px' }} />
+                                        </div>
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>4 Hrs OT (Salary Sheet)</h4>
+                                            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Fixed Monthly Addition</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Default ON</span>
+                                        <ToggleSwitch
+                                            checked={fourHrsOtDefaultEnabled}
+                                            onChange={setFourHrsOtDefaultEnabled}
+                                            title="Default 4 Hrs OT state in Finance Salary Sheet"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                                        4 Hrs OT Amount (PKR) *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="100"
+                                        min="0"
+                                        className="input-base"
+                                        style={{ width: '100%', height: '34px', fontSize: '13px', fontWeight: 600, fontFamily: 'monospace' }}
+                                        value={fourHrsOtAmount}
+                                        onChange={(e) => setFourHrsOtAmount(e.target.value)}
+                                        placeholder="1000"
+                                    />
+                                </div>
+
+                                <div style={{ padding: '8px 10px', borderRadius: '6px', background: 'var(--color-surface-secondary)', fontSize: '11px', borderLeft: '3px solid #0284c7' }}>
+                                    <strong>Payroll Rule:</strong> Applied when Finance switch is ON
+                                    <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                        Adds <strong>PKR {numFourHrsOt.toLocaleString()}</strong> to Total Salary before proration.
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Card 6: Site Allowance (Payroll Allowance) */}
+                            <div style={{
+                                padding: '14px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--color-border)',
+                                background: 'var(--color-surface)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '10px'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.12)', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <i className="bx bx-map-pin" style={{ fontSize: '16px' }} />
+                                        </div>
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>Site Allowance (Salary Sheet)</h4>
+                                            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Fixed Monthly Addition</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Default ON</span>
+                                        <ToggleSwitch
+                                            checked={siteAllowanceDefaultEnabled}
+                                            onChange={setSiteAllowanceDefaultEnabled}
+                                            title="Default Site Allowance state in Finance Salary Sheet"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                                        Site Allowance Amount (PKR) *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="100"
+                                        min="0"
+                                        className="input-base"
+                                        style={{ width: '100%', height: '34px', fontSize: '13px', fontWeight: 600, fontFamily: 'monospace' }}
+                                        value={siteAllowanceAmount}
+                                        onChange={(e) => setSiteAllowanceAmount(e.target.value)}
+                                        placeholder="1000"
+                                    />
+                                </div>
+
+                                <div style={{ padding: '8px 10px', borderRadius: '6px', background: 'var(--color-surface-secondary)', fontSize: '11px', borderLeft: '3px solid #059669' }}>
+                                    <strong>Payroll Rule:</strong> Applied when Finance switch is ON
+                                    <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                        Adds <strong>PKR {numSiteAllowance.toLocaleString()}</strong> to Total Salary before proration.
                                     </div>
                                 </div>
                             </div>
