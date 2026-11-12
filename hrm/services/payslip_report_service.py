@@ -88,7 +88,7 @@ class PayslipReportService:
         branding = SalarySheetService.get_company_branding(company)
 
         # Resolve presets
-        today = timezone.now().date()
+        today = timezone.localdate()
         d_from = _parse_date(date_from)
         d_to = _parse_date(date_to)
         if date_range_preset and date_range_preset.upper() not in ('CUSTOM', 'DATE_RANGE', 'ALL'):

@@ -39,7 +39,7 @@ class AdvanceSheetService:
         from operations.models import DailyDutyPay
         from finance.models import AdvanceSheet, AdvanceDraftInput
 
-        today = timezone.now().date()
+        today = timezone.localdate()
         current_month = f"{today.year:04d}-{today.month:02d}"
         if today.month == 1:
             prev_month = f"{today.year - 1:04d}-12"
@@ -465,7 +465,7 @@ class AdvanceSheetService:
             }
 
         # act == 'PAY': Treasury deduction + Voucher + EmployeeAdvance (for Salary Sheet deduction)
-        pay_date = date.fromisoformat(payment_date_str) if payment_date_str else timezone.now().date()
+        pay_date = date.fromisoformat(payment_date_str) if payment_date_str else timezone.localdate()
         ensure_open_period_and_foundation(company, pay_date)
 
         treasury_acc = None

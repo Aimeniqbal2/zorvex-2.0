@@ -14,6 +14,7 @@ services:
     volumes:
       - zorvex_v2_postgres_data:/var/lib/postgresql/data
     environment:
+      TZ: Asia/Karachi
       POSTGRES_DB: ${DB_NAME:-erp_prod_db}
       POSTGRES_USER: ${DB_USER:-erp_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -49,6 +50,8 @@ services:
       - zorvex_v2_static_volume:/app/staticfiles
     env_file:
       - .env
+    environment:
+      TZ: Asia/Karachi
     depends_on:
       db:
         condition: service_healthy
@@ -68,6 +71,8 @@ services:
       - zorvex_v2_media_volume:/app/media
     env_file:
       - .env
+    environment:
+      TZ: Asia/Karachi
     depends_on:
       redis:
         condition: service_healthy
@@ -85,6 +90,8 @@ services:
     command: celery -A erp_core beat -l info
     env_file:
       - .env
+    environment:
+      TZ: Asia/Karachi
     depends_on:
       redis:
         condition: service_healthy
