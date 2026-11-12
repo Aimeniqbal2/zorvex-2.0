@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button';
 import { apiClient } from '../api';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { useToastStore } from '../../../stores/toastStore';
-import { PayslipPrintModal, PayslipPrintRow, PayslipBranding } from './PayslipPrintModal';
+import { PayslipPrintModal, type PayslipPrintRow, type PayslipBranding } from './PayslipPrintModal';
 
 interface SiteOption {
   id: string;

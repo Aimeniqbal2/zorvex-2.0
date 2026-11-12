@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../../components/ui/Button';
 import { useToastStore } from '../../../../stores/toastStore';
-import {
+import type {
   AdvanceSheetItem,
   AdvanceSheetLineItem,
   BankAccount,
+} from '../api';
+import {
   fetchBankAccounts,
   fetchFinanceAdvanceSheetDetail,
   fetchFinanceAdvanceSheets,

@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../../components/ui/Button';
 import { useToastStore } from '../../../../stores/toastStore';
-import {
+import type {
   BankAccount,
   FinancePaymentMode,
   LiveSalarySheetResponse,
   LiveSalarySheetRow,
   SalarySheetItem,
   SalarySheetLineItem,
+} from '../api';
+import {
   deleteSalarySheet,
   fetchBankAccounts,
   fetchFinancePaymentModes,

@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/Button';
 import { useToastStore } from '../../../stores/toastStore';
-import {
+import type {
   OpsAdvanceBuilderResponse,
   OpsAdvanceBuilderRow,
   OpsAdvanceSheetItem,
+} from '../api';
+import {
   deleteOpsAdvanceSheet,
   fetchOpsAdvanceBuilder,
   fetchOpsAdvanceSheetDetail,

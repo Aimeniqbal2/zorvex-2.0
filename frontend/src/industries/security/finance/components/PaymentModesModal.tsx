@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Modal } from '../../../../components/ui/Modal';
 import { Button } from '../../../../components/ui/Button';
 import { useToastStore } from '../../../../stores/toastStore';
+import type { FinancePaymentMode } from '../api';
 import {
   fetchFinancePaymentModes,
   createFinancePaymentMode,
   updateFinancePaymentMode,
   deleteFinancePaymentMode,
-  FinancePaymentMode,
 } from '../api';
 
 interface PaymentModesModalProps {

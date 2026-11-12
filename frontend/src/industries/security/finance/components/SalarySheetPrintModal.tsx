@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '../../../../components/ui/Button';
-import { SalarySheetItem } from '../api';
+import type { SalarySheetItem } from '../api';
 
 interface SalarySheetPrintModalProps {
   sheet: SalarySheetItem | null;
