@@ -1,4 +1,5 @@
 import logging
+import datetime
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry, ADDITION, CHANGE, DELETION
 from django.contrib.contenttypes.models import ContentType
@@ -6,8 +7,338 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.urls import reverse
 from django.utils import timezone
+from django.db import models
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 0. Enhanced Custom Admin Filters for Master Audit Trail
+# ---------------------------------------------------------------------------
+
+class ActionDateCalendarFilter(admin.ListFilter):
+    """
+    Interactive Date & Range Filter with Native HTML5 Calendar Picker + 1-Click Presets.
+    Allows administrators to filter logs by:
+    1. Exact Single Date selected from calendar picker (date_exact)
+    2. Date Range from calendar pickers (date_from to date_to)
+    3. Quick 1-click presets: Today, Yesterday, Last 7 Days, Last 30 Days, This Month, Last Month
+    """
+    title = 'Date (Calendar & Presets)'
+    parameter_name = 'action_time'
+    template = 'admin/filters/calendar_date_range_filter.html'
+
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        def _get_val(k):
+            v = params.pop(k, None)
+            if isinstance(v, (list, tuple)):
+                return v[-1] if v else None
+            return v
+        self.date_preset = _get_val('date_preset')
+        self.date_exact = _get_val('date_exact')
+        self.date_from = _get_val('date_from')
+        self.date_to = _get_val('date_to')
+
+    def expected_parameters(self):
+        return ['date_preset', 'date_exact', 'date_from', 'date_to']
+
+    def has_output(self):
+        return True
+
+    @property
+    def has_active_filter(self):
+        return bool(self.date_preset or self.date_exact or self.date_from or self.date_to)
+
+    @property
+    def active_summary(self):
+        if self.date_exact:
+            return f"🎯 Single Date: {self.date_exact}"
+        if self.date_from and self.date_to:
+            return f"📆 Range: {self.date_from} → {self.date_to}"
+        if self.date_from:
+            return f"📆 From: {self.date_from} onward"
+        if self.date_to:
+            return f"📆 Up to: {self.date_to}"
+        if self.date_preset:
+            preset_labels = {
+                'today': '⚡ Today',
+                'yesterday': '⏮️ Yesterday',
+                'last_7_days': '📅 Last 7 Days',
+                'last_30_days': '📆 Last 30 Days',
+                'this_month': '🗓️ This Month',
+                'last_month': '🗓️ Last Month',
+            }
+            return f"Active Preset: {preset_labels.get(self.date_preset, self.date_preset)}"
+        return ""
+
+    def choices(self, changelist):
+        all_active = not self.has_active_filter
+        yield {
+            'selected': all_active,
+            'query_string': changelist.get_query_string(
+                {}, ['date_preset', 'date_exact', 'date_from', 'date_to', 'p']
+            ),
+            'display': 'All Dates',
+        }
+
+        presets = [
+            ('today', '⚡ Today'),
+            ('yesterday', '⏮️ Yesterday'),
+            ('last_7_days', '📅 Last 7 Days'),
+            ('last_30_days', '📆 Last 30 Days'),
+            ('this_month', '🗓️ This Month'),
+            ('last_month', '🗓️ Last Month'),
+        ]
+
+        for val, label in presets:
+            yield {
+                'selected': self.date_preset == val,
+                'query_string': changelist.get_query_string(
+                    {'date_preset': val}, ['date_exact', 'date_from', 'date_to', 'p']
+                ),
+                'display': label,
+            }
+
+    def queryset(self, request, queryset):
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+
+        # 1. Preset Filtering
+        if self.date_preset:
+            if self.date_preset == 'today':
+                start = datetime.datetime.combine(today, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(today, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+
+            elif self.date_preset == 'yesterday':
+                yesterday = today - datetime.timedelta(days=1)
+                start = datetime.datetime.combine(yesterday, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(yesterday, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+
+            elif self.date_preset == 'last_7_days':
+                start_day = today - datetime.timedelta(days=7)
+                start = datetime.datetime.combine(start_day, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(today, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+
+            elif self.date_preset == 'last_30_days':
+                start_day = today - datetime.timedelta(days=30)
+                start = datetime.datetime.combine(start_day, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(today, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+
+            elif self.date_preset == 'this_month':
+                start_day = today.replace(day=1)
+                start = datetime.datetime.combine(start_day, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(today, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+
+            elif self.date_preset == 'last_month':
+                last_month_end = today.replace(day=1) - datetime.timedelta(days=1)
+                last_month_start = last_month_end.replace(day=1)
+                start = datetime.datetime.combine(last_month_start, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(last_month_end, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+
+        # 2. Exact Single Date from calendar picker
+        if self.date_exact:
+            try:
+                exact_d = datetime.date.fromisoformat(self.date_exact.strip())
+                start = datetime.datetime.combine(exact_d, datetime.time.min).replace(tzinfo=tz)
+                end = datetime.datetime.combine(exact_d, datetime.time.max).replace(tzinfo=tz)
+                return queryset.filter(action_time__range=(start, end))
+            except (ValueError, TypeError):
+                pass
+
+        # 3. Custom Date Range from calendar pickers
+        if self.date_from or self.date_to:
+            q_filters = {}
+            if self.date_from:
+                try:
+                    d_from = datetime.date.fromisoformat(self.date_from.strip())
+                    start = datetime.datetime.combine(d_from, datetime.time.min).replace(tzinfo=tz)
+                    q_filters['action_time__gte'] = start
+                except (ValueError, TypeError):
+                    pass
+            if self.date_to:
+                try:
+                    d_to = datetime.date.fromisoformat(self.date_to.strip())
+                    end = datetime.datetime.combine(d_to, datetime.time.max).replace(tzinfo=tz)
+                    q_filters['action_time__lte'] = end
+                except (ValueError, TypeError):
+                    pass
+            if q_filters:
+                return queryset.filter(**q_filters)
+
+        return queryset
+
+
+class AuditActionFlagFilter(admin.SimpleListFilter):
+    """Filter by action type (Created / Edited / Deleted) with intuitive status badges."""
+    title = 'Action Type'
+    parameter_name = 'action_type'
+
+    def lookups(self, request, model_admin):
+        return [
+            (str(ADDITION), '🟢 Created / Added (New Record)'),
+            (str(CHANGE), '🟡 Edited / Updated (Field Modified)'),
+            (str(DELETION), '🔴 Deleted / Removed (Record Erased)'),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val:
+            return queryset.filter(action_flag=val)
+        return queryset
+
+
+class AuditUserFilter(admin.SimpleListFilter):
+    """
+    Shows only users who have actively recorded audit actions in the system,
+    with full name and username.
+    """
+    title = 'User / Operator'
+    parameter_name = 'audit_user'
+
+    def lookups(self, request, model_admin):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user_ids = list(LogEntry.objects.exclude(user__isnull=True).values_list('user_id', flat=True).distinct())
+        if not user_ids:
+            return []
+        users = User.objects.filter(id__in=user_ids).order_by('username')
+        items = []
+        for u in users:
+            full_name = f"{getattr(u, 'first_name', '')} {getattr(u, 'last_name', '')}".strip()
+            display = f"{u.username} ({full_name})" if full_name else u.username
+            items.append((str(u.pk), f"👤 {display}"))
+        return items
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val:
+            return queryset.filter(user_id=val)
+        return queryset
+
+
+class AuditModuleFilter(admin.SimpleListFilter):
+    """
+    Groups all 150+ models into clear, high-level ERP modules for instant filtering.
+    """
+    title = 'ERP Module / System Area'
+    parameter_name = 'audit_module'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('operations', '🛡️ Security Operations & Rosters'),
+            ('security_crm', '📋 Security CRM & Client Contracts'),
+            ('finance', '💰 Finance, Salaries & GL'),
+            ('billing', '🧾 Billing & Client Invoices'),
+            ('hrm', '👥 Guards & Staff HR'),
+            ('inventory', '📦 Inventory & Equipment Store'),
+            ('purchasing', '🛒 Purchasing & Vendor POs'),
+            ('accounts', '👤 User Accounts & Permissions'),
+            ('companies', '🏢 Multi-Company & Tenants'),
+            ('platform_core', '⚙️ Platform & System Sequences'),
+            ('communications', '💬 Communications & Emails'),
+            ('django_admin', '🔐 Admin & System Log'),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if not val:
+            return queryset
+
+        module_map = {
+            'operations': ['operations'],
+            'security_crm': ['security_crm'],
+            'finance': ['finance'],
+            'billing': ['billing'],
+            'hrm': ['hrm', 'mobile'],
+            'inventory': ['inventory'],
+            'purchasing': ['purchasing'],
+            'accounts': ['accounts', 'auth'],
+            'companies': ['companies'],
+            'platform_core': ['platform_core', 'subscriptions', 'notifications'],
+            'communications': ['communications'],
+            'django_admin': ['admin', 'contenttypes', 'sessions'],
+        }
+        apps = module_map.get(val, [val])
+        return queryset.filter(content_type__app_label__in=apps)
+
+
+class AuditChangeTypeFilter(admin.SimpleListFilter):
+    """Quick filters for critical security and operational audit areas."""
+    title = 'Audit Focus & Security Events'
+    parameter_name = 'audit_focus'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('passwords', '🔑 Password & Credential Changes'),
+            ('deletions', '🗑️ All Deletions & Soft-Deletions'),
+            ('permissions', '🔒 Role & Permission Updates'),
+            ('financial', '💵 Vouchers, Invoices & Salaries'),
+            ('attendance', '📋 Attendance & Duty Pay Entries'),
+            ('field_edits', '✏️ Field-by-Field Edits'),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val == 'passwords':
+            return queryset.filter(change_message__icontains='password')
+        elif val == 'deletions':
+            return queryset.filter(
+                models.Q(action_flag=DELETION) |
+                models.Q(change_message__icontains='soft-delete') |
+                models.Q(change_message__icontains='is_deleted')
+            )
+        elif val == 'permissions':
+            return queryset.filter(
+                models.Q(content_type__model__in=['companyrole', 'usermoduleaccess', 'permission', 'group']) |
+                models.Q(change_message__icontains='access_mode') |
+                models.Q(change_message__icontains='permission')
+            )
+        elif val == 'financial':
+            return queryset.filter(
+                models.Q(content_type__app_label__in=['finance', 'billing']) |
+                models.Q(content_type__model__in=['financialvoucher', 'clientinvoice', 'salarysheet', 'advancesheet'])
+            )
+        elif val == 'attendance':
+            return queryset.filter(
+                content_type__model__in=['dailydutypay', 'monthlydutymuster', 'deployment']
+            )
+        elif val == 'field_edits':
+            return queryset.filter(action_flag=CHANGE)
+        return queryset
+
+
+class AuditActiveModelFilter(admin.SimpleListFilter):
+    """
+    Shows only models that actually have log entries recorded,
+    formatted as 'App ❯ Model' for clean scanning.
+    """
+    title = 'Specific Model / Resource'
+    parameter_name = 'audit_model'
+
+    def lookups(self, request, model_admin):
+        ct_ids = list(LogEntry.objects.values_list('content_type_id', flat=True).distinct())
+        if not ct_ids:
+            return []
+        cts = ContentType.objects.filter(id__in=ct_ids).order_by('app_label', 'model')
+        items = []
+        for ct in cts:
+            app_display = ct.app_label.replace('_', ' ').title()
+            model_display = ct.model.replace('_', ' ').title()
+            items.append((str(ct.id), f"{app_display} ❯ {model_display}"))
+        return items
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val:
+            return queryset.filter(content_type_id=val)
+        return queryset
 
 
 # ---------------------------------------------------------------------------
@@ -29,20 +360,34 @@ class LogEntryAdmin(admin.ModelAdmin):
         'change_message_display',
     )
     list_filter = (
-        'action_flag',
-        'content_type',
-        'user',
-        ('action_time', admin.DateFieldListFilter),
+        ActionDateCalendarFilter,
+        AuditActionFlagFilter,
+        AuditUserFilter,
+        AuditModuleFilter,
+        AuditChangeTypeFilter,
+        AuditActiveModelFilter,
     )
     search_fields = (
         'object_repr',
         'change_message',
         'user__username',
+        'user__first_name',
+        'user__last_name',
         'user__email',
         'object_id',
     )
     date_hierarchy = 'action_time'
-    list_per_page = 50
+    list_per_page = 100
+
+    def get_list_display(self, request):
+        return (
+            'action_time_formatted',
+            'user_badge',
+            'action_badge',
+            'content_type_display',
+            'object_link',
+            'change_message_display',
+        )
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('user', 'content_type')
@@ -55,6 +400,47 @@ class LogEntryAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_search_results(self, request, queryset, search_term):
+        queryset, may_have_duplicates = super().get_search_results(request, queryset, search_term)
+        term = (search_term or '').strip()
+        if not term:
+            return queryset, may_have_duplicates
+
+        # 1. Search by date (YYYY-MM-DD or DD-MM-YYYY or YYYY/MM/DD)
+        date_obj = None
+        for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d', '%d/%m/%Y'):
+            try:
+                date_obj = datetime.datetime.strptime(term, fmt).date()
+                break
+            except ValueError:
+                pass
+
+        if date_obj:
+            tz = timezone.get_current_timezone()
+            start = datetime.datetime.combine(date_obj, datetime.time.min).replace(tzinfo=tz)
+            end = datetime.datetime.combine(date_obj, datetime.time.max).replace(tzinfo=tz)
+            queryset = queryset | self.model.objects.filter(action_time__range=(start, end))
+
+        # 2. Search by action keyword
+        lower_term = term.lower()
+        if lower_term in ('add', 'added', 'addition', 'create', 'created', 'new'):
+            queryset = queryset | self.model.objects.filter(action_flag=ADDITION)
+        elif lower_term in ('edit', 'edited', 'update', 'updated', 'change', 'changed', 'modify', 'modified'):
+            queryset = queryset | self.model.objects.filter(action_flag=CHANGE)
+        elif lower_term in ('delete', 'deleted', 'deletion', 'remove', 'removed', 'soft-delete'):
+            queryset = queryset | self.model.objects.filter(
+                models.Q(action_flag=DELETION) | models.Q(change_message__icontains='soft-delete')
+            )
+
+        # 3. Search by app/model keywords (e.g. invoice, guard, voucher, proposal, contract)
+        matching_cts = ContentType.objects.filter(
+            models.Q(model__icontains=lower_term) | models.Q(app_label__icontains=lower_term)
+        )
+        if matching_cts.exists():
+            queryset = queryset | self.model.objects.filter(content_type__in=matching_cts)
+
+        return queryset.distinct(), may_have_duplicates
 
     @admin.display(description='Date & Time (Seconds)', ordering='action_time')
     def action_time_formatted(self, obj):

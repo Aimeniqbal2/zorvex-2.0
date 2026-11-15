@@ -4,7 +4,10 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from subscriptions.models import CompanySubscription
 from .models import User
 from .serializers import (
@@ -18,6 +21,48 @@ from .serializers import (
 class CustomTokenObtainPairView(TokenObtainPairView):
     """Enables generating our cryptographically complex role-embedded API tokens natively."""
     serializer_class = CustomTokenObtainPairSerializer
+
+class SecurityTokenRefreshSerializer(TokenRefreshSerializer):
+    """
+    Validates refresh token and rejects it if the user's password was changed.
+    Ensures newly issued access token inherits the current pwd_hash.
+    """
+    def validate(self, attrs):
+        data = super().validate(attrs)
+
+        try:
+            refresh = RefreshToken(attrs['refresh'])
+            user_id = refresh.payload.get('user_id')
+            token_pwd_hash = refresh.payload.get('pwd_hash')
+
+            user = User._base_manager.filter(id=user_id).first()
+            if not user or not user.is_active:
+                raise AuthenticationFailed("User account is inactive or not found.", code="user_inactive")
+
+            current_pwd_hash = user.get_session_auth_hash()[:16]
+            if not token_pwd_hash or token_pwd_hash != current_pwd_hash:
+                raise AuthenticationFailed(
+                    "Password has been changed. You have been logged out from all active devices. Please sign in again.",
+                    code="password_changed"
+                )
+
+            # Ensure the refreshed access token contains the current pwd_hash
+            new_access = AccessToken(data['access'])
+            new_access['pwd_hash'] = current_pwd_hash
+            data['access'] = str(new_access)
+
+        except AuthenticationFailed:
+            raise
+        except Exception as e:
+            raise AuthenticationFailed(f"Token refresh validation failed: {e}", code="token_invalid")
+
+        return data
+
+class SecurityTokenRefreshView(TokenRefreshView):
+    """
+    Guarantees refresh requests are rejected if password was changed in Django Admin or elsewhere.
+    """
+    serializer_class = SecurityTokenRefreshSerializer
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()

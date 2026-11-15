@@ -92,4 +92,42 @@ class CustomUserAdmin(UserAdmin):
             return self.model._base_manager.all()
         return super().get_queryset(request)
 
+    def user_change_password(self, request, id, form_url=""):
+        """
+        Overrides the Django Admin password change view for users.
+        Ensures immediate device-wide session and JWT token revocation.
+        """
+        response = super().user_change_password(request, id, form_url)
+        # HTTP 302 redirect indicates the password change form was successfully saved
+        if getattr(response, 'status_code', None) == 302:
+            target_user = self.get_object(request, id)
+            if target_user:
+                from accounts.signals import revoke_user_sessions_and_tokens
+                from django.contrib import messages
+                curr_key = request.session.session_key if request.user.pk == target_user.pk else None
+                revoked_count = revoke_user_sessions_and_tokens(target_user, current_session_key=curr_key)
+                messages.info(
+                    request,
+                    f"🔒 Security Alert: All active sessions, mobile devices, and browser logins for user "
+                    f"'{target_user.username}' have been terminated. The user must sign in using the new password."
+                )
+        return response
+
+    def save_model(self, request, obj, form, change):
+        """
+        Detects if password or credentials were changed via the main user change form.
+        """
+        is_pwd_changed = change and ('password' in form.changed_data)
+        super().save_model(request, obj, form, change)
+        if is_pwd_changed:
+            from accounts.signals import revoke_user_sessions_and_tokens
+            from django.contrib import messages
+            curr_key = request.session.session_key if request.user.pk == obj.pk else None
+            revoke_user_sessions_and_tokens(obj, current_session_key=curr_key)
+            messages.info(
+                request,
+                f"🔒 Security Alert: Password updated for user '{obj.username}'. "
+                f"All active device sessions and tokens have been automatically revoked."
+            )
+
 admin.site.register(User, CustomUserAdmin)

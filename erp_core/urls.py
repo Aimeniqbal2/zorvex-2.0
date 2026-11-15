@@ -3,8 +3,7 @@ from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
-from rest_framework_simplejwt.views import TokenRefreshView
-from accounts.views import CustomTokenObtainPairView
+from accounts.views import CustomTokenObtainPairView, SecurityTokenRefreshView
 from erp_core.search_views import GlobalSearchView
 from django.views.generic import RedirectView
 import erp_core.audit_signals
@@ -21,7 +20,7 @@ urlpatterns = [
     
     # JWT Auth Endpoints
     path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/refresh/', SecurityTokenRefreshView.as_view(), name='token_refresh'),
     
     # ERP Module Endpoints
     path('api/companies/', include('companies.urls')),

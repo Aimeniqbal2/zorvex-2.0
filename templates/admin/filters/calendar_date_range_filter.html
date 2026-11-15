@@ -1,0 +1,152 @@
+{% load i18n %}
+<details data-filter-title="{{ title }}" open class="audit-calendar-filter-details" style="margin-bottom: 14px; border-bottom: 1px solid var(--border-color, #334155); padding-bottom: 12px;">
+  <summary style="cursor: pointer; padding: 6px 0; font-weight: 600;">
+    <h2 style="display: inline; font-size: 13px; font-weight: 700; color: var(--body-fg, #e2e8f0); margin: 0;">
+      📅 {{ title }}
+    </h2>
+  </summary>
+
+  {% if spec.has_active_filter %}
+  <div style="margin: 8px 0; padding: 6px 10px; background: rgba(2, 132, 199, 0.15); border: 1px solid #0284c7; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+    <span style="font-size: 11px; font-weight: 600; color: #38bdf8;">
+      {{ spec.active_summary }}
+    </span>
+    <a href="javascript:void(0)" onclick="clearAuditDateFilter()" style="font-size: 14px; font-weight: bold; color: #f87171; text-decoration: none; padding: 0 4px;" title="Clear date filter">✕</a>
+  </div>
+  {% endif %}
+
+  <!-- Quick Range Presets -->
+  <div style="margin-top: 8px; margin-bottom: 10px;">
+    <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 6px;">
+      ⚡ Quick Presets
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+      {% for choice in choices %}
+        <a href="{{ choice.query_string|iriencode }}"
+           style="display: inline-block; padding: 3px 8px; font-size: 11px; border-radius: 12px; text-decoration: none; transition: all 0.15s ease;
+                  {% if choice.selected %}
+                    background: #0284c7; color: #ffffff; font-weight: 700; box-shadow: 0 1px 3px rgba(2,132,199,0.4);
+                  {% else %}
+                    background: var(--darkened-bg, rgba(255,255,255,0.06)); color: var(--body-fg, #cbd5e1); border: 1px solid var(--border-color, #475569);
+                  {% endif %}">
+          {{ choice.display }}
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Calendar Picker Inputs -->
+  <div style="background: var(--darkened-bg, rgba(255,255,255,0.03)); border: 1px solid var(--border-color, #334155); border-radius: 8px; padding: 10px; margin-top: 6px;">
+    
+    <!-- Exact Single Date -->
+    <div style="margin-bottom: 10px;">
+      <label for="audit_date_exact" style="display: block; font-size: 11px; font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">
+        🎯 Select Single Date (Calendar)
+      </label>
+      <input type="date"
+             id="audit_date_exact"
+             value="{{ spec.date_exact|default:'' }}"
+             onkeydown="if(event.key==='Enter') applyAuditDateFilter();"
+             style="width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 12px; font-family: inherit; border-radius: 6px; border: 1px solid var(--border-color, #475569); background: var(--body-bg, #0f172a); color: var(--body-fg, #f8fafc); outline: none;" />
+      <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+        Pick any date from calendar to view that exact day.
+      </div>
+    </div>
+
+    <!-- Date Range Divider -->
+    <div style="text-align: center; margin: 8px 0; position: relative;">
+      <hr style="border: none; border-top: 1px solid var(--border-color, #334155); margin: 0;" />
+      <span style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); background: var(--body-bg, #1e293b); padding: 0 6px; font-size: 9.5px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">
+        OR Date Range
+      </span>
+    </div>
+
+    <!-- From Date -->
+    <div style="margin-bottom: 6px; margin-top: 10px;">
+      <label for="audit_date_from" style="display: block; font-size: 10.5px; font-weight: 500; color: #94a3b8; margin-bottom: 3px;">
+        From Date
+      </label>
+      <input type="date"
+             id="audit_date_from"
+             value="{{ spec.date_from|default:'' }}"
+             onkeydown="if(event.key==='Enter') applyAuditDateFilter();"
+             style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 11.5px; font-family: inherit; border-radius: 6px; border: 1px solid var(--border-color, #475569); background: var(--body-bg, #0f172a); color: var(--body-fg, #f8fafc); outline: none;" />
+    </div>
+
+    <!-- To Date -->
+    <div style="margin-bottom: 10px;">
+      <label for="audit_date_to" style="display: block; font-size: 10.5px; font-weight: 500; color: #94a3b8; margin-bottom: 3px;">
+        To Date
+      </label>
+      <input type="date"
+             id="audit_date_to"
+             value="{{ spec.date_to|default:'' }}"
+             onkeydown="if(event.key==='Enter') applyAuditDateFilter();"
+             style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 11.5px; font-family: inherit; border-radius: 6px; border: 1px solid var(--border-color, #475569); background: var(--body-bg, #0f172a); color: var(--body-fg, #f8fafc); outline: none;" />
+    </div>
+
+    <!-- Buttons -->
+    <div style="display: flex; gap: 6px; margin-top: 10px;">
+      <button type="button"
+              onclick="applyAuditDateFilter()"
+              style="flex: 2; padding: 6px 12px; background: #0284c7; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.2);">
+        <span>🔍 Apply Date</span>
+      </button>
+      <button type="button"
+              onclick="clearAuditDateFilter()"
+              style="flex: 1; padding: 6px 8px; background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; font-size: 11.5px; font-weight: 500; cursor: pointer; text-align: center;">
+        <span>Reset</span>
+      </button>
+    </div>
+
+  </div>
+
+  <script>
+    if (!window.applyAuditDateFilter) {
+      window.applyAuditDateFilter = function() {
+        var exactInput = document.getElementById('audit_date_exact');
+        var fromInput = document.getElementById('audit_date_from');
+        var toInput = document.getElementById('audit_date_to');
+
+        var exactVal = exactInput ? exactInput.value.trim() : '';
+        var fromVal = fromInput ? fromInput.value.trim() : '';
+        var toVal = toInput ? toInput.value.trim() : '';
+
+        var url = new URL(window.location.href);
+        url.searchParams.delete('p');
+        url.searchParams.delete('date_preset');
+
+        if (exactVal) {
+          url.searchParams.set('date_exact', exactVal);
+          url.searchParams.delete('date_from');
+          url.searchParams.delete('date_to');
+        } else {
+          url.searchParams.delete('date_exact');
+          if (fromVal) {
+            url.searchParams.set('date_from', fromVal);
+          } else {
+            url.searchParams.delete('date_from');
+          }
+          if (toVal) {
+            url.searchParams.set('date_to', toVal);
+          } else {
+            url.searchParams.delete('date_to');
+          }
+        }
+        window.location.href = url.toString();
+      };
+    }
+
+    if (!window.clearAuditDateFilter) {
+      window.clearAuditDateFilter = function() {
+        var url = new URL(window.location.href);
+        url.searchParams.delete('p');
+        url.searchParams.delete('date_preset');
+        url.searchParams.delete('date_exact');
+        url.searchParams.delete('date_from');
+        url.searchParams.delete('date_to');
+        window.location.href = url.toString();
+      };
+    }
+  </script>
+</details>

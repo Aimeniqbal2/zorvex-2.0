@@ -28,6 +28,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             token['company_name'] = "Zorvex ERP"
             token['company_logo'] = None
             token['business_type'] = None
+
+        # Embed session auth hash for instantaneous multi-device revocation on password change
+        token['pwd_hash'] = user.get_session_auth_hash()[:16]
             
         return token
 
