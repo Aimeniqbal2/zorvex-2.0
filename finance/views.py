@@ -3952,7 +3952,14 @@ class SalarySheetViewSet(BaseFinanceViewSet):
     serializer_class = SalarySheetListSerializer
     search_fields = ['sheet_number', 'month', 'title']
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from .services.salary_sheet_service import ensure_payroll_schema_synced
+        ensure_payroll_schema_synced()
+
     def get_queryset(self):
+        from .services.salary_sheet_service import ensure_payroll_schema_synced
+        ensure_payroll_schema_synced()
         company = self.get_company()
         qs = SalarySheet.objects.filter(is_deleted=False)
         if company:

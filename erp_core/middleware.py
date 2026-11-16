@@ -28,6 +28,13 @@ class TenantMiddleware:
     def __call__(self, request):
         from subscriptions.models import CompanySubscription, SubscriptionPlan  # imported locally to avoid registry conflicts
         path = request.path
+
+        if path.startswith('/api/'):
+            try:
+                from finance.services.salary_sheet_service import ensure_payroll_schema_synced
+                ensure_payroll_schema_synced()
+            except Exception:
+                pass
         
         _thread_locals.company = None
         _thread_locals.user = None

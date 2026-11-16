@@ -117,52 +117,58 @@ export const WorkspaceManager: React.FC = () => {
                 </div>
 
                 {/* Tab Layers */}
-                {tabs.map(tab => (
-                    <div 
-                        key={tab.id} 
-                        style={{ 
-                            display: activeTabId === tab.id ? 'block' : 'none',
-                            height: '100%',
-                            width: '100%',
-                            overflowY: tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing' ? 'hidden' : 'auto',
-                            overflowX: tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing' ? 'hidden' : 'auto'
-                        }}
-                    >
-                    <Suspense fallback={TabLoadingFallback}>
-                        {tab.moduleCode === 'inventory' || tab.moduleCode === 'store_equipment' ? (
-                            isSecurityIndustry ? <SecurityInventoryWorkspace /> : <InventoryModule />
-                        ) : tab.moduleCode === 'pos' ? (
-                            <POSModule />
-                        ) : tab.moduleCode === 'crm' || tab.moduleCode === 'clients_contracts' ? (
-                            isSecurityIndustry ? <SecurityCRMModule /> : <CRMModule />
-                        ) : tab.moduleCode === 'security_ops' || tab.moduleCode === 'operations' ? (
-                            <SecurityOperationsModule />
-                        ) : tab.moduleCode === 'monthly_muster' ? (
-                            <MonthlyMusterSheetTab onBack={() => {
-                                closeTab(tab.id);
-                                activateTab('operations');
-                            }} />
-                        ) : tab.moduleCode === 'attendance_register' ? (
-                            <OperationsAttendanceLedgerView onBack={() => {
-                                closeTab(tab.id);
-                                activateTab('operations');
-                            }} />
-                        ) : tab.moduleCode === 'attendance_registry' ? (
-                            <MasterAttendanceRegistryView
-                                isStandalone
-                                onBack={() => {
+                {tabs.map(tab => {
+                    const isFullscreenGrid = tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing';
+                    return (
+                        <div 
+                            key={tab.id} 
+                            style={{ 
+                                display: activeTabId === tab.id ? (isFullscreenGrid ? 'flex' : 'block') : 'none',
+                                flexDirection: 'column',
+                                height: '100%',
+                                width: '100%',
+                                minHeight: 0,
+                                overflowY: isFullscreenGrid ? 'hidden' : 'auto',
+                                overflowX: isFullscreenGrid ? 'hidden' : 'auto'
+                            }}
+                        >
+                        <Suspense fallback={TabLoadingFallback}>
+                            {tab.moduleCode === 'inventory' || tab.moduleCode === 'store_equipment' ? (
+                                isSecurityIndustry ? <SecurityInventoryWorkspace /> : <InventoryModule />
+                            ) : tab.moduleCode === 'pos' ? (
+                                <POSModule />
+                            ) : tab.moduleCode === 'crm' || tab.moduleCode === 'clients_contracts' ? (
+                                isSecurityIndustry ? <SecurityCRMModule /> : <CRMModule />
+                            ) : tab.moduleCode === 'security_ops' || tab.moduleCode === 'operations' ? (
+                                <SecurityOperationsModule />
+                            ) : tab.moduleCode === 'monthly_muster' ? (
+                                <MonthlyMusterSheetTab onBack={() => {
                                     closeTab(tab.id);
                                     activateTab('operations');
-                                }}
-                            />
-                        ) : tab.moduleCode === 'fast_costing' ? (
-                            <div style={{ height: '100%', padding: '16px 20px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-                                <FastCostingGridTab onBack={() => {
-                                    closeTab(tab.id);
-                                    activateTab(isSecurityIndustry ? 'clients_contracts' : 'crm');
                                 }} />
-                            </div>
-                        ) : tab.moduleCode === 'platform' ? (
+                            ) : tab.moduleCode === 'attendance_register' ? (
+                                <OperationsAttendanceLedgerView onBack={() => {
+                                    closeTab(tab.id);
+                                    activateTab('operations');
+                                }} />
+                            ) : tab.moduleCode === 'attendance_registry' ? (
+                                <div style={{ height: '100%', width: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                                    <MasterAttendanceRegistryView
+                                        isStandalone
+                                        onBack={() => {
+                                            closeTab(tab.id);
+                                            activateTab('operations');
+                                        }}
+                                    />
+                                </div>
+                            ) : tab.moduleCode === 'fast_costing' ? (
+                                <div style={{ height: '100%', padding: '16px 20px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+                                    <FastCostingGridTab onBack={() => {
+                                        closeTab(tab.id);
+                                        activateTab(isSecurityIndustry ? 'clients_contracts' : 'crm');
+                                    }} />
+                                </div>
+                            ) : tab.moduleCode === 'platform' ? (
                             <PlatformModule />
                         ) : tab.moduleCode === 'hr' || tab.moduleCode === 'guards_staff' || tab.moduleCode === 'technicians_staff' ? (
                             isMobileIndustry ? <MobileHRModule /> : <HRModule isSecurity={isSecurityIndustry} />

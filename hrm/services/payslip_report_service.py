@@ -70,9 +70,11 @@ class PayslipReportService:
     ) -> Dict[str, Any]:
         from companies.models import Company
         from finance.models import SalarySheet, SalarySheetLine, FinancePaymentMode
-        from finance.services.salary_sheet_service import SalarySheetService
+        from finance.services.salary_sheet_service import SalarySheetService, ensure_payroll_schema_synced
         from hrm.models import Payslip
         from operations.models import OperationalSite, Deployment
+
+        ensure_payroll_schema_synced()
 
         company = Company.objects.filter(id=company_id).first() if company_id else None
         if not company:

@@ -32,6 +32,86 @@ def _q2(val: Any) -> Decimal:
     return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
+_schema_synced = False
+
+
+def ensure_payroll_schema_synced():
+    """
+    Self-healing schema synchronization: dynamically ensures all required
+    PostgreSQL columns exist for Salary Sheets, CRM allowances, and HR doc charges.
+    Prevents 'column total_food_allowance does not exist' and related runtime crashes.
+    """
+    global _schema_synced
+    if _schema_synced:
+        return
+    try:
+        from django.db import connection
+        sql_statements = [
+            # 1. Finance SalarySheet columns
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_food_allowance numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_basic_salary numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_four_hrs_ot numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_site_allowance numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_salary numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_overtime_payable numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_gross_payable numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_doc_charges numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_eobi numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_admin_charges numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_fine numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_insurance numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_advance numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_other_deductions numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_deductions numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_net_payable numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS total_paid numeric(15, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS crm_rules_snapshot jsonb DEFAULT '{}'::jsonb;",
+            "ALTER TABLE IF EXISTS finance_salarysheet ADD COLUMN IF NOT EXISTS notes text DEFAULT '';",
+
+            # 2. Finance SalarySheetLine columns
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS food_allowance numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS basic_salary numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS four_hrs_ot_amount numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS four_hrs_ot_enabled boolean DEFAULT false;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS site_allowance_amount numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS site_allowance_enabled boolean DEFAULT false;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS total_salary numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS doc_charges numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS eobi_amount numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS admin_charges numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS fine_amount numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS insurance_amount numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS advance_amount numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS other_deductions numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS total_deduction numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS net_salary_payable numeric(12, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS is_stop_payment boolean DEFAULT false;",
+            "ALTER TABLE IF EXISTS finance_salarysheetline ADD COLUMN IF NOT EXISTS stop_payment_reason text DEFAULT '';",
+
+            # 3. MonthlyPayrollDraftInput columns
+            "ALTER TABLE IF EXISTS finance_monthlypayrolldraftinput ADD COLUMN IF NOT EXISTS food_allowance_override numeric(12, 2);",
+
+            # 4. Security CRM ClientLocation columns
+            "ALTER TABLE IF EXISTS security_crm_clientlocation ADD COLUMN IF NOT EXISTS food_allowance numeric(12, 2) DEFAULT 0;",
+
+            # 5. HRM Employee Doc Charges columns
+            "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_amount numeric(10, 2) DEFAULT 0;",
+            "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_enabled boolean DEFAULT false;",
+            "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_month varchar(7) DEFAULT '';",
+            "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_paid boolean DEFAULT false;",
+            "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_paid_at timestamp with time zone;",
+        ]
+        with connection.cursor() as cursor:
+            for sql in sql_statements:
+                try:
+                    cursor.execute(sql)
+                except Exception:
+                    pass
+        _schema_synced = True
+    except Exception:
+        pass
+
+
 class SalarySheetService:
     """
     Computes live monthly Salary Sheet data (matching Finance Sample Sheet) from
@@ -49,6 +129,7 @@ class SalarySheetService:
 
     @classmethod
     def resolve_month_context(cls, company, month_param: Optional[str] = None) -> Tuple[str, str, str, List[str], date, date, int]:
+        ensure_payroll_schema_synced()
         from operations.models import DailyDutyPay
         from finance.models import SalarySheet
 

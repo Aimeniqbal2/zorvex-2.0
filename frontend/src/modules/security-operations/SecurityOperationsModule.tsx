@@ -87,7 +87,15 @@ export const SecurityOperationsModule: React.FC = () => {
             return;
         }
         if (tabId === 'attendance_registry') {
-            setActiveTab('attendance_registry');
+            openTab({
+                code: 'attendance_registry',
+                name: 'Attendance Registry',
+                icon: 'bx-calendar-check',
+                route: '/attendance-registry',
+                category: 'Operations',
+                minRole: 'manager',
+                engine: 'security_ops',
+            });
             return;
         }
         setActiveTab(tabId);
@@ -213,7 +221,10 @@ export const SecurityOperationsModule: React.FC = () => {
                 </div>
                 
                 <div className="security-ops-main">
-                    <div className="security-ops-content">
+                    <div 
+                        className="security-ops-content"
+                        style={activeTab === 'attendance_registry' ? { padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' } : undefined}
+                    >
                         {renderContent()}
                     </div>
                 </div>
