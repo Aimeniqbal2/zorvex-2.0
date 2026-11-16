@@ -179,8 +179,7 @@ export const SalarySheetPrintModal: React.FC<SalarySheetPrintModalProps> = ({
                 <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>OSS</th>
                 <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc', minWidth: '88px' }}>Employee&apos;s Name</th>
                 <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>Basic Salary</th>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>4 Hrs OT</th>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>Site Allowance</th>
+                <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>Food Allowance</th>
                 <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>Total Salary</th>
                 <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>Total Shifts</th>
                 <th rowSpan={2} style={{ border: '1px solid #000', padding: '3px', background: '#f8fafc' }}>Paid Shifts</th>
@@ -222,8 +221,7 @@ export const SalarySheetPrintModal: React.FC<SalarySheetPrintModalProps> = ({
                     <td style={cellStyle()}>{ln.oss_code}</td>
                     <td className="txt-left" style={{ ...cellStyle(), textAlign: 'left', fontWeight: 600 }}>{ln.employee_name}</td>
                     <td style={cellStyle()}>{fmtInt(ln.basic_salary)}</td>
-                    <td style={cellStyle()}>{Number(ln.four_hrs_ot_amount) > 0 ? fmtInt(ln.four_hrs_ot_amount) : '-'}</td>
-                    <td style={cellStyle()}>{Number(ln.site_allowance_amount) > 0 ? fmtInt(ln.site_allowance_amount) : '-'}</td>
+                    <td style={cellStyle()}>{Number(ln.food_allowance) > 0 ? fmtInt(ln.food_allowance) : '-'}</td>
                     <td style={{ ...cellStyle(), fontWeight: 700 }}>{fmtInt(ln.total_salary)}</td>
                     <td style={cellStyle()}>{ln.total_shifts}</td>
                     <td style={cellStyle()}>{fmtNum(ln.paid_shifts) || '0'}</td>
@@ -268,8 +266,7 @@ export const SalarySheetPrintModal: React.FC<SalarySheetPrintModalProps> = ({
               <tr style={{ background: '#f1f5f9', fontWeight: 800 }}>
                 <td colSpan={3} style={{ border: '1px solid #000', padding: '4px', textAlign: 'right' }}>GRAND TOTAL ({lines.length}):</td>
                 <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{fmtInt(sheet.total_basic_salary)}</td>
-                <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{fmtInt(sheet.total_four_hrs_ot)}</td>
-                <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{fmtInt(sheet.total_site_allowance)}</td>
+                <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{fmtInt(sheet.total_food_allowance)}</td>
                 <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{fmtInt(sheet.total_salary)}</td>
                 <td colSpan={3} style={{ border: '1px solid #000', padding: '4px' }}></td>
                 <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{fmtInt(lines.reduce((s, x) => s + Number(x.prorated_salary || 0), 0))}</td>

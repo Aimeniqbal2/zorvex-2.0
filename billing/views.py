@@ -618,7 +618,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     company=company,
                     invoice=invoice,
                     line_type='REGULAR_SERVICE',
-                    description=f"{lb['service_type']} @ {site_name} (CRM Rate - {billing_month})",
+                    description=f"{lb['service_type']}",
                     site_id=sid,
                     quantity=Decimal(str(lb['quantity'] or 1)),
                     unit_rate=Decimal(str(lb['client_rate'] or 0)),
@@ -902,8 +902,21 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     contract_monthly_rate += amt
                     total_contract_heads += int(sl.quantity or 0)
                     daily_client_rate = (Decimal(str(sl.client_rate or 0)) / Decimal(str(days_in_month))).quantize(Decimal('0.01')) if days_in_month > 0 else Decimal('0.00')
+                    weapon_str = (getattr(sl, 'weapon_type', '') or '').replace('_', ' ').strip().title()
+                    shift_str = (getattr(sl, 'shift_hours', '') or '').replace('_', ' ').strip().title()
+                    specs = []
+                    if weapon_str and weapon_str.upper() not in ('NONE', ''):
+                        specs.append(weapon_str)
+                    if shift_str and shift_str.upper() not in ('NONE', ''):
+                        specs.append(shift_str)
+                    spec_sfx = f" ({', '.join(specs)})" if specs else ""
+                    st_name = sl.service_type.name if sl.service_type else 'Security Personnel'
+                    full_desc = f"{st_name}{spec_sfx}"
                     line_breakdown.append({
-                        'service_type': sl.service_type.name if sl.service_type else 'Security Personnel',
+                        'service_type': full_desc,
+                        'raw_service_type': st_name,
+                        'weapon_type': sl.weapon_type,
+                        'shift_hours': sl.shift_hours,
                         'quantity': int(sl.quantity or 0),
                         'client_rate': float(sl.client_rate or 0),
                         'daily_client_rate': float(daily_client_rate),
@@ -1541,7 +1554,7 @@ class ClientInvoiceViewSet(TenantModelViewSet):
         fin_cfg = SecurityFinanceConfiguration.objects.filter(company_id=company_id, is_active=True).first()
         currency = fin_cfg.default_currency if fin_cfg else None
 
-        def _parse_service_line(s):
+        def _parse_service_lines(s):
             s_type = str(s.get('type', 'PERMANENT')).upper()
             calc_mode = str(s.get('calculation_mode', 'CONTRACT_RATE')).upper()
             s_id = s.get('site_id')
@@ -1556,6 +1569,23 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 t_title = s.get('temporary_title') or 'Temporary Security Service'
                 desc = s.get('description') or f"Temporary Security: {t_title}"
                 tag = f"[TSR:{s.get('temporary_service_id')}]" if s.get('temporary_service_id') else ''
+                line_tax = Decimal(str(s.get('sales_tax_amount') or 0)).quantize(Decimal('0.01')) if s.get('sales_tax_amount') is not None else (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                eff_line_rate = ((line_tax / line_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (line_sub > 0 and line_tax > 0) else Decimal('0.00')
+                return [{
+                    'line_type': line_type,
+                    'description': desc,
+                    'site': s_obj,
+                    'quantity': qty,
+                    'unit_rate': rate,
+                    'line_subtotal': line_sub,
+                    'tax_rate': eff_line_rate,
+                    'tax_amount': line_tax,
+                    'total_amount': line_sub + line_tax,
+                    'tag': tag,
+                    'site_label': site_label,
+                    'contract_id': s.get('contract_id'),
+                    'has_explicit_tax': s.get('sales_tax_amount') is not None,
+                }]
             elif calc_mode == 'ATTENDANCE_RATE':
                 qty = Decimal(str(s.get('fulfilled_shifts', s.get('quantity', 0))))
                 rate = Decimal(str(s.get('guard_daily_bill_rate', s.get('unit_rate', 0))))
@@ -1563,8 +1593,90 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 line_type = 'REGULAR_SERVICE'
                 desc = s.get('description') or f"Attendance-Delivered Security @ {site_label} ({int(qty)} Shifts x Rs {rate:,.2f})"
                 tag = f"[MODE:ATTENDANCE_RATE] [SITE:{s_id}]" if s_id else "[MODE:ATTENDANCE_RATE]"
+                line_tax = Decimal(str(s.get('sales_tax_amount') or 0)).quantize(Decimal('0.01')) if s.get('sales_tax_amount') is not None else (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                eff_line_rate = ((line_tax / line_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (line_sub > 0 and line_tax > 0) else Decimal('0.00')
+                return [{
+                    'line_type': line_type,
+                    'description': desc,
+                    'site': s_obj,
+                    'quantity': qty,
+                    'unit_rate': rate,
+                    'line_subtotal': line_sub,
+                    'tax_rate': eff_line_rate,
+                    'tax_amount': line_tax,
+                    'total_amount': line_sub + line_tax,
+                    'tag': tag,
+                    'site_label': site_label,
+                    'contract_id': s.get('contract_id'),
+                    'has_explicit_tax': s.get('sales_tax_amount') is not None,
+                }]
             else:
-                # CONTRACT_RATE or direct quantity*unit_rate
+                # CONTRACT_RATE: check if proposal has detailed ProposalServiceLines
+                try:
+                    from security_crm.models import ProposalServiceLine
+                    prop_lines = list(ProposalServiceLine.objects.filter(
+                        company_id=company_id, is_deleted=False,
+                        location__customer_id=client_id, location__name__iexact=site_label
+                    ).select_related('service_type'))
+                    if not prop_lines:
+                        prop_lines = list(ProposalServiceLine.objects.filter(
+                            company_id=company_id, is_deleted=False,
+                            proposal_version__proposal__customer_id=client_id, location__name__iexact=site_label
+                        ).select_related('service_type'))
+                    if len(prop_lines) > 1:
+                        total_p_sub = sum(Decimal(str(p.quantity or 0)) * Decimal(str(p.client_rate or 0)) for p in prop_lines)
+                        s_tax_val = Decimal(str(s.get('sales_tax_amount', 0))) if s.get('sales_tax_amount') is not None else None
+                        rem_tax = s_tax_val
+                        res = []
+                        for p_idx, pl in enumerate(prop_lines):
+                            p_qty = Decimal(str(pl.quantity or 1))
+                            p_rate = Decimal(str(pl.client_rate or 0))
+                            p_sub = (p_qty * p_rate).quantize(Decimal('0.01'))
+                            if s_tax_val is not None:
+                                if p_idx == len(prop_lines) - 1:
+                                    p_tax = rem_tax
+                                elif total_p_sub > 0:
+                                    p_tax = (s_tax_val * (p_sub / total_p_sub)).quantize(Decimal('0.01'))
+                                    rem_tax -= p_tax
+                                else:
+                                    p_tax = Decimal('0.00')
+                                p_eff_rate = ((p_tax / p_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if p_sub > 0 and p_tax > 0 else Decimal('0.00')
+                            else:
+                                p_eff_rate = tax_rate
+                                p_tax = (p_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+
+                            w_type = getattr(pl, 'weapon_type', '') or ''
+                            s_hrs = getattr(pl, 'shift_hours', '') or ''
+                            specs = []
+                            if w_type and w_type.upper() not in ('NONE', ''):
+                                specs.append(w_type.replace('_', ' ').title())
+                            if s_hrs and s_hrs.upper() not in ('NONE', ''):
+                                specs.append(s_hrs.replace('_', ' ').title())
+                            spec_sfx = f" ({', '.join(specs)})" if specs else ""
+                            s_name = pl.service_type.name if pl.service_type else 'Security Personnel'
+                            p_desc = f"{s_name}{spec_sfx}"
+
+                            res.append({
+                                'line_type': 'REGULAR_SERVICE',
+                                'description': p_desc,
+                                'site': s_obj,
+                                'quantity': p_qty,
+                                'unit_rate': p_rate,
+                                'line_subtotal': p_sub,
+                                'tax_rate': p_eff_rate,
+                                'tax_amount': p_tax,
+                                'total_amount': p_sub + p_tax,
+                                'tag': f"[MODE:CONTRACT_RATE] [SITE:{s_id}]" if s_id else "[MODE:CONTRACT_RATE]",
+                                'site_label': site_label,
+                                'contract_id': s.get('contract_id'),
+                                'has_explicit_tax': s.get('sales_tax_amount') is not None,
+                            })
+                        if res:
+                            return res
+                except Exception:
+                    pass
+
+                # Fallback to single line
                 if 'contract_monthly_rate' in s:
                     qty = Decimal('1.00')
                     rate = Decimal(str(s.get('contract_monthly_rate', 0)))
@@ -1575,29 +1687,27 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 line_type = s.get('service_type', 'REGULAR_SERVICE')
                 desc = s.get('description') or f"CRM Retainer Security @ {site_label} ({billing_month})"
                 tag = f"[MODE:CONTRACT_RATE] [SITE:{s_id}]" if s_id else "[MODE:CONTRACT_RATE]"
-
-            if s.get('sales_tax_amount') is not None:
-                line_tax = Decimal(str(s.get('sales_tax_amount') or 0)).quantize(Decimal('0.01'))
-                eff_line_rate = ((line_tax / line_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (line_sub > 0 and line_tax > 0) else Decimal('0.00')
-            else:
-                eff_line_rate = tax_rate
-                line_tax = (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
-
-            return {
-                'line_type': line_type,
-                'description': desc,
-                'site': s_obj,
-                'quantity': qty,
-                'unit_rate': rate,
-                'line_subtotal': line_sub,
-                'tax_rate': eff_line_rate,
-                'tax_amount': line_tax,
-                'total_amount': line_sub + line_tax,
-                'tag': tag,
-                'site_label': site_label,
-                'contract_id': s.get('contract_id'),
-                'has_explicit_tax': s.get('sales_tax_amount') is not None,
-            }
+                if s.get('sales_tax_amount') is not None:
+                    line_tax = Decimal(str(s.get('sales_tax_amount') or 0)).quantize(Decimal('0.01'))
+                    eff_line_rate = ((line_tax / line_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (line_sub > 0 and line_tax > 0) else Decimal('0.00')
+                else:
+                    eff_line_rate = tax_rate
+                    line_tax = (line_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+                return [{
+                    'line_type': line_type,
+                    'description': desc,
+                    'site': s_obj,
+                    'quantity': qty,
+                    'unit_rate': rate,
+                    'line_subtotal': line_sub,
+                    'tax_rate': eff_line_rate,
+                    'tax_amount': line_tax,
+                    'total_amount': line_sub + line_tax,
+                    'tag': tag,
+                    'site_label': site_label,
+                    'contract_id': s.get('contract_id'),
+                    'has_explicit_tax': s.get('sales_tax_amount') is not None,
+                }]
 
         created_invoices = []
 
@@ -1618,18 +1728,18 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     contract_id_hint = None
 
                     for s in svc_list:
-                        parsed = _parse_service_line(s)
-                        subtotal += parsed['line_subtotal']
-                        if parsed['has_explicit_tax']:
-                            any_explicit_tax = True
-                            explicit_tax_sum += parsed['tax_amount']
-                        if parsed['site'] and not site_obj:
-                            site_obj = parsed['site']
-                        if parsed['contract_id'] and not contract_id_hint:
-                            contract_id_hint = parsed['contract_id']
-                        if parsed['tag']:
-                            tags.append(parsed['tag'])
-                        lines_data.append(parsed)
+                        for parsed in _parse_service_lines(s):
+                            subtotal += parsed['line_subtotal']
+                            if parsed['has_explicit_tax']:
+                                any_explicit_tax = True
+                                explicit_tax_sum += parsed['tax_amount']
+                            if parsed['site'] and not site_obj:
+                                site_obj = parsed['site']
+                            if parsed['contract_id'] and not contract_id_hint:
+                                contract_id_hint = parsed['contract_id']
+                            if parsed['tag']:
+                                tags.append(parsed['tag'])
+                            lines_data.append(parsed)
 
                     tax_amount = explicit_tax_sum.quantize(Decimal('0.01')) if any_explicit_tax else (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
                     grand_total = subtotal + tax_amount
@@ -1690,16 +1800,16 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                 contract_id_hint = None
 
                 for s in services:
-                    parsed = _parse_service_line(s)
-                    subtotal += parsed['line_subtotal']
-                    if parsed['has_explicit_tax']:
-                        any_explicit_tax = True
-                        explicit_tax_sum += parsed['tax_amount']
-                    if parsed['contract_id'] and not contract_id_hint:
-                        contract_id_hint = parsed['contract_id']
-                    if parsed['tag']:
-                        tags.append(parsed['tag'])
-                    lines_data.append(parsed)
+                    for parsed in _parse_service_lines(s):
+                        subtotal += parsed['line_subtotal']
+                        if parsed['has_explicit_tax']:
+                            any_explicit_tax = True
+                            explicit_tax_sum += parsed['tax_amount']
+                        if parsed['contract_id'] and not contract_id_hint:
+                            contract_id_hint = parsed['contract_id']
+                        if parsed['tag']:
+                            tags.append(parsed['tag'])
+                        lines_data.append(parsed)
 
                 tax_amount = explicit_tax_sum.quantize(Decimal('0.01')) if any_explicit_tax else (subtotal * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
                 grand_total = subtotal + tax_amount

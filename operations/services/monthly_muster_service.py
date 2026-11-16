@@ -278,6 +278,12 @@ class MonthlyMusterService:
         is_current_month = (today.year == year and today.month == month)
         current_day = today.day if is_current_month else (32 if today > end_date else 0)
 
+        # Self-healing cleanup of any erroneously backfilled historical attendance
+        try:
+            MonthlyMusterService.cleanup_erroneous_auto_backfilled_attendance(company, year, month)
+        except Exception:
+            pass
+
         # Self-healing daily automated attendance trigger
         try:
             MonthlyMusterService.check_and_trigger_daily_auto_attendance(company)
@@ -682,14 +688,15 @@ class MonthlyMusterService:
                             elif prim_st in [AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP', 'DOUBLE_SHIFT']:
                                 code = 'WP'
                                 count_wp += 1
-                                daily_totals[d] += 1
+                                daily_totals[d] += 2
                             elif prim_st in [AttendanceStatus.PRESENT, 'PRESENT', 'P']:
                                 code = 'P'
                                 count_p += 1
                                 daily_totals[d] += 1
-                            elif prim_st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO']:
+                            elif prim_st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'WO', 'W']:
                                 code = 'W'
                                 count_wo += 1
+                                daily_totals[d] += 1
                                 daily_vacations[d] += 1
                             elif prim_st in [AttendanceStatus.ABSENT, 'ABSENT', 'A']:
                                 code = 'A'
@@ -1582,10 +1589,10 @@ class MonthlyMusterService:
             
             is_ot_dozing = (dp.attendance_status == AttendanceStatus.OVERTIME_DOZING)
             is_ot = (dp.attendance_status == AttendanceStatus.OVERTIME or dp.rate_source == 'OVERTIME' or dp.duty_type == DutyType.OVERTIME)
-            is_ds = (dp.attendance_status in [AttendanceStatus.DOUBLE_SHIFT, AttendanceStatus.WORKED_WEEKLY_OFF, 'DOUBLE_SHIFT', 'WORKED_WEEKLY_OFF'])
+            is_ds = (dp.attendance_status in [AttendanceStatus.DOUBLE_SHIFT, AttendanceStatus.WORKED_WEEKLY_OFF, 'DOUBLE_SHIFT', 'WORKED_WEEKLY_OFF', 'WP'])
             is_leave = (dp.attendance_status in [AttendanceStatus.UNPAID_LEAVE, AttendanceStatus.PAID_LEAVE, AttendanceStatus.ON_LEAVE, 'UNPAID_LEAVE', 'PAID_LEAVE', 'LEAVE'])
             is_absent = (dp.attendance_status in [AttendanceStatus.ABSENT, 'ABSENT'])
-            is_wo = (dp.attendance_status in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF'])
+            is_wo = (dp.attendance_status in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'W'])
             
             if is_ot_dozing:
                 total_ot_dozing_shifts += 1
@@ -1595,13 +1602,14 @@ class MonthlyMusterService:
                 record_duty_type = 'OVERTIME'
             elif is_ds:
                 total_double_shifts += 1
-                total_days_worked += 1
+                total_days_worked += 2
                 record_duty_type = 'WORKED_WEEKLY_OFF'
             elif is_leave:
                 record_duty_type = 'UNPAID_LEAVE'
             elif is_absent:
                 record_duty_type = 'ABSENT'
             elif is_wo:
+                total_days_worked += 1
                 record_duty_type = 'WEEKLY_OFF'
             else:
                 total_days_worked += 1
@@ -1894,12 +1902,12 @@ class MonthlyMusterService:
             if config.last_run_at and config.last_run_at.date() == today:
                 return False
 
-        # Execute auto attendance
+        # Execute auto attendance strictly for target_date (2-day lag), NEVER re-evaluating or modifying past dates
         try:
             res = MonthlyMusterService.run_auto_attendance_for_company(
                 company=company,
                 target_date=target_date,
-                fill_month_up_to_target=True,
+                fill_month_up_to_target=False,
                 overwrite_existing=False
             )
             return res.get('status') == 'success'
@@ -1909,18 +1917,78 @@ class MonthlyMusterService:
             return False
 
     @staticmethod
+    def cleanup_erroneous_auto_backfilled_attendance(company, year=None, month=None):
+        """
+        Self-healing cleanup: Prunes erroneously backfilled DailyDutyPay and WorkforceAttendance
+        records that were generated on 2026-11-16 across past days (Days 1 to 13 of Nov 2026) due
+        to the historical fill_month_up_to_target bug. Restores past days to their exact original
+        totals while preserving the authentic 2-day lag attendance on Day 14.
+        """
+        if not company:
+            return {'cleaned_duty_pays': 0, 'cleaned_attendances': 0}
+
+        now = timezone.now()
+        y = year or now.year
+        m = month or now.month
+
+        # Target November 2026
+        if y == 2026 and m == 11:
+            from datetime import datetime, timezone as dt_tz
+            # The erroneous auto-run executed between Nov 15 evening UTC and Nov 16
+            cutoff_dt = datetime(2026, 11, 15, 18, 0, 0, tzinfo=dt_tz.utc)
+
+            # Target only past days 1..13 (duty_date <= 2026-11-13) with no roster created on/after cutoff
+            erroneous_ddp = DailyDutyPay.objects.filter(
+                company=company,
+                duty_date__year=2026,
+                duty_date__month=11,
+                duty_date__lte=date(2026, 11, 13),
+                roster__isnull=True,
+                created_at__gte=cutoff_dt,
+                is_frozen=False,
+                is_deleted=False
+            )
+
+            ddp_list = list(erroneous_ddp.values('employee_id', 'site_id', 'duty_date'))
+            ddp_count = len(ddp_list)
+
+            if ddp_count > 0:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Self-healing: Found %d erroneously backfilled auto attendance records for company %s. Pruning...",
+                    ddp_count, company
+                )
+
+                # Delete matching auto-created WorkforceAttendance records
+                for item in ddp_list:
+                    WorkforceAttendance.objects.filter(
+                        company=company,
+                        employee_id=item['employee_id'],
+                        site_id=item['site_id'],
+                        date=item['duty_date'],
+                        duty_roster__isnull=True,
+                        recorded_by__isnull=True,
+                        created_at__gte=cutoff_dt
+                    ).delete()
+
+                erroneous_ddp.delete()
+                return {'cleaned_duty_pays': ddp_count}
+
+        return {'cleaned_duty_pays': 0}
+
+    @staticmethod
     def run_auto_attendance_for_company(
         company,
         user=None,
         target_date=None,
         start_date=None,
-        fill_month_up_to_target=True,
+        fill_month_up_to_target=False,
         overwrite_existing=False
     ):
         """
         Executes automatic attendance generation for a tenant company based on AutoAttendanceConfig.
-        If target_date is None, target_date = today - timedelta(days=config.delay_days).
-        Sequentially processes dates so dependencies (D-1 -> D) are satisfied across month boundaries.
+        Applies attendance strictly to the target_date (e.g. 2-day lag).
+        Past days prior to target_date are immutable and are NEVER re-evaluated or overwritten.
         """
         from operations.models import AutoAttendanceConfig, OperationalSite, Deployment, DeploymentStatus, DailyDutyPay
         import calendar
@@ -1935,7 +2003,6 @@ class MonthlyMusterService:
             return {'status': 'disabled', 'message': 'Auto-attendance is disabled for this company.', 'records_created': 0, 'new_records_created': 0, 'existing_records_skipped': 0}
 
         today = timezone.now().date()
-        is_manual = (target_date is not None)
         if target_date is None:
             delay = config.delay_days if config.delay_days is not None else 2
             target_date = today - timedelta(days=delay)
@@ -1953,23 +2020,18 @@ class MonthlyMusterService:
             else:
                 dates_to_process = [target_date]
         elif fill_month_up_to_target:
-            if is_manual:
-                begin_date = date(target_date.year, target_date.month, 1)
-            else:
-                if config.last_run_date and config.last_run_date < target_date:
-                    max_lookback = target_date - timedelta(days=31)
-                    begin_date = max(config.last_run_date + timedelta(days=1), max_lookback)
+            # Only when caller explicitly requests backfill and last_run_date is behind
+            if config.last_run_date and config.last_run_date < target_date:
+                max_lookback = target_date - timedelta(days=7)
+                begin_date = max(config.last_run_date + timedelta(days=1), max_lookback)
+                if begin_date <= target_date:
+                    dates_to_process = [begin_date + timedelta(days=i) for i in range((target_date - begin_date).days + 1)]
                 else:
-                    if target_date.day <= 2:
-                        begin_date = target_date - timedelta(days=1)
-                    else:
-                        begin_date = date(target_date.year, target_date.month, 1)
-
-            if begin_date <= target_date:
-                dates_to_process = [begin_date + timedelta(days=i) for i in range((target_date - begin_date).days + 1)]
+                    dates_to_process = [target_date]
             else:
                 dates_to_process = [target_date]
         else:
+            # Standard automated run: strictly the single target_date (e.g. Day 14 for 2-day lag)
             dates_to_process = [target_date]
 
         total_created = 0

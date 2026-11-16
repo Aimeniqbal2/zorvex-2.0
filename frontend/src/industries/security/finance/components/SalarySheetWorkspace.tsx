@@ -122,13 +122,12 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
     loadLivePreview(newMonth);
   };
 
-  // Recomputes row client-side immediately on toggle/fine edit so totals are instant
+  // Recomputes row client-side immediately on fine edit so totals are instant
   const recomputeRow = (r: LiveSalarySheetRow, patch: Partial<LiveSalarySheetRow>): LiveSalarySheetRow => {
     const crm = liveData?.crm_rules;
     const updated: LiveSalarySheetRow = { ...r, ...patch };
-    const fourAmt = updated.four_hrs_ot_enabled ? Math.round(crm?.four_hrs_ot_amount ?? 1000) : 0;
-    const siteAmt = updated.site_allowance_enabled ? Math.round(crm?.site_allowance_amount ?? 1000) : 0;
-    const totalSalary = Math.round(updated.basic_salary + fourAmt + siteAmt);
+    const foodAmt = Number(updated.food_allowance) || 0;
+    const totalSalary = Math.round(updated.basic_salary + foodAmt);
 
     let prorated = 0;
     if (updated.paid_shifts > 0) {
@@ -167,8 +166,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
 
     return {
       ...updated,
-      four_hrs_ot_amount: fourAmt,
-      site_allowance_amount: siteAmt,
+      food_allowance: foodAmt,
       total_salary: totalSalary,
       prorated_salary: prorated,
       gross_salary_payable: gross,
@@ -177,24 +175,6 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
       total_deduction: totalDed,
       net_salary_payable: net,
     };
-  };
-
-  const handleToggleAllowance = async (
-    row: LiveSalarySheetRow,
-    field: 'four_hrs_ot_enabled' | 'site_allowance_enabled'
-  ) => {
-    if (!liveData) return;
-    const nextVal = !row[field];
-    setRows((prev) => prev.map((r) => (r.employee_id === row.employee_id ? recomputeRow(r, { [field]: nextVal }) : r)));
-    try {
-      await updateSalaryDraftLine({
-        month: liveData.month,
-        employee_id: row.employee_id,
-        [field]: nextVal,
-      });
-    } catch {
-      useToastStore.getState().error('Failed to save switch state.');
-    }
   };
 
   const handleFineChange = (row: LiveSalarySheetRow, rawVal: string) => {
@@ -263,8 +243,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
     try {
       const overrides = rows.map((r) => ({
         employee_id: r.employee_id,
-        four_hrs_ot_enabled: r.four_hrs_ot_enabled,
-        site_allowance_enabled: r.site_allowance_enabled,
+        food_allowance: r.food_allowance,
         fine_amount: r.manual_fine_amount,
         payment_mode_id: r.payment_mode_id,
         mode_of_payment: r.mode_of_payment,
@@ -380,8 +359,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
     return filteredRows.reduce(
       (acc, r) => {
         acc.basic += r.basic_salary;
-        acc.fourOt += r.four_hrs_ot_amount;
-        acc.siteAll += r.site_allowance_amount;
+        acc.foodAllowance += Number(r.food_allowance) || 0;
         acc.totalSal += r.total_salary;
         acc.prorated += r.prorated_salary;
         acc.otPay += r.overtime_payable;
@@ -398,8 +376,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
       },
       {
         basic: 0,
-        fourOt: 0,
-        siteAll: 0,
+        foodAllowance: 0,
         totalSal: 0,
         prorated: 0,
         otPay: 0,
@@ -584,9 +561,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               {liveData && (
                 <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', padding: '6px 10px', borderRadius: '6px', background: 'var(--color-surface-secondary)', border: '1px solid var(--color-border)' }}>
-                  CRM Rules: <strong>4h OT {fmtPkr(liveData.crm_rules.four_hrs_ot_amount)}</strong> &bull;{' '}
-                  <strong>Site Allow {fmtPkr(liveData.crm_rules.site_allowance_amount)}</strong> &bull;{' '}
-                  <strong>{liveData.days_in_month} Days</strong>
+                  <strong>{liveData.days_in_month} Days ({liveData.month})</strong>
                 </div>
               )}
 
@@ -663,8 +638,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
                     <th rowSpan={2} style={thBase}>OSS</th>
                     <th rowSpan={2} style={{ ...thBase, textAlign: 'left', minWidth: '140px' }}>Employee&apos;s Name</th>
                     <th rowSpan={2} style={thBase}>Basic Salary</th>
-                    <th rowSpan={2} style={thBase}>4 Hrs OT</th>
-                    <th rowSpan={2} style={thBase}>Site Allowance</th>
+                    <th rowSpan={2} style={thBase}>Food Allowance</th>
                     <th rowSpan={2} style={thBase}>Total Salary</th>
                     <th rowSpan={2} style={thBase}>Total Shifts</th>
                     <th rowSpan={2} style={thBase}>Paid Shifts</th>
@@ -698,46 +672,25 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
                       <td style={{ ...tdBase, textAlign: 'left', fontWeight: 600 }}>{row.employee_name}</td>
                       <td style={tdBase}>{fmtInt(row.basic_salary)}</td>
 
-                      {/* 4 Hrs OT Switchable */}
+                      {/* Food Allowance */}
                       <td style={tdBase}>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAllowance(row, 'four_hrs_ot_enabled')}
-                          title="Toggle 4 Hrs OT (amount synced from CRM Costing Rules)"
-                          style={{
-                            padding: '2px 7px',
-                            borderRadius: '99px',
-                            border: '1px solid var(--color-border)',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            background: row.four_hrs_ot_enabled ? '#0284c7' : 'var(--color-surface-secondary)',
-                            color: row.four_hrs_ot_enabled ? '#fff' : 'var(--color-text-muted)',
-                          }}
-                        >
-                          {row.four_hrs_ot_enabled ? fmtInt(row.four_hrs_ot_amount) : 'OFF (0)'}
-                        </button>
-                      </td>
-
-                      {/* Site Allowance Switchable */}
-                      <td style={tdBase}>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAllowance(row, 'site_allowance_enabled')}
-                          title="Toggle Site Allowance (amount synced from CRM Costing Rules)"
-                          style={{
-                            padding: '2px 7px',
-                            borderRadius: '99px',
-                            border: '1px solid var(--color-border)',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            background: row.site_allowance_enabled ? '#059669' : 'var(--color-surface-secondary)',
-                            color: row.site_allowance_enabled ? '#fff' : 'var(--color-text-muted)',
-                          }}
-                        >
-                          {row.site_allowance_enabled ? fmtInt(row.site_allowance_amount) : 'OFF (0)'}
-                        </button>
+                        {Number(row.food_allowance) > 0 ? (
+                          <span
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '99px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              background: '#059669',
+                              color: '#fff',
+                              display: 'inline-block',
+                            }}
+                          >
+                            {fmtInt(row.food_allowance)}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '11px' }}>0</span>
+                        )}
                       </td>
 
                       <td style={{ ...tdBase, fontWeight: 700 }}>{fmtInt(row.total_salary)}</td>
@@ -840,8 +793,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
                   <tr style={{ background: 'var(--color-surface-secondary)', fontWeight: 800 }}>
                     <td colSpan={3} style={{ ...tdBase, textAlign: 'right' }}>TOTALS ({filteredRows.length}):</td>
                     <td style={tdBase}>{fmtInt(liveTotals.basic)}</td>
-                    <td style={tdBase}>{fmtInt(liveTotals.fourOt)}</td>
-                    <td style={tdBase}>{fmtInt(liveTotals.siteAll)}</td>
+                    <td style={tdBase}>{fmtInt(liveTotals.foodAllowance)}</td>
                     <td style={tdBase}>{fmtInt(liveTotals.totalSal)}</td>
                     <td colSpan={3} style={tdBase}></td>
                     <td style={tdBase}>{fmtInt(liveTotals.prorated)}</td>
@@ -1004,8 +956,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
                       <th rowSpan={2} style={thBase}>OSS</th>
                       <th rowSpan={2} style={{ ...thBase, textAlign: 'left', minWidth: '140px' }}>Employee&apos;s Name</th>
                       <th rowSpan={2} style={thBase}>Basic</th>
-                      <th rowSpan={2} style={thBase}>4h OT</th>
-                      <th rowSpan={2} style={thBase}>Site All</th>
+                      <th rowSpan={2} style={thBase}>Food Allow</th>
                       <th rowSpan={2} style={thBase}>Total Sal</th>
                       <th rowSpan={2} style={thBase}>Shifts</th>
                       <th rowSpan={2} style={thBase}>Paid</th>
@@ -1050,8 +1001,7 @@ export const SalarySheetWorkspace: React.FC<SalarySheetWorkspaceProps> = ({
                           <td style={{ ...tdBase, fontFamily: 'monospace', fontWeight: 700 }}>{ln.oss_code}</td>
                           <td style={{ ...tdBase, textAlign: 'left', fontWeight: 600 }}>{ln.employee_name}</td>
                           <td style={tdBase}>{fmtInt(ln.basic_salary)}</td>
-                          <td style={tdBase}>{Number(ln.four_hrs_ot_amount) > 0 ? fmtInt(ln.four_hrs_ot_amount) : '-'}</td>
-                          <td style={tdBase}>{Number(ln.site_allowance_amount) > 0 ? fmtInt(ln.site_allowance_amount) : '-'}</td>
+                          <td style={tdBase}>{Number(ln.food_allowance) > 0 ? fmtInt(ln.food_allowance) : '-'}</td>
                           <td style={{ ...tdBase, fontWeight: 700 }}>{fmtInt(ln.total_salary)}</td>
                           <td style={tdBase}>{ln.total_shifts}</td>
                           <td style={tdBase}>{ln.paid_shifts}</td>

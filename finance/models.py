@@ -2994,11 +2994,12 @@ class EmployeePayrollPreference(BaseModel):
 
 class MonthlyPayrollDraftInput(BaseModel):
     """
-    Stores per-month Finance edits (Fine, 4 Hrs OT switch, Site Allowance switch, Mode of Payment)
+    Stores per-month Finance edits (Fine, Food Allowance override, Mode of Payment)
     prior to locking and creating the immutable monthly SalarySheet.
     """
     employee = models.ForeignKey('hrm.Employee', on_delete=models.CASCADE, related_name='monthly_payroll_draft_inputs')
     month = models.CharField(max_length=7, db_index=True)
+    food_allowance_override = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     four_hrs_ot_enabled = models.BooleanField(null=True, blank=True)
     site_allowance_enabled = models.BooleanField(null=True, blank=True)
     fine_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -3045,8 +3046,9 @@ class SalarySheet(BaseModel):
 
     total_employees = models.PositiveIntegerField(default=0)
     total_basic_salary = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-    total_four_hrs_ot = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-    total_site_allowance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    total_food_allowance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    total_four_hrs_ot = models.DecimalField(max_digits=15, decimal_places=2, default=0, null=True, blank=True)
+    total_site_allowance = models.DecimalField(max_digits=15, decimal_places=2, default=0, null=True, blank=True)
     total_salary = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     total_overtime_payable = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     total_gross_payable = models.DecimalField(max_digits=15, decimal_places=2, default=0)
@@ -3102,10 +3104,11 @@ class SalarySheetLine(BaseModel):
     cnic_issue_date = models.DateField(null=True, blank=True)
 
     basic_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    four_hrs_ot_enabled = models.BooleanField(default=True)
-    four_hrs_ot_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    site_allowance_enabled = models.BooleanField(default=True)
-    site_allowance_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    food_allowance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    four_hrs_ot_enabled = models.BooleanField(default=False, null=True, blank=True)
+    four_hrs_ot_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, null=True, blank=True)
+    site_allowance_enabled = models.BooleanField(default=False, null=True, blank=True)
+    site_allowance_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, null=True, blank=True)
     total_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     total_shifts = models.PositiveIntegerField(default=30)

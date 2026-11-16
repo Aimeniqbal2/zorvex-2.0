@@ -31,6 +31,13 @@ export interface ClientLocation {
     email?: string | null;
     is_active: boolean;
     company?: string;
+    food_allowance?: number | string | null;
+    eobi_enabled?: boolean;
+    eobi_rate?: number | string | null;
+    admin_charges_enabled?: boolean;
+    admin_charges_percentage?: number | string | null;
+    insurance_enabled?: boolean;
+    insurance_percentage?: number | string | null;
 }
 
 export interface ProposalAdditionalCharge {

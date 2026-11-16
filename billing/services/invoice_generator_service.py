@@ -230,11 +230,12 @@ class InvoiceGeneratorService:
                     'site_tax': Decimal('0.00'),
                     'site_total': Decimal('0.00'),
                 }
+            clean_desc = re.sub(r'\s*\(CRM Rate[^)]*\)', '', line.description or '').strip()
             line_dict = {
                 'id': str(line.id),
                 'line_type': line.line_type,
                 'line_type_display': line.line_type.replace('_', ' ').title() if line.line_type else 'Security Service',
-                'description': line.description,
+                'description': clean_desc,
                 'site_name': site_name,
                 'designation': line.designation.name if line.designation else None,
                 'billing_unit': 'MONTHLY',
@@ -269,9 +270,9 @@ class InvoiceGeneratorService:
         total_service_charges = Decimal('0.00')
         sales_tax_basis = 'MANUAL'
         nominal_tax_rate = Decimal('0.00')
+        prop_ver = None
         try:
             from security_crm.models import ProposalServiceLine, SecurityProposal
-            prop_ver = None
             if client and primary_site:
                 psl = (
                     ProposalServiceLine.objects.filter(
@@ -298,6 +299,68 @@ class InvoiceGeneratorService:
                 sales_tax_basis = str(getattr(prop_ver, 'sales_tax_basis', 'MANUAL') or 'MANUAL').upper()
                 nominal_tax_rate = Decimal(str(getattr(prop_ver, 'tax_rate', 0) or 0))
                 sc_per_guard = Decimal(str(getattr(prop_ver, 'service_charges_per_guard', 0) or 0))
+
+                # If invoice only has a single generic retainer line, expand into detailed CRM proposal service lines
+                if len(flat_lines) <= 1 or any(kw in (flat_lines[0].get('description') or '') for kw in ['Retainer', 'Security Services', 'Security Staff', 'Security Guards']):
+                    ps_qs = ProposalServiceLine.objects.filter(
+                        proposal_version=prop_ver, company=company, is_deleted=False
+                    ).select_related('service_type', 'location')
+                    if primary_site:
+                        site_ps = [p for p in ps_qs if p.location and p.location.name and p.location.name.lower() == primary_site.name.lower()]
+                        if site_ps:
+                            ps_qs = site_ps
+                    ps_list = list(ps_qs)
+                    if len(ps_list) > 1:
+                        total_p_sub = sum(Decimal(str(p.quantity or 0)) * Decimal(str(p.client_rate or 0)) for p in ps_list)
+                        tax_amt_curr = Decimal(str(invoice.tax_amount or 0))
+                        rem_tax = tax_amt_curr
+                        expanded_lines = []
+                        running_guard_qty = Decimal('0.00')
+                        for p_idx, psl_item in enumerate(ps_list):
+                            p_qty = Decimal(str(psl_item.quantity or 1))
+                            p_rate = Decimal(str(psl_item.client_rate or 0))
+                            p_sub = (p_qty * p_rate).quantize(Decimal('0.01'))
+                            running_guard_qty += p_qty
+                            if p_idx == len(ps_list) - 1:
+                                p_tax = rem_tax
+                            elif total_p_sub > 0:
+                                p_tax = (tax_amt_curr * (p_sub / total_p_sub)).quantize(Decimal('0.01'))
+                                rem_tax -= p_tax
+                            else:
+                                p_tax = Decimal('0.00')
+                            p_eff_rate = ((p_tax / p_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if p_sub > 0 and p_tax > 0 else Decimal('0.00')
+
+                            w_type = getattr(psl_item, 'weapon_type', '') or ''
+                            s_hrs = getattr(psl_item, 'shift_hours', '') or ''
+                            specs = []
+                            if w_type and w_type.upper() not in ('NONE', ''):
+                                specs.append(w_type.replace('_', ' ').title())
+                            if s_hrs and s_hrs.upper() not in ('NONE', ''):
+                                specs.append(s_hrs.replace('_', ' ').title())
+                            spec_sfx = f" ({', '.join(specs)})" if specs else ""
+                            s_name = psl_item.service_type.name if psl_item.service_type else 'Security Personnel'
+                            p_desc = f"{s_name}{spec_sfx}"
+
+                            expanded_lines.append({
+                                'id': f"crm-{psl_item.id}",
+                                'line_type': 'REGULAR_SERVICE',
+                                'line_type_display': 'Regular Service',
+                                'description': p_desc,
+                                'site_name': primary_site.name if primary_site else 'General Site',
+                                'designation': None,
+                                'billing_unit': 'MONTHLY',
+                                'quantity': float(p_qty),
+                                'unit_price': float(p_rate),
+                                'unit_rate': float(p_rate),
+                                'line_subtotal': float(p_sub),
+                                'subtotal': float(p_sub),
+                                'tax_rate': float(p_eff_rate),
+                                'tax_amount': float(p_tax),
+                                'total_amount': float(p_sub + p_tax),
+                            })
+                        if expanded_lines:
+                            flat_lines = expanded_lines
+                            total_guard_qty = running_guard_qty
         except Exception:
             pass
 
@@ -306,12 +369,12 @@ class InvoiceGeneratorService:
         grand_total_dec = Decimal(str(invoice.grand_total or 0)).quantize(Decimal('0.01'))
 
         # Effective tax rate resolution
-        if sheet and hasattr(sheet, 'tax_rate') and Decimal(str(sheet.tax_rate or 0)) > 0:
+        if nominal_tax_rate > 0 and tax_amt_dec > 0:
+            effective_tax_rate = nominal_tax_rate
+        elif sheet and hasattr(sheet, 'tax_rate') and Decimal(str(sheet.tax_rate or 0)) > 0:
             effective_tax_rate = Decimal(str(sheet.tax_rate))
         elif lines and any(Decimal(str(ln.tax_rate or 0)) > 0 for ln in lines):
             effective_tax_rate = next(Decimal(str(ln.tax_rate)) for ln in lines if Decimal(str(ln.tax_rate or 0)) > 0)
-        elif nominal_tax_rate > 0 and tax_amt_dec > 0:
-            effective_tax_rate = nominal_tax_rate
         elif subtotal_dec > 0 and tax_amt_dec > 0:
             effective_tax_rate = ((tax_amt_dec / subtotal_dec) * Decimal('100.00')).quantize(Decimal('0.01'))
         else:
@@ -327,6 +390,15 @@ class InvoiceGeneratorService:
             candidate_sc = (tax_amt_dec / (nominal_tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'))
             if candidate_sc <= subtotal_dec:
                 total_service_charges = candidate_sc
+
+        # Calculate exact tax rate applied to Service Charges (e.g. 8.00% nominal SRB/PRA)
+        sc_tax_rate = nominal_tax_rate
+        if sc_tax_rate <= 0 and total_service_charges > 0 and tax_amt_dec > 0:
+            sc_tax_rate = ((tax_amt_dec / total_service_charges) * Decimal('100.00')).quantize(Decimal('0.01'))
+        elif sc_tax_rate <= 0:
+            sc_tax_rate = effective_tax_rate
+
+        final_display_tax_rate = sc_tax_rate if (sales_tax_basis == 'SERVICE_CHARGES' and total_service_charges > 0) else (nominal_tax_rate if nominal_tax_rate > 0 else effective_tax_rate)
 
         guards_subtotal = (subtotal_dec - total_service_charges).quantize(Decimal('0.01'))
 
@@ -369,7 +441,7 @@ class InvoiceGeneratorService:
             'raw_notes': invoice.notes or '',
             'terms_and_conditions': invoice.terms_and_conditions or '',
             'subtotal': float(subtotal_dec),
-            'tax_rate': float(effective_tax_rate),
+            'tax_rate': float(final_display_tax_rate),
             'tax_amount': float(tax_amt_dec),
             'grand_total': float(grand_total_dec),
             'paid_amount': float(invoice.paid_amount or 0),
@@ -432,7 +504,7 @@ class InvoiceGeneratorService:
                 'amount': float(total_service_charges),
                 'guards_subtotal': float(guards_subtotal),
                 'sales_tax_basis': sales_tax_basis,
-                'sales_tax_rate': float(effective_tax_rate),
+                'sales_tax_rate': float(sc_tax_rate),
                 'sales_tax_amount': float(tax_amt_dec),
             },
             'invoice': invoice_payload,
@@ -515,18 +587,35 @@ class InvoiceGeneratorService:
             </tr>
             """
         elif mode == 'CHEQUE' and sc.get('has_breakdown'):
+            sc_per_guard = sc['per_guard']
             guards_amt = sc['guards_subtotal']
-            total_qty = sc['quantity'] or 1
-            unit_guard = (guards_amt / total_qty) if total_qty > 0 else guards_amt
-            desc_base = display_lines[0]['description'] if len(display_lines) == 1 else f"Security Staff ({client['name']})"
-            rows_html = f"""
-            <tr>
-                <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">1</td>
-                <td style="border: 1px solid #0f172a; padding: 6px 8px;">{esc(desc_base)}</td>
-                <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">{total_qty:g}</td>
-                <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{unit_guard:,.0f}</td>
-                <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{guards_amt:,.0f}</td>
-            </tr>
+            total_qty = sc['quantity'] or sum(float(l.get('quantity') or 0) for l in display_lines) or 1
+            lines_rows = []
+            for idx, ln in enumerate(display_lines, 1):
+                qty = float(ln.get('quantity') or 1)
+                unit_r = float(ln.get('unit_rate') or 0)
+                if sc_per_guard > 0 and unit_r >= sc_per_guard:
+                    line_base_rate = unit_r - sc_per_guard
+                    line_base_amt = qty * line_base_rate
+                elif total_qty > 0:
+                    line_base_amt = guards_amt * (qty / total_qty)
+                    line_base_rate = (line_base_amt / qty) if qty > 0 else 0
+                else:
+                    line_base_rate = unit_r
+                    line_base_amt = float(ln.get('line_subtotal') or 0)
+
+                desc = re.sub(r'\s*\(CRM Rate[^)]*\)', '', ln.get('description') or '').strip()
+                lines_rows.append(f"""
+                <tr>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">{idx}</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px;">{esc(desc)}</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">{qty:g}</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{line_base_rate:,.0f}</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{line_base_amt:,.0f}</td>
+                </tr>
+                """)
+
+            lines_rows.append(f"""
             <tr>
                 <td style="border: 1px solid #0f172a; padding: 6px 8px;"></td>
                 <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center; font-weight: 700;">Total</td>
@@ -534,13 +623,15 @@ class InvoiceGeneratorService:
                 <td style="border: 1px solid #0f172a; padding: 6px 8px;"></td>
                 <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right; font-weight: 700;">{guards_amt:,.0f}</td>
             </tr>
-            """
+            """)
+            rows_html = "".join(lines_rows)
         else:
             for idx, ln in enumerate(display_lines, 1):
+                desc = re.sub(r'\s*\(CRM Rate[^)]*\)', '', ln.get('description') or '').strip()
                 rows_html += f"""
                 <tr>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">{idx}</td>
-                    <td style="border: 1px solid #0f172a; padding: 6px 8px;">{esc(ln['description'])}</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px;">{esc(desc)}</td>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">{ln['quantity']:g}</td>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{ln['unit_rate']:,.0f}</td>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{ln['line_subtotal']:,.0f}</td>
@@ -549,7 +640,7 @@ class InvoiceGeneratorService:
 
         extra_rows_html = ""
         if mode == 'CHEQUE':
-            next_sno = (2 if sc.get('has_breakdown') else len(display_lines) + 1)
+            next_sno = (len(display_lines) + 1 if sc.get('has_breakdown') else len(display_lines) + 1)
             if tpl.get('show_service_charges_row') and sc.get('has_breakdown'):
                 extra_rows_html += f"""
                 <tr>
@@ -562,12 +653,13 @@ class InvoiceGeneratorService:
                 """
                 next_sno += 1
             if context['tax_amount'] > 0 or context['tax_rate'] > 0:
+                display_tax_rate = sc.get('sales_tax_rate') if (sc.get('has_breakdown') and sc.get('sales_tax_rate', 0) > 0) else context['tax_rate']
                 extra_rows_html += f"""
                 <tr>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: center;">{next_sno}</td>
-                    <td style="border: 1px solid #0f172a; padding: 6px 8px;">{esc(tpl.get('sales_tax_label', 'Add: Sales Tax'))} {context['tax_rate']:g}%</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px;">{esc(tpl.get('sales_tax_label', 'Add: Sales Tax'))} {display_tax_rate:g}%</td>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px;"></td>
-                    <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{context['tax_rate']:g}%</td>
+                    <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{display_tax_rate:g}%</td>
                     <td style="border: 1px solid #0f172a; padding: 6px 8px; text-align: right;">{context['tax_amount']:,.0f}</td>
                 </tr>
                 """

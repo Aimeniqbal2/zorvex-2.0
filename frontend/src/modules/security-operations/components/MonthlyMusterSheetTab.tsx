@@ -276,7 +276,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
     const [modalIsEnabled, setModalIsEnabled] = useState<boolean>(true);
     const [modalDelayDays, setModalDelayDays] = useState<number>(2);
     const [modalTargetDate, setModalTargetDate] = useState<string>('');
-    const [modalFillMonth, setModalFillMonth] = useState<boolean>(true);
+    const [modalFillMonth, setModalFillMonth] = useState<boolean>(false);
     const [modalOverwrite, setModalOverwrite] = useState<boolean>(false);
 
     // Can freeze if not already frozen and month is ended (past month or at month-end day)
@@ -745,9 +745,9 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                 let dVac = 0;
                 updatedGuards.forEach(g => {
                     const c = (g.days[String(d)] || '').trim().toUpperCase();
-                    if (c === 'PO' || c === 'POD') {
+                    if (['PO', 'POD', 'WP', 'D', 'WO+OT', 'DS', '2'].includes(c)) {
                         dTot += 2;
-                    } else if (['P', '1', 'O', 'OT', 'OD', 'WP', 'D', 'WO+OT', 'DS'].includes(c)) {
+                    } else if (['P', '1', 'O', 'OT', 'OD', 'W', 'WO'].includes(c)) {
                         dTot += 1;
                     }
                     if (['W', 'WO', 'L', 'PL', 'SL'].includes(c)) dVac++;
@@ -1627,7 +1627,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                                                     Total Marked Shifts Fulfilled
                                                 </div>
                                                 <span style={{ fontSize: '0.7rem', background: '#d1fae5', color: '#065f46', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                                    P=1 | PO=2 | POD=2
+                                                    P=1 | W=1 | WP=2 | PO=2 | POD=2
                                                 </span>
                                             </div>
                                         </td>
@@ -2339,7 +2339,7 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                             <span>Total Shifts Fulfilled</span>
                             <span style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.85, background: 'rgba(5, 150, 105, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                                P=1 | PO=2 | POD=2
+                                P=1 | W=1 | WP=2 | PO=2 | POD=2
                             </span>
                         </div>
                     </td>

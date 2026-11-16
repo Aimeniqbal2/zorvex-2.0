@@ -268,8 +268,10 @@ def resolve_daily_rate_and_attribution(company_id, employee, duty_date, roster=N
         payable_percentage = Decimal('0.00')
     elif att_st in [AttendanceStatus.HOLIDAY, 'HOLIDAY']:
         payable_percentage = policy['holiday_pay_percentage']
-    elif att_st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF']:
+    elif att_st in [AttendanceStatus.WEEKLY_OFF, 'WEEKLY_OFF', 'W']:
         payable_percentage = policy['weekly_off_pay_percentage']
+    elif att_st in [AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP', AttendanceStatus.DOUBLE_SHIFT, 'DOUBLE_SHIFT']:
+        payable_percentage = Decimal('200.00')
     else:
         payable_percentage = Decimal('0.00')
 

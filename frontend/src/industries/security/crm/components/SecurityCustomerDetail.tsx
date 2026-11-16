@@ -62,6 +62,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
     const [locationPhone, setLocationPhone] = useState('');
     const [locationWhatsapp, setLocationWhatsapp] = useState('');
     const [locationEmail, setLocationEmail] = useState('');
+    const [locationFoodAllowance, setLocationFoodAllowance] = useState('0');
     const [locationIsActive, setLocationIsActive] = useState(true);
     const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
 
@@ -223,6 +224,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         setLocationPhone('');
         setLocationWhatsapp('');
         setLocationEmail('');
+        setLocationFoodAllowance('0');
         setLocationIsActive(true);
         setIsLocationModalOpen(true);
     };
@@ -236,6 +238,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
         setLocationPhone(loc.phone || '');
         setLocationWhatsapp(loc.whatsapp || '');
         setLocationEmail(loc.email || '');
+        setLocationFoodAllowance(String(loc.food_allowance ?? 0));
         setLocationIsActive(loc.is_active ?? true);
         setIsLocationModalOpen(true);
     };
@@ -269,6 +272,7 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                 phone: locationPhone.trim() || null,
                 whatsapp: locationWhatsapp.trim() || null,
                 email: locationEmail.trim() || null,
+                food_allowance: Math.max(0, Number(locationFoodAllowance) || 0),
                 is_active: locationIsActive
             };
 
@@ -468,6 +472,15 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                     ) : (
                         <span style={{ color: 'var(--color-text-muted)' }}>—</span>
                     )}
+                </div>
+            )
+        },
+        {
+            key: 'food_allowance',
+            header: 'Food Allowance',
+            render: (loc) => (
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: Number(loc.food_allowance) > 0 ? '#059669' : 'var(--color-text-muted)' }}>
+                    {Number(loc.food_allowance) > 0 ? formatPKR(loc.food_allowance) : 'PKR 0'}
                 </div>
             )
         },
@@ -1542,12 +1555,22 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                                 value={locationEmail}
                                 onChange={(e) => setLocationEmail(e.target.value)}
                             />
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: 500, color: 'var(--color-text)' }}>
-                                    Site Operational Status
-                                </label>
-                                <select 
-                                    className="crm-select"
+                            <Input 
+                                label="Food Allowance (PKR per guard)"
+                                type="number"
+                                min="0"
+                                placeholder="0 (manual food allowance)"
+                                value={locationFoodAllowance}
+                                onChange={(e) => setLocationFoodAllowance(e.target.value)}
+                            />
+                        </div>
+
+                        <div>
+                            <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: 500, color: 'var(--color-text)' }}>
+                                Site Operational Status
+                            </label>
+                            <select 
+                                className="crm-select"
                                     style={{
                                         width: '100%',
                                         padding: '9px 12px',

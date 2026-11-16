@@ -41,9 +41,10 @@ class SalarySheetService:
     OT_STATUSES = {'OVERTIME', 'O', 'OVERTIME_DOZING', 'OD'}
     PRESENT_PLUS_OT_STATUSES = {'PO', 'POD'}
     HALF_DAY_STATUSES = {'HALF_DAY', 'HD'}
-    WORKED_WEEK_OFF_STATUSES = {'WP'}
-    ABSENT_STATUSES = {'ABSENT', 'A', 'UNPAID_LEAVE', 'L', 'LEAVE', 'WEEK_OFF', 'W'}
-    PAID_REGULAR_STATUSES = {'PRESENT', 'P', 'PO', 'POD', 'HALF_DAY', 'HD', 'WP', 'LATE'}
+    WORKED_WEEK_OFF_STATUSES = {'WP', 'WORKED_WEEKLY_OFF', 'WORKED_OFF'}
+    WEEKLY_OFF_STATUSES = {'WEEK_OFF', 'W', 'WEEKLY_OFF'}
+    ABSENT_STATUSES = {'ABSENT', 'A', 'UNPAID_LEAVE', 'L', 'LEAVE'}
+    PAID_REGULAR_STATUSES = {'PRESENT', 'P', 'PO', 'POD', 'HALF_DAY', 'HD', 'WP', 'LATE', 'WEEK_OFF', 'W', 'WEEKLY_OFF'}
 
     @classmethod
     def resolve_month_context(cls, company, month_param: Optional[str] = None) -> Tuple[str, str, str, List[str], date, date, int]:
@@ -110,14 +111,10 @@ class SalarySheetService:
                     'sessi_percentage': Decimal('6.00'),
                     'admin_charges_percentage': Decimal('5.00'),
                     'insurance_percentage': Decimal('2.00'),
-                    'four_hrs_ot_amount': Decimal('1000.00'),
-                    'site_allowance_amount': Decimal('1000.00'),
                     'eobi_default_enabled': False,
                     'sessi_default_enabled': False,
                     'admin_charges_default_enabled': False,
                     'insurance_default_enabled': False,
-                    'four_hrs_ot_default_enabled': True,
-                    'site_allowance_default_enabled': True,
                 }
             )
         return {
@@ -126,14 +123,10 @@ class SalarySheetService:
             'sessi_percentage': _q2(setting.sessi_percentage),
             'admin_charges_percentage': _q2(setting.admin_charges_percentage),
             'insurance_percentage': _q2(setting.insurance_percentage),
-            'four_hrs_ot_amount': _round_pkr(setting.four_hrs_ot_amount),
-            'site_allowance_amount': _round_pkr(setting.site_allowance_amount),
             'eobi_default_enabled': bool(setting.eobi_default_enabled),
             'sessi_default_enabled': bool(setting.sessi_default_enabled),
             'admin_charges_default_enabled': bool(setting.admin_charges_default_enabled),
             'insurance_default_enabled': bool(setting.insurance_default_enabled),
-            'four_hrs_ot_default_enabled': bool(setting.four_hrs_ot_default_enabled),
-            'site_allowance_default_enabled': bool(setting.site_allowance_default_enabled),
         }
 
     @classmethod
@@ -286,7 +279,13 @@ class SalarySheetService:
                     st['raw_duty_earnings'] += rate
                     st['raw_ot_earnings'] += (amt - rate)
                 else:
-                    st['raw_duty_earnings'] += amt
+                    st['raw_duty_earnings'] += (amt if amt > Decimal('0') else (rate * Decimal('2.00')))
+                if rate > 0:
+                    st['daily_rates'].append(rate)
+            elif att in cls.WEEKLY_OFF_STATUSES:
+                reg_inc = Decimal('1')
+                st['paid_shifts'] += Decimal('1')
+                st['raw_duty_earnings'] += (amt if amt > Decimal('0') else rate)
                 if rate > 0:
                     st['daily_rates'].append(rate)
             elif att in cls.HALF_DAY_STATUSES:
@@ -296,13 +295,8 @@ class SalarySheetService:
                 if rate > 0:
                     st['daily_rates'].append(rate)
             elif att in cls.ABSENT_STATUSES:
-                # Absent / Unpaid leave / Week off: 0 paid shifts unless explicitly paid > 0
-                if amt > Decimal('0') and att in ('WEEK_OFF', 'W'):
-                    reg_inc = Decimal('1')
-                    st['paid_shifts'] += Decimal('1')
-                    st['raw_duty_earnings'] += amt
-                    if rate > 0:
-                        st['daily_rates'].append(rate)
+                # Absent / Unpaid leave: 0 paid shifts
+                pass
             else:
                 reg_inc = Decimal('1')
                 st['paid_shifts'] += Decimal('1')
@@ -474,28 +468,85 @@ class SalarySheetService:
                 avg_daily = sum(st['daily_rates']) / Decimal(len(st['daily_rates']))
                 basic_salary = _round_pkr(avg_daily * Decimal(days_in_month))
 
-            # Preference + Month Draft overrides
-            pref = prefs_by_emp.get(eid)
+            # Locations Worked & Location-Wise Costing Rules (EOBI / Admin / Insurance / Food Allowance)
+            worked_sites = list(emp_site_shifts.get(eid, {}).values())
+            if not worked_sites and eid in deploy_site_by_emp:
+                ds = deploy_site_by_emp[eid]
+                worked_sites = [{
+                    'site_id': ds['site_id'],
+                    'site_name': ds['site_name'],
+                    'crm_entity_id': ds['crm_entity_id'],
+                    'regular_shifts': Decimal('0'),
+                    'ot_shifts': Decimal('0'),
+                }]
+
+            eobi_enabled = False
+            eobi_rate_val = crm_rules['eobi_rate']
+            admin_enabled = False
+            admin_pct_val = crm_rules['admin_charges_percentage']
+            insurance_enabled = False
+            insurance_pct_val = crm_rules['insurance_percentage']
+
+            locations_summary = []
+            loc_text_parts = []
+            primary_site_id = None
+            loc_food_allowance = Decimal('0')
+
+            sorted_worked_sites = sorted(worked_sites, key=lambda x: x['regular_shifts'] + x['ot_shifts'], reverse=True)
+            for s_idx, ws in enumerate(sorted_worked_sites):
+                if s_idx == 0 and ws['site_id']:
+                    primary_site_id = ws['site_id']
+                reg_s = ws['regular_shifts']
+                ot_s = ws['ot_shifts']
+                reg_fmt = int(reg_s) if reg_s == int(reg_s) else float(reg_s)
+                ot_fmt = int(ot_s) if ot_s == int(ot_s) else float(ot_s)
+                shift_bits = []
+                if reg_s > 0:
+                    shift_bits.append(f"{reg_fmt}D")
+                if ot_s > 0:
+                    shift_bits.append(f"{ot_fmt}OT")
+                badge = f"{ws['site_name']} ({', '.join(shift_bits)})" if shift_bits else ws['site_name']
+                loc_text_parts.append(badge)
+                locations_summary.append({
+                    'site_id': ws['site_id'],
+                    'site_name': ws['site_name'],
+                    'regular_shifts': float(reg_s),
+                    'ot_shifts': float(ot_s),
+                    'label': badge,
+                })
+
+                cl = cls._resolve_client_location(loc_by_key, loc_by_name, ws['crm_entity_id'], ws['site_name'])
+                if cl:
+                    # Capture food allowance from worked location
+                    if loc_food_allowance <= 0 and cl.food_allowance and cl.food_allowance > 0:
+                        loc_food_allowance = _q2(cl.food_allowance)
+                    if cl.eobi_enabled:
+                        eobi_enabled = True
+                        if cl.eobi_rate is not None and cl.eobi_rate > 0:
+                            eobi_rate_val = _q2(cl.eobi_rate)
+                    if cl.admin_charges_enabled:
+                        admin_enabled = True
+                        if cl.admin_charges_percentage is not None:
+                            admin_pct_val = _q2(cl.admin_charges_percentage)
+                    if cl.insurance_enabled:
+                        insurance_enabled = True
+                        if cl.insurance_percentage is not None:
+                            insurance_pct_val = _q2(cl.insurance_percentage)
+
+            # Food Allowance Resolution:
+            # If guard worked shifts on a location with food allowance, guard receives that amount.
             draft = drafts_by_emp.get(eid)
+            pref = prefs_by_emp.get(eid)
 
-            if draft and draft.four_hrs_ot_enabled is not None:
-                four_hrs_ot_enabled = bool(draft.four_hrs_ot_enabled)
-            elif pref is not None:
-                four_hrs_ot_enabled = bool(pref.four_hrs_ot_enabled)
+            if draft and draft.food_allowance_override is not None:
+                food_allowance = _q2(draft.food_allowance_override)
+            elif paid_shifts > 0:
+                food_allowance = loc_food_allowance
             else:
-                four_hrs_ot_enabled = crm_rules['four_hrs_ot_default_enabled']
+                food_allowance = Decimal('0')
 
-            if draft and draft.site_allowance_enabled is not None:
-                site_allowance_enabled = bool(draft.site_allowance_enabled)
-            elif pref is not None:
-                site_allowance_enabled = bool(pref.site_allowance_enabled)
-            else:
-                site_allowance_enabled = crm_rules['site_allowance_default_enabled']
-
-            four_hrs_ot_amount = crm_rules['four_hrs_ot_amount'] if four_hrs_ot_enabled else Decimal('0')
-            site_allowance_amount = crm_rules['site_allowance_amount'] if site_allowance_enabled else Decimal('0')
-
-            total_salary = basic_salary + four_hrs_ot_amount + site_allowance_amount
+            # Total Salary = Basic Salary + Food Allowance
+            total_salary = basic_salary + food_allowance
 
             # Prorated Salary = Total Salary if paid_shifts >= total_shifts, else round((Total Salary / total_shifts) * paid_shifts)
             if paid_shifts <= 0:
@@ -539,67 +590,6 @@ class SalarySheetService:
                 doc_charges = _round_pkr(emp.doc_charges_amount)
             else:
                 doc_charges = Decimal('0')
-
-            # Locations Worked & Location-Wise EOBI / Admin Charges / Insurance
-            worked_sites = list(emp_site_shifts.get(eid, {}).values())
-            if not worked_sites and eid in deploy_site_by_emp:
-                ds = deploy_site_by_emp[eid]
-                worked_sites = [{
-                    'site_id': ds['site_id'],
-                    'site_name': ds['site_name'],
-                    'crm_entity_id': ds['crm_entity_id'],
-                    'regular_shifts': Decimal('0'),
-                    'ot_shifts': Decimal('0'),
-                }]
-
-            eobi_enabled = False
-            eobi_rate_val = crm_rules['eobi_rate']
-            admin_enabled = False
-            admin_pct_val = crm_rules['admin_charges_percentage']
-            insurance_enabled = False
-            insurance_pct_val = crm_rules['insurance_percentage']
-
-            locations_summary = []
-            loc_text_parts = []
-            primary_site_id = None
-
-            for s_idx, ws in enumerate(sorted(worked_sites, key=lambda x: x['regular_shifts'] + x['ot_shifts'], reverse=True)):
-                if s_idx == 0 and ws['site_id']:
-                    primary_site_id = ws['site_id']
-                reg_s = ws['regular_shifts']
-                ot_s = ws['ot_shifts']
-                reg_fmt = int(reg_s) if reg_s == int(reg_s) else float(reg_s)
-                ot_fmt = int(ot_s) if ot_s == int(ot_s) else float(ot_s)
-                shift_bits = []
-                if reg_s > 0:
-                    shift_bits.append(f"{reg_fmt}D")
-                if ot_s > 0:
-                    shift_bits.append(f"{ot_fmt}OT")
-                badge = f"{ws['site_name']} ({', '.join(shift_bits)})" if shift_bits else ws['site_name']
-                loc_text_parts.append(badge)
-                locations_summary.append({
-                    'site_id': ws['site_id'],
-                    'site_name': ws['site_name'],
-                    'regular_shifts': float(reg_s),
-                    'ot_shifts': float(ot_s),
-                    'label': badge,
-                })
-
-                # Location CRM Costing Rule check (only applies if employee worked/was present at this site or has no worked shifts)
-                cl = cls._resolve_client_location(loc_by_key, loc_by_name, ws['crm_entity_id'], ws['site_name'])
-                if cl:
-                    if cl.eobi_enabled:
-                        eobi_enabled = True
-                        if cl.eobi_rate is not None and cl.eobi_rate > 0:
-                            eobi_rate_val = _q2(cl.eobi_rate)
-                    if cl.admin_charges_enabled:
-                        admin_enabled = True
-                        if cl.admin_charges_percentage is not None:
-                            admin_pct_val = _q2(cl.admin_charges_percentage)
-                    if cl.insurance_enabled:
-                        insurance_enabled = True
-                        if cl.insurance_percentage is not None:
-                            insurance_pct_val = _q2(cl.insurance_percentage)
 
             eobi_amount = _round_pkr(eobi_rate_val) if (eobi_enabled and paid_shifts > 0) else Decimal('0')
             admin_charges = _round_pkr(total_salary * admin_pct_val / Decimal('100')) if (admin_enabled and paid_shifts > 0 and total_salary > 0) else Decimal('0')
@@ -645,10 +635,7 @@ class SalarySheetService:
                 'designation_name': emp.designation.name if emp.designation else 'Security Guard',
                 'department_name': emp.department.name if emp.department else 'Security Operations',
                 'basic_salary': float(basic_salary),
-                'four_hrs_ot_enabled': four_hrs_ot_enabled,
-                'four_hrs_ot_amount': float(four_hrs_ot_amount),
-                'site_allowance_enabled': site_allowance_enabled,
-                'site_allowance_amount': float(site_allowance_amount),
+                'food_allowance': float(food_allowance),
                 'total_salary': float(total_salary),
                 'total_shifts': days_in_month,
                 'paid_shifts': float(paid_shifts),
@@ -684,8 +671,7 @@ class SalarySheetService:
             rows.append(row)
 
             totals['basic_salary'] += basic_salary
-            totals['four_hrs_ot'] += four_hrs_ot_amount
-            totals['site_allowance'] += site_allowance_amount
+            totals['food_allowance'] += food_allowance
             totals['total_salary'] += total_salary
             totals['prorated_salary'] += prorated_salary
             totals['overtime_payable'] += overtime_payable
@@ -743,6 +729,13 @@ class SalarySheetService:
         draft, _ = MonthlyPayrollDraftInput.objects.get_or_create(
             company=company, employee=emp, month=month, defaults={'is_deleted': False}
         )
+
+        if 'food_allowance' in data and data['food_allowance'] is not None:
+            try:
+                fa_dec = max(Decimal('0.00'), _q2(data['food_allowance']))
+            except Exception:
+                fa_dec = Decimal('0.00')
+            draft.food_allowance_override = fa_dec
 
         if 'four_hrs_ot_enabled' in data and data['four_hrs_ot_enabled'] is not None:
             val = bool(data['four_hrs_ot_enabled'])
@@ -828,8 +821,7 @@ class SalarySheetService:
 
         ym_clean = selected_month.replace('-', '')
         t_basic = Decimal('0')
-        t_4ot = Decimal('0')
-        t_sa = Decimal('0')
+        t_food = Decimal('0')
         t_sal = Decimal('0')
         t_ot = Decimal('0')
         t_gross = Decimal('0')
@@ -846,8 +838,7 @@ class SalarySheetService:
         lines_to_create = []
         for row in preview['rows']:
             b = Decimal(str(row['basic_salary']))
-            f_ot = Decimal(str(row['four_hrs_ot_amount']))
-            s_al = Decimal(str(row['site_allowance_amount']))
+            food_amt = Decimal(str(row.get('food_allowance', 0) or 0))
             tot_s = Decimal(str(row['total_salary']))
             pror = Decimal(str(row['prorated_salary']))
             ot_p = Decimal(str(row['overtime_payable']))
@@ -863,8 +854,7 @@ class SalarySheetService:
             net = Decimal(str(row['net_salary_payable']))
 
             t_basic += b
-            t_4ot += f_ot
-            t_sa += s_al
+            t_food += food_amt
             t_sal += tot_s
             t_ot += ot_p
             t_gross += gross
@@ -895,10 +885,11 @@ class SalarySheetService:
                 cnic_number=row.get('cnic_number') or '',
                 cnic_issue_date=cnic_issue_dt,
                 basic_salary=b,
-                four_hrs_ot_enabled=bool(row['four_hrs_ot_enabled']),
-                four_hrs_ot_amount=f_ot,
-                site_allowance_enabled=bool(row['site_allowance_enabled']),
-                site_allowance_amount=s_al,
+                food_allowance=food_amt,
+                four_hrs_ot_enabled=False,
+                four_hrs_ot_amount=Decimal('0'),
+                site_allowance_enabled=False,
+                site_allowance_amount=Decimal('0'),
                 total_salary=tot_s,
                 total_shifts=row['total_shifts'],
                 paid_shifts=Decimal(str(row['paid_shifts'])),
@@ -926,8 +917,9 @@ class SalarySheetService:
         SalarySheetLine.objects.bulk_create(lines_to_create, batch_size=500)
 
         sheet.total_basic_salary = t_basic
-        sheet.total_four_hrs_ot = t_4ot
-        sheet.total_site_allowance = t_sa
+        sheet.total_food_allowance = t_food
+        sheet.total_four_hrs_ot = Decimal('0')
+        sheet.total_site_allowance = Decimal('0')
         sheet.total_salary = t_sal
         sheet.total_overtime_payable = t_ot
         sheet.total_gross_payable = t_gross

@@ -5380,7 +5380,7 @@ class MonthlyMusterRunAutoAttendanceView(APIView):
             except ValueError:
                 return Response({'detail': 'Invalid target_date format. Expected YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        fill_month_up_to_target = request.data.get('fill_month_up_to_target', True)
+        fill_month_up_to_target = request.data.get('fill_month_up_to_target', False)
         overwrite_existing = request.data.get('overwrite_existing', False)
 
         from operations.services.monthly_muster_service import MonthlyMusterService

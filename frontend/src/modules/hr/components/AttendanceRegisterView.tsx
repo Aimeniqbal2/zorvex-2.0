@@ -511,6 +511,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                     title={`${row.employee_code} — ${row.employee_name}\nDate: ${dateStr}\nNo attendance marked`}
                     style={{
                         borderRight: '1px solid #f1f5f9',
+                        borderBottom: '1px solid #e2e8f0',
                         padding: '4px 3px',
                         minWidth: '58px',
                         height: '44px',
@@ -530,6 +531,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                 title={tooltipText}
                 style={{
                     borderRight: '1px solid #e2e8f0',
+                    borderBottom: '1px solid #e2e8f0',
                     padding: '3px 2px',
                     minWidth: '58px',
                     maxWidth: '72px',
@@ -1112,20 +1114,65 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                     boxShadow: '0 1px 2px rgba(15,23,42,0.03)',
                 }}
             >
-                <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 330px)', overflowY: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                        <thead style={{ position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>
-                            <tr style={{ borderBottom: '2px solid #cbd5e1' }}>
+                <style>{`
+                    .att-reg-table-container::-webkit-scrollbar {
+                        height: 10px;
+                        width: 10px;
+                    }
+                    .att-reg-table-container::-webkit-scrollbar-track {
+                        background: #f1f5f9;
+                    }
+                    .att-reg-table-container::-webkit-scrollbar-thumb {
+                        background: #cbd5e1;
+                        border-radius: 6px;
+                    }
+                    .att-reg-table-container::-webkit-scrollbar-thumb:hover {
+                        background: #94a3b8;
+                    }
+                    .att-reg-row:hover td {
+                        background-color: #f8fafc !important;
+                    }
+                    .att-reg-row:hover td.att-sticky-col {
+                        background-color: #f1f5f9 !important;
+                    }
+                `}</style>
+                <div
+                    className="att-reg-table-container"
+                    style={{
+                        overflowX: 'auto',
+                        overflowY: 'auto',
+                        maxHeight: 'calc(100vh - 310px)',
+                        position: 'relative',
+                        background: '#ffffff',
+                    }}
+                >
+                    <table
+                        style={{
+                            width: 'max-content',
+                            minWidth: '100%',
+                            borderCollapse: 'separate',
+                            borderSpacing: 0,
+                            fontSize: '12px',
+                        }}
+                    >
+                        <thead>
+                            <tr>
                                 <th
+                                    className="att-sticky-col"
                                     style={{
                                         position: 'sticky',
+                                        top: 0,
                                         left: 0,
-                                        zIndex: 25,
+                                        zIndex: 40,
                                         background: '#f8fafc',
                                         padding: '9px 10px',
                                         textAlign: 'left',
-                                        minWidth: '82px',
-                                        borderRight: '1px solid #e2e8f0',
+                                        width: '85px',
+                                        minWidth: '85px',
+                                        maxWidth: '85px',
+                                        boxSizing: 'border-box',
+                                        borderBottom: '2px solid #cbd5e1',
+                                        borderRight: '1px solid #cbd5e1',
                                         fontWeight: 700,
                                         color: '#334155',
                                         fontSize: '11px',
@@ -1134,15 +1181,21 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     CODE
                                 </th>
                                 <th
+                                    className="att-sticky-col"
                                     style={{
                                         position: 'sticky',
-                                        left: '82px',
-                                        zIndex: 25,
+                                        top: 0,
+                                        left: '85px',
+                                        zIndex: 40,
                                         background: '#f8fafc',
                                         padding: '9px 10px',
                                         textAlign: 'left',
-                                        minWidth: '175px',
-                                        borderRight: '1px solid #e2e8f0',
+                                        width: '210px',
+                                        minWidth: '210px',
+                                        maxWidth: '210px',
+                                        boxSizing: 'border-box',
+                                        borderBottom: '2px solid #cbd5e1',
+                                        borderRight: '1px solid #cbd5e1',
                                         fontWeight: 700,
                                         color: '#334155',
                                         fontSize: '11px',
@@ -1151,11 +1204,22 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     EMPLOYEE NAME
                                 </th>
                                 <th
+                                    className="att-sticky-col"
                                     style={{
+                                        position: 'sticky',
+                                        top: 0,
+                                        left: '295px',
+                                        zIndex: 40,
+                                        background: '#f8fafc',
                                         padding: '9px 10px',
                                         textAlign: 'left',
-                                        minWidth: '115px',
-                                        borderRight: '1px solid #e2e8f0',
+                                        width: '140px',
+                                        minWidth: '140px',
+                                        maxWidth: '140px',
+                                        boxSizing: 'border-box',
+                                        borderBottom: '2px solid #cbd5e1',
+                                        borderRight: '2px solid #94a3b8',
+                                        boxShadow: '4px 0 8px -2px rgba(15, 23, 42, 0.12)',
                                         fontWeight: 700,
                                         color: '#334155',
                                         fontSize: '11px',
@@ -1167,9 +1231,13 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     <th
                                         key={dh.date}
                                         style={{
+                                            position: 'sticky',
+                                            top: 0,
+                                            zIndex: 20,
                                             padding: '6px 2px',
                                             textAlign: 'center',
                                             minWidth: '58px',
+                                            borderBottom: '2px solid #cbd5e1',
                                             borderRight: '1px solid #e2e8f0',
                                             background: dh.is_sunday ? '#fff7ed' : '#f8fafc',
                                             color: dh.is_sunday ? '#c2410c' : '#334155',
@@ -1184,6 +1252,9 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                 <th
                                     title="Total Worked Shifts (P + O + OD + WP)"
                                     style={{
+                                        position: 'sticky',
+                                        top: 0,
+                                        zIndex: 20,
                                         padding: '9px 8px',
                                         textAlign: 'center',
                                         minWidth: '52px',
@@ -1191,28 +1262,29 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         color: '#1e3a8a',
                                         fontWeight: 800,
                                         fontSize: '11.5px',
+                                        borderBottom: '2px solid #cbd5e1',
                                         borderLeft: '2px solid #cbd5e1',
                                         borderRight: '1px solid #e2e8f0',
                                     }}
                                 >
                                     Tots
                                 </th>
-                                <th style={{ padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#059669', fontWeight: 700 }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#059669', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                                     P
                                 </th>
-                                <th style={{ padding: '9px 6px', textAlign: 'center', minWidth: '38px', color: '#0284c7', fontWeight: 700 }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '38px', color: '#0284c7', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                                     OT
                                 </th>
-                                <th style={{ padding: '9px 6px', textAlign: 'center', minWidth: '36px', color: '#7e22ce', fontWeight: 700 }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '36px', color: '#7e22ce', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                                     WP
                                 </th>
-                                <th style={{ padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#475569', fontWeight: 700 }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#475569', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                                     W
                                 </th>
-                                <th style={{ padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#dc2626', fontWeight: 700 }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#dc2626', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                                     A
                                 </th>
-                                <th style={{ padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#d97706', fontWeight: 700 }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#d97706', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                                     L
                                 </th>
                             </tr>
@@ -1235,12 +1307,13 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                 data.rows.map((row) => (
                                     <tr
                                         key={row.employee_id}
+                                        className="att-reg-row"
                                         style={{
-                                            borderBottom: '1px solid #e2e8f0',
                                             background: '#ffffff',
                                         }}
                                     >
                                         <td
+                                            className="att-sticky-col"
                                             style={{
                                                 position: 'sticky',
                                                 left: 0,
@@ -1249,40 +1322,85 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                                 padding: '7px 10px',
                                                 fontWeight: 700,
                                                 color: '#0f172a',
-                                                borderRight: '1px solid #e2e8f0',
+                                                width: '85px',
+                                                minWidth: '85px',
+                                                maxWidth: '85px',
+                                                boxSizing: 'border-box',
+                                                borderBottom: '1px solid #e2e8f0',
+                                                borderRight: '1px solid #cbd5e1',
                                                 verticalAlign: 'middle',
+                                                whiteSpace: 'nowrap',
                                             }}
                                         >
                                             {row.employee_code}
                                         </td>
                                         <td
+                                            className="att-sticky-col"
                                             style={{
                                                 position: 'sticky',
-                                                left: '82px',
+                                                left: '85px',
                                                 zIndex: 10,
                                                 background: '#ffffff',
                                                 padding: '7px 10px',
-                                                borderRight: '1px solid #e2e8f0',
+                                                width: '210px',
+                                                minWidth: '210px',
+                                                maxWidth: '210px',
+                                                boxSizing: 'border-box',
+                                                borderBottom: '1px solid #e2e8f0',
+                                                borderRight: '1px solid #cbd5e1',
                                                 verticalAlign: 'middle',
                                             }}
                                         >
-                                            <div style={{ fontWeight: 600, color: '#0f172a', lineHeight: '1.2' }}>
+                                            <div
+                                                style={{
+                                                    fontWeight: 600,
+                                                    color: '#0f172a',
+                                                    lineHeight: '1.2',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap',
+                                                }}
+                                                title={row.employee_name}
+                                            >
                                                 {row.employee_name}
                                             </div>
                                             {row.father_name && (
-                                                <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                                <div
+                                                    style={{
+                                                        fontSize: '10.5px',
+                                                        color: '#64748b',
+                                                        marginTop: '2px',
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        whiteSpace: 'nowrap',
+                                                    }}
+                                                    title={row.father_name}
+                                                >
                                                     {row.father_name}
                                                 </div>
                                             )}
                                         </td>
                                         <td
+                                            className="att-sticky-col"
                                             style={{
+                                                position: 'sticky',
+                                                left: '295px',
+                                                zIndex: 10,
+                                                background: '#ffffff',
                                                 padding: '7px 10px',
+                                                width: '140px',
+                                                minWidth: '140px',
+                                                maxWidth: '140px',
+                                                boxSizing: 'border-box',
                                                 color: '#475569',
                                                 fontSize: '11.5px',
-                                                borderRight: '1px solid #e2e8f0',
+                                                lineHeight: '1.25',
+                                                borderBottom: '1px solid #e2e8f0',
+                                                borderRight: '2px solid #94a3b8',
+                                                boxShadow: '4px 0 8px -2px rgba(15, 23, 42, 0.12)',
                                                 verticalAlign: 'middle',
                                             }}
+                                            title={row.designation || '-'}
                                         >
                                             {row.designation || '-'}
                                         </td>
@@ -1297,6 +1415,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                                 fontSize: '13px',
                                                 color: '#1e3a8a',
                                                 background: '#eff6ff',
+                                                borderBottom: '1px solid #e2e8f0',
                                                 borderLeft: '2px solid #cbd5e1',
                                                 borderRight: '1px solid #e2e8f0',
                                                 verticalAlign: 'middle',
@@ -1304,22 +1423,22 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         >
                                             {row.totals.total_duties}
                                         </td>
-                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#059669', verticalAlign: 'middle' }}>
+                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#059669', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
                                             {row.totals.present}
                                         </td>
-                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#0284c7', verticalAlign: 'middle' }}>
+                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#0284c7', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
                                             {row.totals.ot + row.totals.od}
                                         </td>
-                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#7e22ce', verticalAlign: 'middle' }}>
+                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#7e22ce', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
                                             {row.totals.worked_off}
                                         </td>
-                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#475569', verticalAlign: 'middle' }}>
+                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#475569', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
                                             {row.totals.weekly_off}
                                         </td>
-                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#dc2626', verticalAlign: 'middle' }}>
+                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#dc2626', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
                                             {row.totals.absent}
                                         </td>
-                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#d97706', verticalAlign: 'middle' }}>
+                                        <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#d97706', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>
                                             {row.totals.leave}
                                         </td>
                                     </tr>

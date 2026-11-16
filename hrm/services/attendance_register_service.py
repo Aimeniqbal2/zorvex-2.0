@@ -80,11 +80,11 @@ def _display_label_for_code(code):
 def _shift_weight_for_code(code):
     """
     Worked shift contribution to 'Tots':
-      P=1, O=1, OD=1, PO=2, POD=2, WP=1, HD=0.5, others (W, A, L, JUMP, '')=0
+      P=1, O=1, OD=1, W=1, PO=2, POD=2, WP=2, HD=0.5, others (A, L, JUMP, '')=0
     """
-    if code in ('PO', 'POD'):
+    if code in ('PO', 'POD', 'WP'):
         return 2.0
-    if code in ('P', 'O', 'OD', 'WP'):
+    if code in ('P', 'O', 'OD', 'W'):
         return 1.0
     if code == 'HD':
         return 0.5
@@ -121,6 +121,21 @@ class AttendanceRegisterService:
         marked_only=False,
     ):
         today = timezone.now().date()
+
+        def _clean_param(val):
+            if val is None:
+                return None
+            s = str(val).strip()
+            if not s or s.upper() in ('ALL', 'NULL', 'UNDEFINED', 'NONE'):
+                return None
+            return s
+
+        employee_id = _clean_param(employee_id)
+        department_id = _clean_param(department_id)
+        designation_id = _clean_param(designation_id)
+        site_id = _clean_param(site_id)
+        shift_id = _clean_param(shift_id)
+        client_id = _clean_param(client_id)
 
         # 1. Resolve date range
         if month and year:
@@ -320,11 +335,29 @@ class AttendanceRegisterService:
         }
         for j in jumps_qs:
             if j.status in active_jump_statuses and j.absent_since:
-                end_dt_raw = j.reinstated_at or j.resolved_at
-                j_end = end_dt_raw.date() if hasattr(end_dt_raw, 'date') else (end_dt_raw or end_date)
-                j_start = j.absent_since.date() if hasattr(j.absent_since, 'date') else j.absent_since
-                if j_end >= start_date:
-                    emp_jump_dates[str(j.employee_id)].append((j_start, j_end, j))
+                try:
+                    if hasattr(j.absent_since, 'date') and callable(getattr(j.absent_since, 'date', None)):
+                        j_start = j.absent_since.date()
+                    elif isinstance(j.absent_since, date):
+                        j_start = j.absent_since
+                    else:
+                        continue
+
+                    end_dt_raw = j.reinstated_at or j.resolved_at
+                    if end_dt_raw:
+                        if hasattr(end_dt_raw, 'date') and callable(getattr(end_dt_raw, 'date', None)):
+                            j_end = end_dt_raw.date()
+                        elif isinstance(end_dt_raw, date):
+                            j_end = end_dt_raw
+                        else:
+                            j_end = end_date
+                    else:
+                        j_end = end_date
+
+                    if j_start and j_end and isinstance(j_start, date) and isinstance(j_end, date) and j_end >= start_date:
+                        emp_jump_dates[str(j.employee_id)].append((j_start, j_end, j))
+                except Exception:
+                    continue
 
         # 3. Filter employees (Active employees OR anyone with recorded attendance in this period)
         qs = Employee.objects.filter(
@@ -486,7 +519,7 @@ class AttendanceRegisterService:
                 primary_codes = [e['code'] for e in entries]
                 if primary_codes == ['A']:
                     for j_start, j_end, j_obj in jump_spans:
-                        if j_start <= curr_date <= j_end:
+                        if j_start and j_end and isinstance(j_start, date) and isinstance(j_end, date) and j_start <= curr_date <= j_end:
                             is_jump_day = True
                             jump_id = str(j_obj.id)
                             break

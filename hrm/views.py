@@ -1092,97 +1092,109 @@ class WorkforceAttendanceViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='register')
     def register(self, request):
+        import logging
+        logger = logging.getLogger(__name__)
         company_id = self._get_company_id(request)
         from hrm.services.attendance_register_service import AttendanceRegisterService
-        data = AttendanceRegisterService.get_attendance_register(
-            company_id=company_id,
-            date_from=request.query_params.get('date_from'),
-            date_to=request.query_params.get('date_to'),
-            month=request.query_params.get('month'),
-            year=request.query_params.get('year'),
-            employee_id=request.query_params.get('employee_id'),
-            employee_from=request.query_params.get('employee_from'),
-            employee_to=request.query_params.get('employee_to'),
-            workforce_type=request.query_params.get('workforce_type'),
-            department_id=request.query_params.get('department_id'),
-            designation_id=request.query_params.get('designation_id'),
-            site_id=request.query_params.get('site_id'),
-            shift_id=request.query_params.get('shift_id'),
-            client_id=request.query_params.get('client_id'),
-            status_filter=request.query_params.get('status'),
-            search=request.query_params.get('search'),
-            marked_only=request.query_params.get('marked_only', False),
-        )
-        data['exported_by'] = (
-            (request.user.get_full_name() if hasattr(request.user, 'get_full_name') else '')
-            or getattr(request.user, 'username', '')
-            or getattr(request.user, 'email', '')
-            or 'OPERATION'
-        )
         try:
-            from companies.models import Company
-            data['company_name'] = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
-        except Exception:
-            data['company_name'] = ''
-        return Response(data, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=['get'], url_path='export-register')
-    def export_register(self, request):
-        company_id = self._get_company_id(request)
-        from hrm.services.attendance_register_service import AttendanceRegisterService
-        data = AttendanceRegisterService.get_attendance_register(
-            company_id=company_id,
-            date_from=request.query_params.get('date_from'),
-            date_to=request.query_params.get('date_to'),
-            month=request.query_params.get('month'),
-            year=request.query_params.get('year'),
-            employee_id=request.query_params.get('employee_id'),
-            employee_from=request.query_params.get('employee_from'),
-            employee_to=request.query_params.get('employee_to'),
-            workforce_type=request.query_params.get('workforce_type'),
-            department_id=request.query_params.get('department_id'),
-            designation_id=request.query_params.get('designation_id'),
-            site_id=request.query_params.get('site_id'),
-            shift_id=request.query_params.get('shift_id'),
-            client_id=request.query_params.get('client_id'),
-            status_filter=request.query_params.get('status'),
-            search=request.query_params.get('search'),
-            marked_only=request.query_params.get('marked_only', False),
-        )
-        from django.http import HttpResponse
-        export_format = (request.query_params.get('export_format') or 'csv').strip().lower()
-        year_val = data.get('year', '')
-        month_val = str(data.get('month', '')).zfill(2)
-
-        if export_format in ('xlsx', 'excel'):
-            company_name = ''
-            try:
-                from companies.models import Company
-                company_name = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
-            except Exception:
-                pass
-            exported_by = (
+            data = AttendanceRegisterService.get_attendance_register(
+                company_id=company_id,
+                date_from=request.query_params.get('date_from'),
+                date_to=request.query_params.get('date_to'),
+                month=request.query_params.get('month'),
+                year=request.query_params.get('year'),
+                employee_id=request.query_params.get('employee_id'),
+                employee_from=request.query_params.get('employee_from'),
+                employee_to=request.query_params.get('employee_to'),
+                workforce_type=request.query_params.get('workforce_type'),
+                department_id=request.query_params.get('department_id'),
+                designation_id=request.query_params.get('designation_id'),
+                site_id=request.query_params.get('site_id'),
+                shift_id=request.query_params.get('shift_id'),
+                client_id=request.query_params.get('client_id'),
+                status_filter=request.query_params.get('status'),
+                search=request.query_params.get('search'),
+                marked_only=request.query_params.get('marked_only', False),
+            )
+            data['exported_by'] = (
                 (request.user.get_full_name() if hasattr(request.user, 'get_full_name') else '')
                 or getattr(request.user, 'username', '')
                 or getattr(request.user, 'email', '')
                 or 'OPERATION'
             )
-            xlsx_bytes = AttendanceRegisterService.export_attendance_register_xlsx(
-                data,
-                company_name=company_name,
-                exported_by=exported_by,
-            )
-            response = HttpResponse(
-                xlsx_bytes,
-                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            )
-            response['Content-Disposition'] = f'attachment; filename="attendance_register_{year_val}_{month_val}.xlsx"'
-            return response
+            try:
+                from companies.models import Company
+                data['company_name'] = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
+            except Exception:
+                data['company_name'] = ''
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception("Error generating attendance register: %s", e)
+            return Response({'error': str(e), 'rows': [], 'summary': {}}, status=status.HTTP_400_BAD_REQUEST)
 
-        csv_content = AttendanceRegisterService.export_attendance_register_csv(data)
-        response = HttpResponse(csv_content, content_type='text/csv; charset=utf-8')
-        response['Content-Disposition'] = f'attachment; filename="attendance_register_{year_val}_{month_val}.csv"'
-        return response
+    @action(detail=False, methods=['get'], url_path='export-register')
+    def export_register(self, request):
+        import logging
+        logger = logging.getLogger(__name__)
+        company_id = self._get_company_id(request)
+        from hrm.services.attendance_register_service import AttendanceRegisterService
+        try:
+            data = AttendanceRegisterService.get_attendance_register(
+                company_id=company_id,
+                date_from=request.query_params.get('date_from'),
+                date_to=request.query_params.get('date_to'),
+                month=request.query_params.get('month'),
+                year=request.query_params.get('year'),
+                employee_id=request.query_params.get('employee_id'),
+                employee_from=request.query_params.get('employee_from'),
+                employee_to=request.query_params.get('employee_to'),
+                workforce_type=request.query_params.get('workforce_type'),
+                department_id=request.query_params.get('department_id'),
+                designation_id=request.query_params.get('designation_id'),
+                site_id=request.query_params.get('site_id'),
+                shift_id=request.query_params.get('shift_id'),
+                client_id=request.query_params.get('client_id'),
+                status_filter=request.query_params.get('status'),
+                search=request.query_params.get('search'),
+                marked_only=request.query_params.get('marked_only', False),
+            )
+            from django.http import HttpResponse
+            export_format = (request.query_params.get('export_format') or 'csv').strip().lower()
+            year_val = data.get('year', '')
+            month_val = str(data.get('month', '')).zfill(2)
+
+            if export_format in ('xlsx', 'excel'):
+                company_name = ''
+                try:
+                    from companies.models import Company
+                    company_name = Company.objects.filter(id=company_id).values_list('name', flat=True).first() or ''
+                except Exception:
+                    pass
+                exported_by = (
+                    (request.user.get_full_name() if hasattr(request.user, 'get_full_name') else '')
+                    or getattr(request.user, 'username', '')
+                    or getattr(request.user, 'email', '')
+                    or 'OPERATION'
+                )
+                xlsx_bytes = AttendanceRegisterService.export_attendance_register_xlsx(
+                    data,
+                    company_name=company_name,
+                    exported_by=exported_by,
+                )
+                response = HttpResponse(
+                    xlsx_bytes,
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                )
+                response['Content-Disposition'] = f'attachment; filename="attendance_register_{year_val}_{month_val}.xlsx"'
+                return response
+
+            csv_content = AttendanceRegisterService.export_attendance_register_csv(data)
+            response = HttpResponse(csv_content, content_type='text/csv; charset=utf-8')
+            response['Content-Disposition'] = f'attachment; filename="attendance_register_{year_val}_{month_val}.csv"'
+            return response
+        except Exception as e:
+            logger.exception("Error exporting attendance register: %s", e)
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class ShiftViewSet(TenantModelViewSet):
     queryset = Shift.objects.all()

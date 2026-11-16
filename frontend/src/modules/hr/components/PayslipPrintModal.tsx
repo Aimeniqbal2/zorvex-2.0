@@ -21,8 +21,7 @@ export interface PayslipPrintRow {
   cnic_number?: string;
   cnic_issue_date?: string | null;
   basic_salary: number;
-  four_hrs_ot_amount: number;
-  site_allowance_amount: number;
+  food_allowance: number;
   total_salary: number;
   total_shifts: number;
   paid_shifts: number;
@@ -266,12 +265,8 @@ export const PayslipPrintModal: React.FC<PayslipPrintModalProps> = ({
                     <td className="amt" style={{ border: '1px solid #cbd5e1', padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPkr(r.basic_salary)}</td>
                   </tr>
                   <tr>
-                    <td style={{ border: '1px solid #cbd5e1', padding: '4px 8px' }}>4 Hrs OT</td>
-                    <td className="amt" style={{ border: '1px solid #cbd5e1', padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPkr(r.four_hrs_ot_amount)}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ border: '1px solid #cbd5e1', padding: '4px 8px' }}>Site Allowance</td>
-                    <td className="amt" style={{ border: '1px solid #cbd5e1', padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPkr(r.site_allowance_amount)}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: '4px 8px' }}>Food Allowance</td>
+                    <td className="amt" style={{ border: '1px solid #cbd5e1', padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPkr(r.food_allowance)}</td>
                   </tr>
                   <tr style={{ background: '#f8fafc', fontWeight: 700 }}>
                     <td style={{ border: '1px solid #cbd5e1', padding: '4px 8px' }}>Total Monthly Salary</td>

@@ -99,15 +99,12 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
 
   const contractCode = context.contract?.contract_number || inv.contract_code || '-';
   const showScBreakdown = mode === 'CHEQUE' && tpl.show_service_charges_row && sc.has_breakdown;
-  const primaryDesc =
-    lines.length === 1
-      ? lines[0].description
-      : client.billing_address
-      ? `Security Guards (${client.billing_address})`
-      : 'Security Guards';
   const totalQty = sc.quantity > 0 ? sc.quantity : lines.reduce((acc, l) => acc + Number(l.quantity || 0), 0) || 1;
-  const perHeadGuard = totalQty > 0 ? sc.guards_subtotal / totalQty : sc.guards_subtotal;
-  const extraStartIndex = showScBreakdown ? 2 : Math.max(lines.length, 1) + 1;
+  const displayTaxRate =
+    showScBreakdown && sc.sales_tax_rate > 0
+      ? sc.sales_tax_rate
+      : (taxRate > 0 ? taxRate : 0);
+  const extraStartIndex = showScBreakdown ? lines.length + 1 : Math.max(lines.length, 1) + 1;
 
   return (
     <div
@@ -345,13 +342,34 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
             </tr>
           ) : showScBreakdown ? (
             <>
-              <tr>
-                <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>1</td>
-                <td style={{ border: '1px solid #0f172a', padding: '6px 10px' }}>{primaryDesc}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>{totalQty}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>{fmtMoney(perHeadGuard)}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>{fmtMoney(sc.guards_subtotal)}</td>
-              </tr>
+              {lines.map((ln, idx) => {
+                const qty = Number(ln.quantity || 1);
+                const unitR = Number(ln.unit_rate || 0);
+                let lineBaseRate: number;
+                let lineBaseAmt: number;
+                if (sc.per_guard > 0 && unitR >= sc.per_guard) {
+                  lineBaseRate = unitR - sc.per_guard;
+                  lineBaseAmt = qty * lineBaseRate;
+                } else if (totalQty > 0) {
+                  lineBaseAmt = sc.guards_subtotal * (qty / totalQty);
+                  lineBaseRate = qty > 0 ? lineBaseAmt / qty : 0;
+                } else {
+                  lineBaseRate = unitR;
+                  lineBaseAmt = Number(ln.line_subtotal || 0);
+                }
+                const cleanDesc = (ln.description || '')
+                  .replace(/\s*\(CRM Rate[^)]*\)/gi, '')
+                  .trim();
+                return (
+                  <tr key={ln.id || idx}>
+                    <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>{idx + 1}</td>
+                    <td style={{ border: '1px solid #0f172a', padding: '6px 10px' }}>{cleanDesc}</td>
+                    <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>{qty}</td>
+                    <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>{fmtMoney(lineBaseRate)}</td>
+                    <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>{fmtMoney(lineBaseAmt)}</td>
+                  </tr>
+                );
+              })}
               <tr>
                 <td style={{ border: '1px solid #0f172a', padding: '5px 8px' }}></td>
                 <td style={{ border: '1px solid #0f172a', padding: '5px 10px', textAlign: 'center', fontWeight: 700 }}>Total</td>
@@ -362,7 +380,7 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
                 </td>
               </tr>
               <tr>
-                <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>2</td>
+                <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>{lines.length + 1}</td>
                 <td style={{ border: '1px solid #0f172a', padding: '6px 10px' }}>{tpl.service_charges_label || 'Service Charges'}</td>
                 <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>{totalQty}</td>
                 <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>{fmtMoney(sc.per_guard)}</td>
@@ -370,29 +388,34 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
               </tr>
             </>
           ) : (
-            lines.map((ln, idx) => (
-              <tr key={ln.id || idx}>
-                <td style={{ border: '1px solid #0f172a', padding: '7px 8px', textAlign: 'center' }}>{idx + 1}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '7px 10px' }}>{ln.description}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '7px 8px', textAlign: 'center' }}>{ln.quantity}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '7px 10px', textAlign: 'right' }}>{fmtMoney(ln.unit_rate)}</td>
-                <td style={{ border: '1px solid #0f172a', padding: '7px 10px', textAlign: 'right' }}>{fmtMoney(ln.line_subtotal)}</td>
-              </tr>
-            ))
+            lines.map((ln, idx) => {
+              const cleanDesc = (ln.description || '')
+                .replace(/\s*\(CRM Rate[^)]*\)/gi, '')
+                .trim();
+              return (
+                <tr key={ln.id || idx}>
+                  <td style={{ border: '1px solid #0f172a', padding: '7px 8px', textAlign: 'center' }}>{idx + 1}</td>
+                  <td style={{ border: '1px solid #0f172a', padding: '7px 10px' }}>{cleanDesc}</td>
+                  <td style={{ border: '1px solid #0f172a', padding: '7px 8px', textAlign: 'center' }}>{ln.quantity}</td>
+                  <td style={{ border: '1px solid #0f172a', padding: '7px 10px', textAlign: 'right' }}>{fmtMoney(ln.unit_rate)}</td>
+                  <td style={{ border: '1px solid #0f172a', padding: '7px 10px', textAlign: 'right' }}>{fmtMoney(ln.line_subtotal)}</td>
+                </tr>
+              );
+            })
           )}
 
           {/* Sales Tax Row (Shown on Cheque / Sales Tax Invoice or when taxAmount > 0) */}
-          {(taxAmount > 0 || (mode === 'CHEQUE' && taxRate > 0)) && (
+          {(taxAmount > 0 || (mode === 'CHEQUE' && displayTaxRate > 0)) && (
             <tr>
               <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>
-                {showScBreakdown ? 3 : extraStartIndex}
+                {showScBreakdown ? lines.length + 2 : Math.max(lines.length, 1) + 1}
               </td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 10px' }}>
-                {tpl.sales_tax_label || 'Add: Sales Tax on Service'} {taxRate > 0 ? `${taxRate}%` : ''}
+                {tpl.sales_tax_label || 'Add: Sales Tax on Service'} {displayTaxRate > 0 ? `${displayTaxRate}%` : ''}
               </td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 8px' }}></td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>
-                {taxRate > 0 ? `${taxRate}%` : '-'}
+                {displayTaxRate > 0 ? `${displayTaxRate}%` : '-'}
               </td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>
                 {fmtMoney(taxAmount)}

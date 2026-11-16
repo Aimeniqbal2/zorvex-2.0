@@ -154,7 +154,10 @@ class PayrollRulesService:
                 ))
             else:
                 if duty.attendance_status not in [AttendanceStatus.ABSENT, AttendanceStatus.UNPAID_LEAVE]:
-                    duty_days_count += 1
+                    if duty.attendance_status in [AttendanceStatus.WORKED_WEEKLY_OFF, 'WORKED_WEEKLY_OFF', 'WP']:
+                        duty_days_count += 2
+                    else:
+                        duty_days_count += 1
                 duty_earnings_total += duty_amt
                 lines_to_create.append(PayrollCalculationLine(
                     company_id=company_id,

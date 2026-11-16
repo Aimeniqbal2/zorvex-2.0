@@ -514,7 +514,8 @@ class ClientLocation(BaseModel):
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, default='')
 
-    # Location-specific Statutory & Costing Rules (Formula & Enablement)
+    # Location-specific Food Allowance & Statutory Rules
+    food_allowance = models.DecimalField(max_digits=12, decimal_places=2, default=0, null=True, blank=True, help_text="Monthly food allowance in PKR for guards deployed at this location")
     eobi_enabled = models.BooleanField(default=False)
     eobi_rate = models.DecimalField(max_digits=12, decimal_places=2, default=1500, null=True, blank=True, help_text="Manual EOBI rate in PKR per guard")
     sessi_enabled = models.BooleanField(default=False)
