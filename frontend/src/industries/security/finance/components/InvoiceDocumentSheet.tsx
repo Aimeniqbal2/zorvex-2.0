@@ -104,7 +104,6 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
     showScBreakdown && sc.sales_tax_rate > 0
       ? sc.sales_tax_rate
       : (taxRate > 0 ? taxRate : 0);
-  const extraStartIndex = showScBreakdown ? lines.length + 1 : Math.max(lines.length, 1) + 1;
 
   return (
     <div
