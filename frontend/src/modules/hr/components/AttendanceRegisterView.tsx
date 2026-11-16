@@ -604,19 +604,25 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
     return (
         <div
             style={{
-                padding: isStandalone ? '20px 24px' : '16px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                maxHeight: '100%',
+                padding: isStandalone ? '16px 20px' : '12px 16px',
                 background: '#f8fafc',
-                minHeight: '100%',
+                boxSizing: 'border-box',
+                overflow: 'hidden',
             }}
         >
             {/* Header & Actions */}
             <div
                 style={{
+                    flexShrink: 0,
                     background: '#ffffff',
-                    borderRadius: '12px',
+                    borderRadius: '10px',
                     border: '1px solid #e2e8f0',
-                    padding: '16px 20px',
-                    marginBottom: '14px',
+                    padding: '12px 16px',
+                    marginBottom: '10px',
                     boxShadow: '0 1px 2px rgba(15,23,42,0.03)',
                 }}
             >
@@ -1000,10 +1006,11 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
             {/* Legend + Summary Cards */}
             <div
                 style={{
+                    flexShrink: 0,
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                    gap: '12px',
-                    marginBottom: '14px',
+                    gap: '10px',
+                    marginBottom: '10px',
                 }}
             >
                 <div
@@ -1011,7 +1018,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                         background: '#ffffff',
                         borderRadius: '10px',
                         border: '1px solid #e2e8f0',
-                        padding: '12px 16px',
+                        padding: '10px 14px',
                     }}
                 >
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
@@ -1058,7 +1065,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                         background: '#ffffff',
                         borderRadius: '10px',
                         border: '1px solid #e2e8f0',
-                        padding: '12px 16px',
+                        padding: '10px 14px',
                     }}
                 >
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
@@ -1107,11 +1114,16 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
             {/* Register Matrix Table */}
             <div
                 style={{
+                    flex: '1 1 0px',
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
                     background: '#ffffff',
-                    borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    boxShadow: '0 2px 8px rgba(15,23,42,0.05)',
                     overflow: 'hidden',
-                    boxShadow: '0 1px 2px rgba(15,23,42,0.03)',
+                    position: 'relative',
                 }}
             >
                 <style>{`
@@ -1123,25 +1135,27 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                         background: #f1f5f9;
                     }
                     .att-reg-table-container::-webkit-scrollbar-thumb {
-                        background: #cbd5e1;
+                        background: #94a3b8;
                         border-radius: 6px;
                     }
                     .att-reg-table-container::-webkit-scrollbar-thumb:hover {
-                        background: #94a3b8;
+                        background: #64748b;
                     }
                     .att-reg-row:hover td {
                         background-color: #f8fafc !important;
                     }
                     .att-reg-row:hover td.att-sticky-col {
-                        background-color: #f1f5f9 !important;
+                        background-color: #e2e8f0 !important;
                     }
                 `}</style>
                 <div
                     className="att-reg-table-container"
                     style={{
+                        flex: '1 1 0px',
+                        minHeight: 0,
+                        width: '100%',
                         overflowX: 'auto',
                         overflowY: 'auto',
-                        maxHeight: 'calc(100vh - 310px)',
                         position: 'relative',
                         background: '#ffffff',
                     }}
@@ -1153,6 +1167,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                             borderCollapse: 'separate',
                             borderSpacing: 0,
                             fontSize: '12px',
+                            background: '#ffffff',
                         }}
                     >
                         <thead>
@@ -1163,18 +1178,18 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         position: 'sticky',
                                         top: 0,
                                         left: 0,
-                                        zIndex: 40,
-                                        background: '#f8fafc',
+                                        zIndex: 60,
+                                        background: '#f1f5f9',
                                         padding: '9px 10px',
                                         textAlign: 'left',
                                         width: '85px',
                                         minWidth: '85px',
                                         maxWidth: '85px',
                                         boxSizing: 'border-box',
-                                        borderBottom: '2px solid #cbd5e1',
+                                        borderBottom: '2px solid #94a3b8',
                                         borderRight: '1px solid #cbd5e1',
-                                        fontWeight: 700,
-                                        color: '#334155',
+                                        fontWeight: 800,
+                                        color: '#1e293b',
                                         fontSize: '11px',
                                     }}
                                 >
@@ -1186,18 +1201,18 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         position: 'sticky',
                                         top: 0,
                                         left: '85px',
-                                        zIndex: 40,
-                                        background: '#f8fafc',
+                                        zIndex: 60,
+                                        background: '#f1f5f9',
                                         padding: '9px 10px',
                                         textAlign: 'left',
                                         width: '210px',
                                         minWidth: '210px',
                                         maxWidth: '210px',
                                         boxSizing: 'border-box',
-                                        borderBottom: '2px solid #cbd5e1',
+                                        borderBottom: '2px solid #94a3b8',
                                         borderRight: '1px solid #cbd5e1',
-                                        fontWeight: 700,
-                                        color: '#334155',
+                                        fontWeight: 800,
+                                        color: '#1e293b',
                                         fontSize: '11px',
                                     }}
                                 >
@@ -1209,19 +1224,19 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         position: 'sticky',
                                         top: 0,
                                         left: '295px',
-                                        zIndex: 40,
-                                        background: '#f8fafc',
+                                        zIndex: 60,
+                                        background: '#f1f5f9',
                                         padding: '9px 10px',
                                         textAlign: 'left',
                                         width: '140px',
                                         minWidth: '140px',
                                         maxWidth: '140px',
                                         boxSizing: 'border-box',
-                                        borderBottom: '2px solid #cbd5e1',
-                                        borderRight: '2px solid #94a3b8',
-                                        boxShadow: '4px 0 8px -2px rgba(15, 23, 42, 0.12)',
-                                        fontWeight: 700,
-                                        color: '#334155',
+                                        borderBottom: '2px solid #94a3b8',
+                                        borderRight: '2px solid #64748b',
+                                        boxShadow: '4px 0 8px -2px rgba(15, 23, 42, 0.18)',
+                                        fontWeight: 800,
+                                        color: '#1e293b',
                                         fontSize: '11px',
                                     }}
                                 >
@@ -1233,11 +1248,11 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         style={{
                                             position: 'sticky',
                                             top: 0,
-                                            zIndex: 20,
+                                            zIndex: 40,
                                             padding: '6px 2px',
                                             textAlign: 'center',
                                             minWidth: '58px',
-                                            borderBottom: '2px solid #cbd5e1',
+                                            borderBottom: '2px solid #94a3b8',
                                             borderRight: '1px solid #e2e8f0',
                                             background: dh.is_sunday ? '#fff7ed' : '#f8fafc',
                                             color: dh.is_sunday ? '#c2410c' : '#334155',
@@ -1254,7 +1269,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     style={{
                                         position: 'sticky',
                                         top: 0,
-                                        zIndex: 20,
+                                        zIndex: 40,
                                         padding: '9px 8px',
                                         textAlign: 'center',
                                         minWidth: '52px',
@@ -1262,29 +1277,29 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                         color: '#1e3a8a',
                                         fontWeight: 800,
                                         fontSize: '11.5px',
-                                        borderBottom: '2px solid #cbd5e1',
+                                        borderBottom: '2px solid #94a3b8',
                                         borderLeft: '2px solid #cbd5e1',
                                         borderRight: '1px solid #e2e8f0',
                                     }}
                                 >
                                     Tots
                                 </th>
-                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#059669', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 40, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#059669', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                     P
                                 </th>
-                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '38px', color: '#0284c7', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 40, padding: '9px 6px', textAlign: 'center', minWidth: '38px', color: '#0284c7', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                     OT
                                 </th>
-                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '36px', color: '#7e22ce', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 40, padding: '9px 6px', textAlign: 'center', minWidth: '36px', color: '#7e22ce', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                     WP
                                 </th>
-                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#475569', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 40, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#475569', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                     W
                                 </th>
-                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#dc2626', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 40, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#dc2626', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                     A
                                 </th>
-                                <th style={{ position: 'sticky', top: 0, zIndex: 20, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#d97706', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                                <th style={{ position: 'sticky', top: 0, zIndex: 40, padding: '9px 6px', textAlign: 'center', minWidth: '34px', color: '#d97706', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                     L
                                 </th>
                             </tr>
@@ -1317,7 +1332,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                             style={{
                                                 position: 'sticky',
                                                 left: 0,
-                                                zIndex: 10,
+                                                zIndex: 30,
                                                 background: '#ffffff',
                                                 padding: '7px 10px',
                                                 fontWeight: 700,
@@ -1339,7 +1354,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                             style={{
                                                 position: 'sticky',
                                                 left: '85px',
-                                                zIndex: 10,
+                                                zIndex: 30,
                                                 background: '#ffffff',
                                                 padding: '7px 10px',
                                                 width: '210px',
@@ -1385,7 +1400,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                             style={{
                                                 position: 'sticky',
                                                 left: '295px',
-                                                zIndex: 10,
+                                                zIndex: 30,
                                                 background: '#ffffff',
                                                 padding: '7px 10px',
                                                 width: '140px',
@@ -1396,8 +1411,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                                 fontSize: '11.5px',
                                                 lineHeight: '1.25',
                                                 borderBottom: '1px solid #e2e8f0',
-                                                borderRight: '2px solid #94a3b8',
-                                                boxShadow: '4px 0 8px -2px rgba(15, 23, 42, 0.12)',
+                                                borderRight: '2px solid #64748b',
+                                                boxShadow: '4px 0 8px -2px rgba(15, 23, 42, 0.15)',
                                                 verticalAlign: 'middle',
                                             }}
                                             title={row.designation || '-'}

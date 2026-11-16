@@ -124,7 +124,8 @@ export const WorkspaceManager: React.FC = () => {
                             display: activeTabId === tab.id ? 'block' : 'none',
                             height: '100%',
                             width: '100%',
-                            overflowY: 'auto'
+                            overflowY: tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing' ? 'hidden' : 'auto',
+                            overflowX: tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing' ? 'hidden' : 'auto'
                         }}
                     >
                     <Suspense fallback={TabLoadingFallback}>
