@@ -1588,7 +1588,6 @@ export const SecurityCustomerDetail: React.FC<Props> = ({ customerId, onBack, on
                                 </select>
                             </div>
                         </div>
-                    </div>
                 </form>
             </Modal>
         </div>
