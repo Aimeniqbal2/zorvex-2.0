@@ -9,10 +9,11 @@ import {
 } from '../../api/communications';
 import { API_HOST_URL } from '../../api/client';
 import { UserProfilePanel } from './UserProfilePanel';
+import { SenderIdentitiesPanel } from './SenderIdentitiesPanel';
 
 export const SettingsWorkspace: React.FC = () => {
     const { user } = useAuthStore();
-    const [activeTab, setActiveTab] = useState<'profile' | 'signatures' | 'company' | 'settings'>('profile');
+    const [activeTab, setActiveTab] = useState<'profile' | 'signatures' | 'senders' | 'company' | 'settings'>('profile');
 
     // Signatures State
     const [signatures, setSignatures] = useState<UserEmailSignature[]>([]);
@@ -191,6 +192,22 @@ export const SettingsWorkspace: React.FC = () => {
                             onClick={() => { setActiveTab('signatures'); resetSigForm(); }}
                         >
                             <i className='bx bx-edit-alt' style={{ fontSize: '18px' }}></i> Email Signatures
+                        </button>
+
+                        <button 
+                            style={{ 
+                                padding: '10px 14px', textAlign: 'left', 
+                                background: activeTab === 'senders' ? 'var(--color-surface-secondary)' : 'transparent', 
+                                border: '1px solid',
+                                borderColor: activeTab === 'senders' ? 'var(--color-border)' : 'transparent', 
+                                borderRadius: '8px', cursor: 'pointer', 
+                                fontWeight: activeTab === 'senders' ? 700 : 500, 
+                                color: activeTab === 'senders' ? 'var(--color-primary)' : 'var(--color-text)',
+                                display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13.5px'
+                            }}
+                            onClick={() => { setActiveTab('senders'); resetSigForm(); }}
+                        >
+                            <i className='bx bx-send' style={{ fontSize: '18px' }}></i> Sender Identities & SMTP
                         </button>
 
                         <button 
@@ -484,6 +501,11 @@ export const SettingsWorkspace: React.FC = () => {
                             </div>
                         )}
                         
+                        {/* Tab: Sender Identities & SMTP */}
+                        {activeTab === 'senders' && (
+                            <SenderIdentitiesPanel />
+                        )}
+
                         {/* Tab 3: Company Details */}
                         {activeTab === 'company' && (
                             <div>

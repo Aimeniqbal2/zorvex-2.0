@@ -43,3 +43,47 @@ export const updateSignature = async (id: string, data: FormData | Partial<UserE
 export const deleteSignature = async (id: string): Promise<void> => {
     await apiClient.delete(`/api/communications/signatures/${id}/`);
 };
+
+export interface SenderIdentity {
+    id: string;
+    name: string;
+    email_address: string;
+    reply_to?: string | null;
+    provider_type: 'SMTP' | 'SYSTEM_DEFAULT';
+    verification_status: 'USABLE' | 'UNVERIFIED' | 'VERIFIED' | 'DISABLED';
+    is_active: boolean;
+    is_default: boolean;
+    is_usable: boolean;
+    smtp_host?: string | null;
+    smtp_port?: number | null;
+    smtp_username?: string | null;
+    smtp_password?: string | null;
+    smtp_use_tls: boolean;
+    has_smtp_password?: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export const getSenderIdentities = async (): Promise<SenderIdentity[]> => {
+    const res = await apiClient.get('/api/communications/senders/');
+    return res.data.results || res.data;
+};
+
+export const createSenderIdentity = async (data: Partial<SenderIdentity>): Promise<SenderIdentity> => {
+    const res = await apiClient.post('/api/communications/senders/', data);
+    return res.data;
+};
+
+export const updateSenderIdentity = async (id: string, data: Partial<SenderIdentity>): Promise<SenderIdentity> => {
+    const res = await apiClient.patch(`/api/communications/senders/${id}/`, data);
+    return res.data;
+};
+
+export const deleteSenderIdentity = async (id: string): Promise<void> => {
+    await apiClient.delete(`/api/communications/senders/${id}/`);
+};
+
+export const testSenderConnection = async (id: string): Promise<{ status: string; verification_status: string; message: string }> => {
+    const res = await apiClient.post(`/api/communications/senders/${id}/test_connection/`);
+    return res.data;
+};
