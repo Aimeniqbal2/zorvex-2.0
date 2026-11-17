@@ -1611,19 +1611,76 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     'has_explicit_tax': s.get('sales_tax_amount') is not None,
                 }]
             else:
-                # CONTRACT_RATE: check if proposal has detailed ProposalServiceLines
+                # 1. First priority: Check if direct line_breakdown was passed from frontend/preview
+                raw_breakdown = s.get('line_breakdown') or []
+                if raw_breakdown and len(raw_breakdown) > 0:
+                    total_p_sub = sum(Decimal(str(p.get('quantity') or 0)) * Decimal(str(p.get('client_rate') or 0)) for p in raw_breakdown)
+                    s_tax_val = Decimal(str(s.get('sales_tax_amount', 0))) if s.get('sales_tax_amount') is not None else None
+                    rem_tax = s_tax_val
+                    res = []
+                    for p_idx, pl in enumerate(raw_breakdown):
+                        p_qty = Decimal(str(pl.get('quantity') or 1))
+                        p_rate = Decimal(str(pl.get('client_rate') or 0))
+                        p_sub = (p_qty * p_rate).quantize(Decimal('0.01'))
+                        if s_tax_val is not None:
+                            if p_idx == len(raw_breakdown) - 1:
+                                p_tax = rem_tax
+                            elif total_p_sub > 0:
+                                p_tax = (s_tax_val * (p_sub / total_p_sub)).quantize(Decimal('0.01'))
+                                rem_tax -= p_tax
+                            else:
+                                p_tax = Decimal('0.00')
+                            p_eff_rate = ((p_tax / p_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if p_sub > 0 and p_tax > 0 else Decimal('0.00')
+                        else:
+                            p_eff_rate = tax_rate
+                            p_tax = (p_sub * (tax_rate / Decimal('100.0'))).quantize(Decimal('0.01'))
+
+                        p_desc = pl.get('service_type') or 'Security Personnel'
+                        res.append({
+                            'line_type': 'REGULAR_SERVICE',
+                            'description': p_desc,
+                            'site': s_obj,
+                            'quantity': p_qty,
+                            'unit_rate': p_rate,
+                            'line_subtotal': p_sub,
+                            'tax_rate': p_eff_rate,
+                            'tax_amount': p_tax,
+                            'total_amount': p_sub + p_tax,
+                            'tag': f"[MODE:CONTRACT_RATE] [SITE:{s_id}]" if s_id else "[MODE:CONTRACT_RATE]",
+                            'site_label': site_label,
+                            'contract_id': s.get('contract_id'),
+                            'has_explicit_tax': s.get('sales_tax_amount') is not None,
+                        })
+                    if res:
+                        return res
+
+                # 2. CONTRACT_RATE: check if proposal has detailed ProposalServiceLines with normalized matching
                 try:
                     from security_crm.models import ProposalServiceLine
-                    prop_lines = list(ProposalServiceLine.objects.filter(
+                    norm_label = ' '.join(site_label.lower().split())
+                    all_prop_lines = list(ProposalServiceLine.objects.filter(
                         company_id=company_id, is_deleted=False,
-                        location__customer_id=client_id, location__name__iexact=site_label
-                    ).select_related('service_type'))
+                        location__customer_id=client_id
+                    ).select_related('service_type', 'location'))
+                    prop_lines = [
+                        pl for pl in all_prop_lines
+                        if pl.location and ' '.join((pl.location.name or '').lower().split()) == norm_label
+                    ]
+                    if not prop_lines:
+                        all_prop_lines2 = list(ProposalServiceLine.objects.filter(
+                            company_id=company_id, is_deleted=False,
+                            proposal_version__proposal__customer_id=client_id
+                        ).select_related('service_type', 'location'))
+                        prop_lines = [
+                            pl for pl in all_prop_lines2
+                            if pl.location and ' '.join((pl.location.name or '').lower().split()) == norm_label
+                        ]
                     if not prop_lines:
                         prop_lines = list(ProposalServiceLine.objects.filter(
                             company_id=company_id, is_deleted=False,
-                            proposal_version__proposal__customer_id=client_id, location__name__iexact=site_label
+                            location__customer_id=client_id, location__name__iexact=site_label
                         ).select_related('service_type'))
-                    if len(prop_lines) > 1:
+                    if len(prop_lines) > 0:
                         total_p_sub = sum(Decimal(str(p.quantity or 0)) * Decimal(str(p.client_rate or 0)) for p in prop_lines)
                         s_tax_val = Decimal(str(s.get('sales_tax_amount', 0))) if s.get('sales_tax_amount') is not None else None
                         rem_tax = s_tax_val

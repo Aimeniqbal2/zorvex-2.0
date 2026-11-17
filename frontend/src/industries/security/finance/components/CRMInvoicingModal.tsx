@@ -27,6 +27,7 @@ interface SiteServiceConfig {
   existingInvoiceNumber?: string | null;
   existingInvoiceStatus?: string | null;
   loadingAttendance: boolean;
+  lineBreakdown?: any[];
 }
 
 interface TempServiceConfig {
@@ -131,7 +132,8 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
       attendanceTaxAmount: Number(s.attendance_tax_amount || 0),
       existingInvoiceNumber: s.existing_invoice_number,
       existingInvoiceStatus: s.existing_invoice_status,
-      loadingAttendance: false
+      loadingAttendance: false,
+      lineBreakdown: s.line_breakdown || []
     }));
     setSiteConfigs(configs);
     setTaxOverrideEdited(false);
@@ -219,8 +221,9 @@ export const CRMInvoicingModal: React.FC<CRMInvoicingModalProps> = ({
           guard_daily_bill_rate: s.guardDailyBillRate,
           sales_tax_amount: taxOverrideEdited
             ? undefined
-            : (s.calcMode === 'CONTRACT_RATE' ? s.salesTaxAmount : s.attendanceTaxAmount)
-        });
+            : (s.calcMode === 'CONTRACT_RATE' ? s.salesTaxAmount : s.attendanceTaxAmount),
+          line_breakdown: s.lineBreakdown || []
+        } as any);
       }
     });
 

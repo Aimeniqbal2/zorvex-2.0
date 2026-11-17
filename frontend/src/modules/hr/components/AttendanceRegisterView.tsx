@@ -606,7 +606,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
             style={{
                 display: 'flex',
                 flexDirection: 'column',
-                height: '100%',
+                height: isStandalone ? '100%' : 'calc(100vh - 220px)',
+                minHeight: '520px',
                 maxHeight: '100%',
                 padding: isStandalone ? '16px 20px' : '12px 16px',
                 background: '#f8fafc',
@@ -1141,7 +1142,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                 style={{
                     flex: 1,
                     minHeight: 0,
-                    height: '100%',
+                    width: '100%',
+                    position: 'relative',
                     overflow: 'auto',
                     background: '#ffffff',
                     border: '1px solid #cbd5e1',

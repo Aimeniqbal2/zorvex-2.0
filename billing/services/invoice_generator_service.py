@@ -274,17 +274,21 @@ class InvoiceGeneratorService:
         try:
             from security_crm.models import ProposalServiceLine, SecurityProposal
             if client and primary_site:
-                psl = (
+                norm_ps = ' '.join((primary_site.name or '').lower().replace('-', ' ').split())
+                psl_list = list(
                     ProposalServiceLine.objects.filter(
                         company=company, is_deleted=False,
-                        location__customer=client, location__name__iexact=primary_site.name
+                        location__customer=client
                     )
-                    .select_related('proposal_version')
+                    .select_related('proposal_version', 'location')
                     .order_by('-proposal_version__version_number')
-                    .first()
                 )
-                if psl:
-                    prop_ver = psl.proposal_version
+                for cand in psl_list:
+                    if cand.location and ' '.join((cand.location.name or '').lower().replace('-', ' ').split()) == norm_ps:
+                        prop_ver = cand.proposal_version
+                        break
+                if not prop_ver and psl_list:
+                    prop_ver = psl_list[0].proposal_version
             if not prop_ver and client:
                 prop = (
                     SecurityProposal.objects.filter(company=company, customer=client, is_deleted=False)
@@ -306,7 +310,8 @@ class InvoiceGeneratorService:
                         proposal_version=prop_ver, company=company, is_deleted=False
                     ).select_related('service_type', 'location')
                     if primary_site:
-                        site_ps = [p for p in ps_qs if p.location and p.location.name and p.location.name.lower() == primary_site.name.lower()]
+                        norm_ps = ' '.join((primary_site.name or '').lower().replace('-', ' ').split())
+                        site_ps = [p for p in ps_qs if p.location and p.location.name and ' '.join(p.location.name.lower().replace('-', ' ').split()) == norm_ps]
                         if site_ps:
                             ps_qs = site_ps
                     ps_list = list(ps_qs)
@@ -393,12 +398,12 @@ class InvoiceGeneratorService:
 
         # Calculate exact tax rate applied to Service Charges (e.g. 8.00% nominal SRB/PRA)
         sc_tax_rate = nominal_tax_rate
-        if sc_tax_rate <= 0 and total_service_charges > 0 and tax_amt_dec > 0:
+        if total_service_charges > 0 and tax_amt_dec > 0 and (nominal_tax_rate <= 0 or sc_tax_rate < 1):
             sc_tax_rate = ((tax_amt_dec / total_service_charges) * Decimal('100.00')).quantize(Decimal('0.01'))
         elif sc_tax_rate <= 0:
             sc_tax_rate = effective_tax_rate
 
-        final_display_tax_rate = sc_tax_rate if (sales_tax_basis == 'SERVICE_CHARGES' and total_service_charges > 0) else (nominal_tax_rate if nominal_tax_rate > 0 else effective_tax_rate)
+        final_display_tax_rate = sc_tax_rate if (total_service_charges > 0) else (nominal_tax_rate if nominal_tax_rate > 0 else effective_tax_rate)
 
         guards_subtotal = (subtotal_dec - total_service_charges).quantize(Decimal('0.01'))
 

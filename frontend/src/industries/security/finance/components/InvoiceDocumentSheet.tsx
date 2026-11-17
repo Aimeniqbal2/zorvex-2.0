@@ -100,10 +100,19 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
   const contractCode = context.contract?.contract_number || inv.contract_code || '-';
   const showScBreakdown = mode === 'CHEQUE' && tpl.show_service_charges_row && sc.has_breakdown;
   const totalQty = sc.quantity > 0 ? sc.quantity : lines.reduce((acc, l) => acc + Number(l.quantity || 0), 0) || 1;
-  const displayTaxRate =
+  let displayTaxRate =
     showScBreakdown && sc.sales_tax_rate > 0
       ? sc.sales_tax_rate
       : (taxRate > 0 ? taxRate : 0);
+
+  // If displayTaxRate was computed against the total invoice subtotal (yielding a diluted fraction like 0.88%),
+  // accurately resolve the true nominal tax rate applied to the Service Charges (e.g. 7,168 / 89,600 * 100 = 8%)
+  if (showScBreakdown && sc.amount > 0 && taxAmount > 0) {
+    const computedScTaxRate = Math.round((taxAmount / sc.amount) * 10000) / 100;
+    if (displayTaxRate < 1 || Math.abs(displayTaxRate - computedScTaxRate) > 0.05) {
+      displayTaxRate = computedScTaxRate;
+    }
+  }
 
   return (
     <div
@@ -410,11 +419,11 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
                 {showScBreakdown ? lines.length + 2 : Math.max(lines.length, 1) + 1}
               </td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 10px' }}>
-                {tpl.sales_tax_label || 'Add: Sales Tax on Service'} {displayTaxRate > 0 ? `${displayTaxRate}%` : ''}
+                {tpl.sales_tax_label || 'Add: Sales Tax on Service'} {displayTaxRate > 0 ? `${displayTaxRate % 1 === 0 ? displayTaxRate.toFixed(0) : displayTaxRate.toFixed(2)}%` : ''}
               </td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 8px' }}></td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>
-                {displayTaxRate > 0 ? `${displayTaxRate}%` : '-'}
+                {displayTaxRate > 0 ? `${displayTaxRate % 1 === 0 ? displayTaxRate.toFixed(0) : displayTaxRate.toFixed(2)}%` : '-'}
               </td>
               <td style={{ border: '1px solid #0f172a', padding: '6px 10px', textAlign: 'right' }}>
                 {fmtMoney(taxAmount)}

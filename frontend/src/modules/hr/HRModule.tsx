@@ -195,12 +195,19 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
                 </div>
 
                 <div className="module-main">
-                    <div className="module-content">
-                        <Card>
-                            <div style={{ padding: '24px' }}>
-                                {renderContent()}
-                            </div>
-                        </Card>
+                    <div 
+                        className="module-content"
+                        style={activeTab === 'ATTENDANCE_REGISTER' ? { padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' } : undefined}
+                    >
+                        {activeTab === 'ATTENDANCE_REGISTER' ? (
+                            renderContent()
+                        ) : (
+                            <Card>
+                                <div style={{ padding: '24px' }}>
+                                    {renderContent()}
+                                </div>
+                            </Card>
+                        )}
                     </div>
                 </div>
             </div>
