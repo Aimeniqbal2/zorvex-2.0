@@ -614,6 +614,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
             'Overhead Exp (PKR)',
             'OT Rate / Hr (PKR)',
             'Service Charges (PKR)',
+            'Food Allowance (PKR)',
             'SESSI (PKR)',
             'EOBI (PKR)',
             'WHT Formula',
@@ -683,6 +684,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
                 Math.round(calc.expense),
                 row.ot_rate ? Number(row.ot_rate) : (calc.totalStrength > 0 ? Math.round((calc.monthlySalary / calc.totalStrength) / 30) : 0),
                 Math.round(calc.totalStrength * calc.serviceCharges),
+                row.food_allowance ? Number(row.food_allowance) : 0,
                 Math.round(calc.sessi),
                 Math.round(calc.eobi),
                 whtBasis,
@@ -719,6 +721,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
             Math.round(expTotalExpense),
             '',
             Math.round(expTotalServiceCharges),
+            '',
             Math.round(expTotalSessi),
             Math.round(expTotalEobi),
             '',
@@ -1153,7 +1156,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
                                     {col.label}
                                 </th>
                             ))}
-                            <th colSpan={17} style={{ 
+                            <th colSpan={18} style={{ 
                                 padding: '10px 16px', 
                                 textAlign: 'center', 
                                 backgroundColor: 'var(--color-surface)',
@@ -1161,7 +1164,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
                                 color: 'var(--color-text)',
                                 borderBottom: '1px solid var(--color-border)', 
                                 fontWeight: 700, 
-                                minWidth: '1760px', 
+                                minWidth: '1875px', 
                                 position: 'sticky', 
                                 top: 0, 
                                 zIndex: 35, 
@@ -1195,6 +1198,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: 'var(--color-text-muted)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overhead Exp</th>
                             <th style={{ padding: '9px 8px', width: '95px', minWidth: '95px', textAlign: 'right', color: '#10b981', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Overtime Dozing OD</th>
                             <th style={{ padding: '9px 8px', width: '110px', minWidth: '110px', textAlign: 'right', color: '#60a5fa', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Service Charges</th>
+                            <th style={{ padding: '9px 8px', width: '115px', minWidth: '115px', textAlign: 'center', color: '#059669', fontWeight: 700, position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>Food Allow (PKR)</th>
                             {/* Statutory Taxes moved next to Service Charges */}
                             <th style={{ padding: '9px 6px', width: '115px', minWidth: '115px', textAlign: 'center', color: 'var(--color-text)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>SESSI/PESSI</th>
                             <th style={{ padding: '9px 6px', width: '115px', minWidth: '115px', textAlign: 'center', color: 'var(--color-text)', position: 'sticky', top: '42px', zIndex: 35, background: 'var(--color-surface-secondary)', borderBottom: '2px solid var(--color-border)', boxSizing: 'border-box', height: '40px' }}>EOBI</th>
@@ -1216,7 +1220,7 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
                     <tbody>
                         {filteredRows.length === 0 ? (
                             <tr>
-                                <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 16} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                                <td colSpan={3 + (ROLE_COLUMNS.length * 3) + 17} style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                                     {isLoading ? 'Loading costing matrix...' : 'No client locations found. Click "+ Add Client / Location Row" or "Import Excel Sheet" to begin.'}
                                 </td>
                             </tr>
@@ -1492,6 +1496,31 @@ export const FastCostingGridTab: React.FC<FastCostingGridTabProps> = ({ onBack }
                                                     border: '1px solid var(--color-border)',
                                                     background: 'var(--color-surface)',
                                                     color: '#60a5fa',
+                                                    fontWeight: 700
+                                                }}
+                                            />
+                                        </td>
+
+                                        {/* Col FA: Location Food Allowance in PKR */}
+                                        <td style={{ padding: '6px 4px' }}>
+                                            <input 
+                                                type="number"
+                                                step="any"
+                                                min="0"
+                                                value={row.food_allowance !== undefined && row.food_allowance !== null ? row.food_allowance : ''}
+                                                onChange={(e) => handleUpdateRow(row, 'food_allowance', e.target.value)}
+                                                placeholder="0"
+                                                title="Food Allowance per guard at this location in PKR (Manual amount, default: 0)"
+                                                style={{
+                                                    width: '100%',
+                                                    height: '34px',
+                                                    padding: '0 8px',
+                                                    fontSize: '12px',
+                                                    textAlign: 'right',
+                                                    borderRadius: '6px',
+                                                    border: Number(row.food_allowance) > 0 ? '1.5px solid #10b981' : '1px solid var(--color-border)',
+                                                    background: Number(row.food_allowance) > 0 ? 'rgba(16, 185, 129, 0.06)' : 'var(--color-surface)',
+                                                    color: Number(row.food_allowance) > 0 ? '#059669' : 'var(--color-text)',
                                                     fontWeight: 700
                                                 }}
                                             />

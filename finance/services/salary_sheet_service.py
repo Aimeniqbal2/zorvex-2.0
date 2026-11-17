@@ -101,10 +101,14 @@ def ensure_payroll_schema_synced():
             "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_paid boolean DEFAULT false;",
             "ALTER TABLE IF EXISTS hrm_employee ADD COLUMN IF NOT EXISTS doc_charges_paid_at timestamp with time zone;",
         ]
-        with connection.cursor() as cursor:
-            for sql in sql_statements:
-                try:
+        for sql in sql_statements:
+            try:
+                with connection.cursor() as cursor:
                     cursor.execute(sql)
+            except Exception:
+                try:
+                    if hasattr(connection, 'connection') and connection.connection:
+                        connection.connection.rollback()
                 except Exception:
                     pass
         _schema_synced = True

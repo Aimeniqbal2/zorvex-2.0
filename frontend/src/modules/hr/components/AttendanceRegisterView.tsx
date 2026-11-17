@@ -1125,15 +1125,12 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                     border-radius: 0 !important;
                 }
                 .att-reg-table thead {
-                    position: sticky !important;
-                    top: 0 !important;
-                    z-index: 50 !important;
+                    position: static !important;
                     overflow: visible !important;
                     background: #f8fafc !important;
                 }
                 .att-reg-table thead tr {
-                    position: sticky !important;
-                    top: 0 !important;
+                    position: static !important;
                     overflow: visible !important;
                     background: #f8fafc !important;
                 }
@@ -1177,18 +1174,21 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                     position: sticky !important;
                     left: 0 !important;
                     z-index: 25 !important;
+                    background-color: #ffffff !important;
                     background-clip: padding-box !important;
                 }
                 .att-reg-table tbody td.att-sticky-1 {
                     position: sticky !important;
                     left: 85px !important;
                     z-index: 25 !important;
+                    background-color: #ffffff !important;
                     background-clip: padding-box !important;
                 }
                 .att-reg-table tbody td.att-sticky-2 {
                     position: sticky !important;
                     left: 295px !important;
                     z-index: 25 !important;
+                    background-color: #ffffff !important;
                     background-clip: padding-box !important;
                     box-shadow: 4px 0 10px rgba(0, 0, 0, 0.18) !important;
                 }
@@ -1235,7 +1235,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                     className="att-reg-table"
                     style={{
                         width: 'max-content',
-                        minWidth: '100%',
+                        minWidth: `${Math.max(2550, (data?.days_header?.length || 31) * 58 + 435 + 270)}px`,
                         tableLayout: 'fixed',
                         borderCollapse: 'separate',
                         borderSpacing: 0,
@@ -1260,8 +1260,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                         <col style={{ width: '36px', minWidth: '36px', maxWidth: '36px' }} />
                         <col style={{ width: '36px', minWidth: '36px', maxWidth: '36px' }} />
                     </colgroup>
-                    <thead style={{ position: 'sticky', top: 0, zIndex: 50, background: '#f8fafc' }}>
-                        <tr style={{ position: 'sticky', top: 0, height: '42px', background: '#f8fafc' }}>
+                    <thead style={{ background: '#f8fafc' }}>
+                        <tr style={{ height: '42px', background: '#f8fafc' }}>
                             <th
                                 className="att-sticky-0"
                                 style={{

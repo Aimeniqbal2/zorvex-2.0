@@ -30,6 +30,7 @@ interface InlineLocationLine {
     phone: string;
     whatsapp: string;
     email: string;
+    food_allowance?: string | number;
 }
 
 export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen, onClose, onSaved }) => {
@@ -76,20 +77,20 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
 
     // Dynamic Operational Location Lines
     const [locations, setLocations] = useState<InlineLocationLine[]>([
-        { id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }
+        { id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '', food_allowance: '0' }
     ]);
 
     const handleAddLocationLine = () => {
         setLocations(prev => [
             ...prev,
-            { id: `loc-${Date.now()}-${Math.random()}`, name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }
+            { id: `loc-${Date.now()}-${Math.random()}`, name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '', food_allowance: '0' }
         ]);
     };
 
     const handleRemoveLocationLine = (id: string) => {
         setLocations(prev => {
             if (prev.length <= 1) {
-                return [{ id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '' }];
+                return [{ id: 'loc-1', name: '', address: '', contact_person: '', designation: '', phone: '', whatsapp: '', email: '', food_allowance: '0' }];
             }
             return prev.filter(l => l.id !== id);
         });
@@ -202,6 +203,7 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
                             phone: loc.phone.trim() || undefined,
                             whatsapp: loc.whatsapp.trim() || undefined,
                             email: loc.email.trim() || undefined,
+                            food_allowance: Math.max(0, Number(loc.food_allowance) || 0),
                             is_active: true
                         });
                     } catch (locErr) {
@@ -642,6 +644,7 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
                                     <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '11%' }}>Phone</th>
                                     <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '11%' }}>WhatsApp</th>
                                     <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, width: '11%' }}>Email</th>
+                                    <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, width: '11%' }}>Food Allow (PKR)</th>
                                     <th style={{ padding: '10px 8px', textAlign: 'center', width: '4%' }}></th>
                                 </tr>
                             </thead>
@@ -771,6 +774,27 @@ export const SecurityClientModal: React.FC<SecurityClientModalProps> = ({ isOpen
                                                     background: 'var(--color-background)',
                                                     color: 'var(--color-text)',
                                                     fontSize: '13px',
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: '8px 10px' }}>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                placeholder="0"
+                                                value={loc.food_allowance !== undefined ? loc.food_allowance : ''}
+                                                onChange={(e) => handleLocationChange(loc.id, 'food_allowance', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '7px 10px',
+                                                    borderRadius: '6px',
+                                                    border: Number(loc.food_allowance) > 0 ? '1.5px solid #10b981' : '1px solid var(--color-border)',
+                                                    background: 'var(--color-background)',
+                                                    color: Number(loc.food_allowance) > 0 ? '#059669' : 'var(--color-text)',
+                                                    fontSize: '13px',
+                                                    textAlign: 'right',
+                                                    fontWeight: 600,
                                                     outline: 'none'
                                                 }}
                                             />

@@ -1654,8 +1654,10 @@ class CostingGridView(APIView):
 
             ins_en = cloc.insurance_enabled if (cloc and hasattr(cloc, 'insurance_enabled')) else getattr(ver, 'insurance_enabled', default_ins_en)
             ins_pct = float(cloc.insurance_percentage if (cloc and cloc.insurance_percentage is not None) else (ver.insurance_percentage if (ver and ver.insurance_percentage is not None) else default_ins_pct))
+            food_all = float(cloc.food_allowance if (cloc and getattr(cloc, 'food_allowance', None) is not None) else 0.0)
 
             return {
+                "food_allowance": food_all,
                 "eobi_enabled": bool(eobi_en),
                 "eobi_rate": eobi_rt,
                 "sessi_enabled": bool(sessi_en),
@@ -2087,6 +2089,7 @@ class CostingGridBatchSyncView(APIView):
                     sales_tax_override = _parse_opt_dec(row.get('sales_tax_override'))
                     withholding_tax_override = _parse_opt_dec(row.get('withholding_tax_override'))
                     ot_rate_val = _parse_dec(row.get('ot_rate'), 0)
+                    food_allowance_val = _parse_dec(row.get('food_allowance'), 0)
 
                     eobi_en = bool(row.get('eobi_enabled', False))
                     eobi_rt = _parse_dec(row.get('eobi_rate'), 1500)
@@ -2118,6 +2121,7 @@ class CostingGridBatchSyncView(APIView):
                         calculated_sessi = Decimal('0.00')
 
                     if location:
+                        location.food_allowance = food_allowance_val
                         location.eobi_enabled = eobi_en
                         location.eobi_rate = eobi_rt
                         location.sessi_enabled = sessi_en
@@ -2128,9 +2132,9 @@ class CostingGridBatchSyncView(APIView):
                         location.insurance_enabled = ins_en
                         location.insurance_percentage = ins_pct
                         location.save(update_fields=[
-                            'eobi_enabled', 'eobi_rate', 'sessi_enabled', 'sessi_minimum_wage',
-                            'sessi_percentage', 'admin_charges_enabled', 'admin_charges_percentage',
-                            'insurance_enabled', 'insurance_percentage'
+                            'food_allowance', 'eobi_enabled', 'eobi_rate', 'sessi_enabled',
+                            'sessi_minimum_wage', 'sessi_percentage', 'admin_charges_enabled',
+                            'admin_charges_percentage', 'insurance_enabled', 'insurance_percentage'
                         ])
 
                     st_basis = 'MANUAL' if sales_tax_override is not None else row.get('sales_tax_basis', 'TOTAL_SALE')

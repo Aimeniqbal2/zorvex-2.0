@@ -991,11 +991,14 @@ export const MonthlyMusterSheetTab: React.FC<MonthlyMusterSheetTabProps> = ({ on
 
     return (
         <div style={{ 
-            minHeight: '100vh', 
+            minHeight: '100%', 
+            height: '100%',
+            overflowY: 'auto',
             background: 'var(--color-bg, #f8fafc)', 
             color: 'var(--color-text, #0f172a)',
             padding: '24px 32px',
-            fontFamily: 'inherit'
+            fontFamily: 'inherit',
+            boxSizing: 'border-box'
         }}>
             
             {musterMode === 'TEMPORARY' ? (

@@ -1133,6 +1133,7 @@ export interface CostingGridRow {
     insurance_enabled?: boolean;
     insurance_percentage?: number | string | null;
     ot_rate?: number | string | null;
+    food_allowance?: number | string | null;
     sales_tax_basis?: string;
     withholding_tax_basis?: string;
 

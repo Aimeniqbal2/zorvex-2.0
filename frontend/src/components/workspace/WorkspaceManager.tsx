@@ -119,22 +119,20 @@ export const WorkspaceManager: React.FC = () => {
                 {/* Tab Layers */}
                 {tabs.map(tab => {
                     const isFullscreenGrid = tab.moduleCode === 'attendance_registry' 
-                        || tab.moduleCode === 'attendance_register' 
-                        || tab.moduleCode === 'fast_costing' 
-                        || tab.moduleCode === 'monthly_muster'
-                        || tab.moduleCode === 'guards_staff'
-                        || tab.moduleCode === 'hr';
+                        || tab.moduleCode === 'attendance_register'
+                        || tab.moduleCode === 'fast_costing';
+                    const isMusterTab = tab.moduleCode === 'monthly_muster';
                     return (
                         <div 
                             key={tab.id} 
                             style={{ 
-                                display: activeTabId === tab.id ? (isFullscreenGrid ? 'flex' : 'block') : 'none',
+                                display: activeTabId === tab.id ? 'flex' : 'none',
                                 flexDirection: 'column',
                                 height: '100%',
                                 width: '100%',
                                 minHeight: 0,
-                                overflowY: isFullscreenGrid ? 'hidden' : 'auto',
-                                overflowX: isFullscreenGrid ? 'hidden' : 'auto'
+                                overflowY: isMusterTab ? 'auto' : 'hidden',
+                                overflowX: isMusterTab ? 'auto' : 'hidden'
                             }}
                         >
                         <Suspense fallback={TabLoadingFallback}>
