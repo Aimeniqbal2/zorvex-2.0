@@ -10,6 +10,13 @@ body, #root, .app-layout {
   overflow: hidden;
 }
 
+table.att-reg-table, table.fast-costing-table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  overflow: visible !important;
+  border-radius: 0 !important;
+}
+
 body {
   font-family: 'Inter', sans-serif;
   background-color: var(--color-background);

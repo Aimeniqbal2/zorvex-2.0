@@ -606,13 +606,16 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
             style={{
                 display: 'flex',
                 flexDirection: 'column',
-                height: isStandalone ? '100%' : 'calc(100vh - 220px)',
-                minHeight: '520px',
+                height: '100%',
                 maxHeight: '100%',
+                flex: 1,
+                minHeight: 0,
+                width: '100%',
                 padding: isStandalone ? '16px 20px' : '12px 16px',
                 background: '#f8fafc',
                 boxSizing: 'border-box',
                 overflow: 'hidden',
+                position: 'relative',
             }}
         >
             {/* Header & Actions */}
@@ -1114,6 +1117,81 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
 
             {/* Register Matrix Table with Sticky Header & Freeze Panes */}
             <style>{`
+                /* Fast Costing Grid & Monthly Muster freeze pane enforcement against globals.css */
+                .att-reg-table {
+                    border-collapse: separate !important;
+                    border-spacing: 0 !important;
+                    overflow: visible !important;
+                    border-radius: 0 !important;
+                }
+                .att-reg-table thead {
+                    position: sticky !important;
+                    top: 0 !important;
+                    z-index: 50 !important;
+                    overflow: visible !important;
+                    background: #f8fafc !important;
+                }
+                .att-reg-table thead tr {
+                    position: sticky !important;
+                    top: 0 !important;
+                    overflow: visible !important;
+                    background: #f8fafc !important;
+                }
+                .att-reg-table thead th {
+                    position: sticky !important;
+                    top: 0 !important;
+                    overflow: visible !important;
+                    background-clip: padding-box !important;
+                    box-sizing: border-box !important;
+                }
+                /* Corner frozen columns (Sticky Top AND Sticky Left) */
+                .att-reg-table thead th.att-sticky-0 {
+                    position: sticky !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    z-index: 70 !important;
+                    background: #f1f5f9 !important;
+                }
+                .att-reg-table thead th.att-sticky-1 {
+                    position: sticky !important;
+                    top: 0 !important;
+                    left: 85px !important;
+                    z-index: 70 !important;
+                    background: #f1f5f9 !important;
+                }
+                .att-reg-table thead th.att-sticky-2 {
+                    position: sticky !important;
+                    top: 0 !important;
+                    left: 295px !important;
+                    z-index: 70 !important;
+                    background: #f1f5f9 !important;
+                    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.18) !important;
+                }
+                .att-reg-table tbody,
+                .att-reg-table tbody tr,
+                .att-reg-table tbody td {
+                    overflow: visible !important;
+                }
+                /* Left frozen columns in table body (Sticky Left only) */
+                .att-reg-table tbody td.att-sticky-0 {
+                    position: sticky !important;
+                    left: 0 !important;
+                    z-index: 25 !important;
+                    background-clip: padding-box !important;
+                }
+                .att-reg-table tbody td.att-sticky-1 {
+                    position: sticky !important;
+                    left: 85px !important;
+                    z-index: 25 !important;
+                    background-clip: padding-box !important;
+                }
+                .att-reg-table tbody td.att-sticky-2 {
+                    position: sticky !important;
+                    left: 295px !important;
+                    z-index: 25 !important;
+                    background-clip: padding-box !important;
+                    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.18) !important;
+                }
                 .att-reg-scroll-container::-webkit-scrollbar {
                     height: 10px;
                     width: 10px;
@@ -1142,6 +1220,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                 style={{
                     flex: 1,
                     minHeight: 0,
+                    height: '100%',
                     width: '100%',
                     position: 'relative',
                     overflow: 'auto',
@@ -1162,6 +1241,8 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                         borderSpacing: 0,
                         fontSize: '12px',
                         background: '#ffffff',
+                        overflow: 'visible',
+                        borderRadius: 0,
                     }}
                 >
                     <colgroup>
@@ -1179,15 +1260,15 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                         <col style={{ width: '36px', minWidth: '36px', maxWidth: '36px' }} />
                         <col style={{ width: '36px', minWidth: '36px', maxWidth: '36px' }} />
                     </colgroup>
-                    <thead>
-                        <tr style={{ height: '42px', background: '#f8fafc' }}>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 50, background: '#f8fafc' }}>
+                        <tr style={{ position: 'sticky', top: 0, height: '42px', background: '#f8fafc' }}>
                             <th
                                 className="att-sticky-0"
                                 style={{
                                     position: 'sticky',
                                     top: 0,
                                     left: 0,
-                                    zIndex: 60,
+                                    zIndex: 70,
                                     background: '#f1f5f9',
                                     padding: '9px 10px',
                                     textAlign: 'left',
@@ -1211,7 +1292,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     position: 'sticky',
                                     top: 0,
                                     left: '85px',
-                                    zIndex: 60,
+                                    zIndex: 70,
                                     background: '#f1f5f9',
                                     padding: '9px 10px',
                                     textAlign: 'left',
@@ -1235,7 +1316,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     position: 'sticky',
                                     top: 0,
                                     left: '295px',
-                                    zIndex: 60,
+                                    zIndex: 70,
                                     background: '#f1f5f9',
                                     padding: '9px 10px',
                                     textAlign: 'left',
@@ -1260,7 +1341,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                     style={{
                                         position: 'sticky',
                                         top: 0,
-                                        zIndex: 35,
+                                        zIndex: 50,
                                         padding: '6px 2px',
                                         textAlign: 'center',
                                         width: '58px',
@@ -1285,7 +1366,7 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                                 style={{
                                     position: 'sticky',
                                     top: 0,
-                                    zIndex: 35,
+                                    zIndex: 50,
                                     padding: '9px 8px',
                                     textAlign: 'center',
                                     width: '52px',
@@ -1304,22 +1385,22 @@ export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
                             >
                                 Tots
                             </th>
-                            <th style={{ position: 'sticky', top: 0, zIndex: 35, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#059669', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                            <th style={{ position: 'sticky', top: 0, zIndex: 50, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#059669', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                 P
                             </th>
-                            <th style={{ position: 'sticky', top: 0, zIndex: 35, padding: '9px 6px', textAlign: 'center', width: '38px', minWidth: '38px', maxWidth: '38px', height: '42px', boxSizing: 'border-box', color: '#0284c7', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                            <th style={{ position: 'sticky', top: 0, zIndex: 50, padding: '9px 6px', textAlign: 'center', width: '38px', minWidth: '38px', maxWidth: '38px', height: '42px', boxSizing: 'border-box', color: '#0284c7', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                 OT
                             </th>
-                            <th style={{ position: 'sticky', top: 0, zIndex: 35, padding: '9px 6px', textAlign: 'center', width: '38px', minWidth: '38px', maxWidth: '38px', height: '42px', boxSizing: 'border-box', color: '#7e22ce', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                            <th style={{ position: 'sticky', top: 0, zIndex: 50, padding: '9px 6px', textAlign: 'center', width: '38px', minWidth: '38px', maxWidth: '38px', height: '42px', boxSizing: 'border-box', color: '#7e22ce', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                 WP
                             </th>
-                            <th style={{ position: 'sticky', top: 0, zIndex: 35, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#475569', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                            <th style={{ position: 'sticky', top: 0, zIndex: 50, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#475569', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                 W
                             </th>
-                            <th style={{ position: 'sticky', top: 0, zIndex: 35, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#dc2626', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                            <th style={{ position: 'sticky', top: 0, zIndex: 50, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#dc2626', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                 A
                             </th>
-                            <th style={{ position: 'sticky', top: 0, zIndex: 35, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#d97706', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                            <th style={{ position: 'sticky', top: 0, zIndex: 50, padding: '9px 6px', textAlign: 'center', width: '36px', minWidth: '36px', maxWidth: '36px', height: '42px', boxSizing: 'border-box', color: '#d97706', fontWeight: 700, background: '#f8fafc', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                 L
                             </th>
                         </tr>

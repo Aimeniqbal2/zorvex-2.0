@@ -197,7 +197,7 @@ export const HRModule: React.FC<HRModuleProps> = ({ isSecurity: propIsSecurity }
                 <div className="module-main">
                     <div 
                         className="module-content"
-                        style={activeTab === 'ATTENDANCE_REGISTER' ? { padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' } : undefined}
+                        style={activeTab === 'ATTENDANCE_REGISTER' ? { padding: 0, overflow: 'hidden', height: '100%', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' } : undefined}
                     >
                         {activeTab === 'ATTENDANCE_REGISTER' ? (
                             renderContent()

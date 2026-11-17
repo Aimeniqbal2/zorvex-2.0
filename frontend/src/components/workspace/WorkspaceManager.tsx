@@ -118,7 +118,12 @@ export const WorkspaceManager: React.FC = () => {
 
                 {/* Tab Layers */}
                 {tabs.map(tab => {
-                    const isFullscreenGrid = tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing' || tab.moduleCode === 'monthly_muster';
+                    const isFullscreenGrid = tab.moduleCode === 'attendance_registry' 
+                        || tab.moduleCode === 'attendance_register' 
+                        || tab.moduleCode === 'fast_costing' 
+                        || tab.moduleCode === 'monthly_muster'
+                        || tab.moduleCode === 'guards_staff'
+                        || tab.moduleCode === 'hr';
                     return (
                         <div 
                             key={tab.id} 
