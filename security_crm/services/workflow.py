@@ -812,13 +812,16 @@ class SecurityProposalWorkflowService:
         active_ver = proposal.approved_version or proposal.versions.filter(company=proposal.company).order_by('-version_number').first()
 
         # 1. Collect all distinct active ClientLocations (strictly excluding deleted/inactive)
-        client_locations = list(proposal.customer.security_locations.filter(
-            company=proposal.company, is_active=True, is_deleted=False
-        ))
-        if active_ver:
-            for line in active_ver.service_lines.filter(is_deleted=False).select_related('location'):
-                if line.location and not line.location.is_deleted and line.location.is_active and line.location not in client_locations:
-                    client_locations.append(line.location)
+        if proposal.location and not proposal.location.is_deleted:
+            client_locations = [proposal.location]
+        else:
+            client_locations = list(proposal.customer.security_locations.filter(
+                company=proposal.company, is_active=True, is_deleted=False
+            ))
+            if active_ver:
+                for line in active_ver.service_lines.filter(is_deleted=False).select_related('location'):
+                    if line.location and not line.location.is_deleted and line.location.is_active and line.location not in client_locations:
+                        client_locations.append(line.location)
 
         # 2. Find or create OperationalSites for each active ClientLocation
         operational_sites = []
@@ -893,6 +896,7 @@ class SecurityProposalWorkflowService:
         # 4. Sync Location Rates and SecurityPosts from ProposalServiceLines
         if active_ver and service_contract:
             active_site_desig_pairs = set()
+            sites_to_recalc = set()
 
             for line in active_ver.service_lines.filter(is_deleted=False, quantity__gt=0):
                 st_name = line.service_type.name if line.service_type else 'Security Guard'
@@ -1006,10 +1010,9 @@ class SecurityProposalWorkflowService:
                         else:
                             dep_qs.update(location_monthly_salary=sal)
 
-                    # Dynamic recalculation for all un-frozen DailyDutyPay records at this site
+                    # Mark site for single batch recalculation after all lines/posts are synced
                     if target_site:
-                        from operations.services.monthly_muster_service import MonthlyMusterService
-                        MonthlyMusterService.recalculate_unfrozen_duties_for_site(target_site)
+                        sites_to_recalc.add(target_site)
 
                     # Also sync to Operations SiteStaffingRequirement for coverage views
                     try:
@@ -1071,6 +1074,14 @@ class SecurityProposalWorkflowService:
                         ssr.save(update_fields=['is_active', 'is_deleted', 'required_headcount'])
             except Exception as ssr_clean_err:
                 logger.warning(f"Error deactivating removed SiteStaffingRequirement: {ssr_clean_err}")
+
+            # Recalculate unfrozen duties ONCE per distinct site in bulk
+            for st_recalc in sites_to_recalc:
+                try:
+                    from operations.services.monthly_muster_service import MonthlyMusterService
+                    MonthlyMusterService.recalculate_unfrozen_duties_for_site(st_recalc)
+                except Exception as recalc_err:
+                    logger.warning(f"Error recalculating unfrozen duties for site {st_recalc.id}: {recalc_err}")
 
         # Mark proposal ACTIVE and ready for operations
         if proposal.status != SecurityProposalStatus.ACTIVE or not proposal.is_handoff_ready:

@@ -83,10 +83,13 @@ class MonthlyMusterService:
         """
         Dynamically recalculates all un-frozen DailyDutyPay records for a site,
         updating rates, amounts, and audit notes from the latest CRM ProposalServiceLine.
+        Optimized with rate caching, active-window filtering, and bulk updates to prevent timeouts.
         """
         if not site:
             return 0
         import calendar
+        import datetime
+        from django.utils import timezone
         from operations.models import DailyDutyPay, AttendanceStatus, DutyType, Deployment
 
         qs = DailyDutyPay.objects.filter(
@@ -97,26 +100,48 @@ class MonthlyMusterService:
 
         if year and month:
             qs = qs.filter(duty_date__year=year, duty_date__month=month)
+        else:
+            now_dt = timezone.now().date()
+            cutoff = (now_dt.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+            qs = qs.filter(duty_date__gte=cutoff)
 
-        updated_count = 0
         deps = list(Deployment.objects.filter(site=site, is_deleted=False).select_related('designation', 'post'))
         deps_map = {str(d.employee_id): d for d in deps}
+
+        daily_rate_cache = {}
+        dozing_rate_cache = {}
+        duties_to_update = []
 
         for ddp in qs:
             target_date = ddp.duty_date
             emp = ddp.employee
+            if not emp:
+                continue
             days_in_month = calendar.monthrange(target_date.year, target_date.month)[1]
             guard_dep = deps_map.get(str(emp.id))
             effective_desig = guard_dep.designation if guard_dep and guard_dep.designation else emp.designation
+            desig_id = str(effective_desig.id) if effective_desig else 'none'
             fallback_sal = (guard_dep.location_monthly_salary if guard_dep and guard_dep.location_monthly_salary else (guard_dep.post.monthly_pay_rate if guard_dep and guard_dep.post and guard_dep.post.monthly_pay_rate else None))
+            fallback_key = str(fallback_sal) if fallback_sal is not None else 'none'
 
-            daily_rate = MonthlyMusterService.get_site_guard_daily_rate(
-                site=site,
-                desig=effective_desig,
-                days_in_month=days_in_month,
-                fallback_monthly_salary=fallback_sal
-            )
-            dozing_rate = MonthlyMusterService.get_site_dozing_overtime_rate(site=site, desig=effective_desig)
+            rate_key = (desig_id, days_in_month, fallback_key)
+            if rate_key in daily_rate_cache:
+                daily_rate = daily_rate_cache[rate_key]
+            else:
+                daily_rate = MonthlyMusterService.get_site_guard_daily_rate(
+                    site=site,
+                    desig=effective_desig,
+                    days_in_month=days_in_month,
+                    fallback_monthly_salary=fallback_sal
+                )
+                daily_rate_cache[rate_key] = daily_rate
+
+            dozing_key = desig_id
+            if dozing_key in dozing_rate_cache:
+                dozing_rate = dozing_rate_cache[dozing_key]
+            else:
+                dozing_rate = MonthlyMusterService.get_site_dozing_overtime_rate(site=site, desig=effective_desig)
+                dozing_rate_cache[dozing_key] = dozing_rate
 
             # Update according to attendance status and duty type
             if ddp.attendance_status == AttendanceStatus.OVERTIME_DOZING:
@@ -152,10 +177,12 @@ class MonthlyMusterService:
                 ddp.daily_payable_rate = daily_rate
                 ddp.payable_amount = (daily_rate * (pct / Decimal('100.00'))).quantize(Decimal('0.01'))
 
-            ddp.save(update_fields=['daily_payable_rate', 'payable_amount', 'notes', 'updated_at'])
-            updated_count += 1
+            duties_to_update.append(ddp)
 
-        return updated_count
+        if duties_to_update:
+            DailyDutyPay.objects.bulk_update(duties_to_update, ['daily_payable_rate', 'payable_amount', 'notes'], batch_size=250)
+
+        return len(duties_to_update)
 
     @staticmethod
     def get_site_overtime_rate(site, desig=None, days_in_month=30, prefetched_lines=None, prefetched_posts=None, fallback_monthly_salary=None):
