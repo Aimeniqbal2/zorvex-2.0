@@ -62,27 +62,36 @@ def get_purchasing_dashboard_kpis(company_id, start_date=None, end_date=None):
     posted_bills_count = inv_qs.count()
     posted_bills_value = inv_qs.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
 
-    # Calculate net outstanding and overdue payables from invoices
+    # Calculate net outstanding and overdue payables from invoices via bulk queries
     total_outstanding_payable = Decimal('0.00')
     total_overdue_payable = Decimal('0.00')
 
-    # Get payments and credit allocations
-    for inv in inv_qs.prefetch_related('payment_allocations', 'credit_notes'):
-        orig_amount = inv.total_amount or Decimal('0.00')
-        paid_amount = inv.payment_allocations.filter(
+    inv_records = list(inv_qs.values('id', 'total_amount', 'due_date'))
+    if inv_records:
+        inv_ids = [r['id'] for r in inv_records]
+        alloc_qs = VendorPaymentAllocation.objects.filter(
+            invoice_id__in=inv_ids,
             payment__status='POSTED'
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        ).values('invoice_id').annotate(total_paid=Sum('amount'))
+        paid_by_inv = {a['invoice_id']: (a['total_paid'] or Decimal('0.00')) for a in alloc_qs}
 
-        return_credit = inv.credit_notes.filter(
+        cred_qs = VendorCreditNote.objects.filter(
+            invoice_id__in=inv_ids,
             status='POSTED'
-        ).aggregate(total=Sum('allocated_amount'))['total'] or Decimal('0.00')
+        ).values('invoice_id').annotate(total_cred=Sum('allocated_amount'))
+        credits_by_inv = {c['invoice_id']: (c['total_cred'] or Decimal('0.00')) for c in cred_qs}
 
-        net_bill = max(Decimal('0.00'), orig_amount - return_credit)
-        outstanding = max(Decimal('0.00'), net_bill - paid_amount)
+        for inv in inv_records:
+            orig_amount = inv['total_amount'] or Decimal('0.00')
+            paid_amount = paid_by_inv.get(inv['id'], Decimal('0.00'))
+            return_credit = credits_by_inv.get(inv['id'], Decimal('0.00'))
 
-        total_outstanding_payable += outstanding
-        if inv.due_date and inv.due_date < today and outstanding > Decimal('0.00'):
-            total_overdue_payable += outstanding
+            net_bill = max(Decimal('0.00'), orig_amount - return_credit)
+            outstanding = max(Decimal('0.00'), net_bill - paid_amount)
+
+            total_outstanding_payable += outstanding
+            if inv['due_date'] and inv['due_date'] < today and outstanding > Decimal('0.00'):
+                total_overdue_payable += outstanding
 
     # 3. Payments This Period
     pay_qs = VendorPayment.objects.filter(

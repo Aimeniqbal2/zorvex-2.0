@@ -402,17 +402,31 @@ class VendorSerializer(serializers.ModelSerializer):
         ]
 
     def get_items_count(self, obj) -> int:
+        if hasattr(obj, 'annotated_items_count'):
+            return obj.annotated_items_count
         return obj.vendor_items.filter(is_active=True).count()
 
     def get_documents_count(self, obj) -> int:
+        if hasattr(obj, 'annotated_documents_count'):
+            return obj.annotated_documents_count
         return obj.documents.count()
 
     def get_contacts_count(self, obj) -> int:
+        if hasattr(obj, 'annotated_contacts_count'):
+            return obj.annotated_contacts_count
         if obj.crm_entity_id:
             return obj.crm_entity.contacts.count()
         return 0
 
     def _get_payable_summary(self, obj):
+        # In list queries or when skip_financial_summary is requested, avoid executing the expensive N+1 loop
+        if self.context.get('skip_financial_summary', False):
+            return {
+                'total_purchases': '0.00',
+                'outstanding_payable': '0.00',
+                'total_paid': '0.00',
+                'overdue_payable': '0.00'
+            }
         if not hasattr(obj, '_cached_payable_sum'):
             from .services.payment_service import get_vendor_payable_summary
             obj._cached_payable_sum = get_vendor_payable_summary(obj.id, obj.company_id)

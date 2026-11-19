@@ -3,6 +3,13 @@ import {
     getSecurityInventoryOverview,
     getSecurityStores,
     createSecurityStore,
+    updateSecurityStore,
+    deleteSecurityStore,
+    updateSecurityItem,
+    deleteSecurityItem,
+    deleteEquipmentIssue,
+    updateEquipmentIssue,
+    deleteEquipmentIncident,
     getSecurityStockAvailability,
     issueSecurityEquipment,
     returnSecurityEquipment,
@@ -173,22 +180,43 @@ export const SecurityInventoryWorkspace: React.FC = () => {
         notes: ''
     });
 
-    // Fetch initial datasets
-    const loadOverviewAndData = useCallback(async () => {
-        setError(null);
-        setLoading(true);
+    // Debounce search query (350ms delay) so typing doesn't spam backend requests
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(searchQuery), 350);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // Modals & States for Edit Item & Edit Store & Edit Issue
+    const [isEditItemModalOpen, setIsEditItemModalOpen] = useState(false);
+    const [selectedItemForEdit, setSelectedItemForEdit] = useState<SecurityStockAvailabilityItem | null>(null);
+    const [editItemForm, setEditItemForm] = useState({
+        name: '',
+        item_code: '',
+        security_category: 'UNIFORM',
+        cost_price: 0,
+        unit_of_measure: 'pcs',
+        is_controlled: false,
+        track_serial_number: false,
+        notes: ''
+    });
+
+    const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
+
+    const [isEditIssueModalOpen, setIsEditIssueModalOpen] = useState(false);
+    const [selectedIssueForEdit, setSelectedIssueForEdit] = useState<EquipmentIssue | null>(null);
+    const [editIssueForm, setEditIssueForm] = useState({
+        notes: '',
+        condition: 'GOOD',
+        expected_return_date: ''
+    });
+
+    // 1. Fetch static/reference datasets (stores, warehouses, sites, items, personnel)
+    const loadReferenceData = useCallback(async () => {
         try {
-            const [ov, storeRes, stockRes, issueRes, incRes, siteRes, profRes, personnelRes] = await Promise.all([
+            const [ov, storeRes, siteRes, profRes, personnelRes] = await Promise.all([
                 getSecurityInventoryOverview().catch(() => null),
                 getSecurityStores().catch(() => ({ stores: [], all_warehouses: [] })),
-                getSecurityStockAvailability({
-                    search: searchQuery || undefined,
-                    warehouse_id: selectedStore || undefined,
-                    category: selectedCategory || undefined,
-                    is_controlled: isControlledFilter || undefined
-                }).catch(() => []),
-                getEquipmentIssues({ search: searchQuery || undefined, status: statusFilter || undefined }).catch(() => ({ results: [] })),
-                getEquipmentIncidents().catch(() => []),
                 getOperationalSites({ is_active: true, page: 1 }).catch(() => ({ results: [] })),
                 getSecurityItemProfiles().catch(() => ({ items: [] })),
                 getActivePersonnel().catch(() => [])
@@ -197,9 +225,6 @@ export const SecurityInventoryWorkspace: React.FC = () => {
             setOverview(ov);
             setStores(storeRes?.stores || []);
             setAllWarehouses(storeRes?.all_warehouses || []);
-            setStockList(stockRes || []);
-            setIssues(issueRes?.results || []);
-            setIncidents(incRes || []);
             setSites(siteRes?.results || []);
             setPersonnel(personnelRes || []);
             setAvailableItems((profRes?.items || []).map((item: any) => ({
@@ -209,16 +234,84 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 is_serialized: item.track_serial_number ?? item.is_serialized ?? false,
             })));
         } catch (err: any) {
-            console.error('Failed to load security inventory data', err);
-            setError(err.message || 'Failed to load security inventory.');
+            console.error('Failed to load reference data', err);
+        }
+    }, []);
+
+    // 2. Fetch stock availability (debounced and fast)
+    const loadStockData = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const stockRes = await getSecurityStockAvailability({
+                search: debouncedSearch || undefined,
+                warehouse_id: selectedStore || undefined,
+                category: selectedCategory || undefined,
+                is_controlled: isControlledFilter || undefined
+            });
+            setStockList(stockRes || []);
+        } catch (err: any) {
+            console.error('Failed to load stock data', err);
+            setError(err.message || 'Failed to load stock availability.');
         } finally {
             setLoading(false);
         }
-    }, [searchQuery, selectedStore, selectedCategory, isControlledFilter, statusFilter]);
+    }, [debouncedSearch, selectedStore, selectedCategory, isControlledFilter]);
 
+    // 3. Fetch equipment issues / custody
+    const loadCustodyData = useCallback(async () => {
+        try {
+            const issueRes = await getEquipmentIssues({
+                search: debouncedSearch || undefined,
+                status: statusFilter || undefined
+            });
+            setIssues(issueRes?.results || []);
+        } catch (err: any) {
+            console.error('Failed to load custody data', err);
+        }
+    }, [debouncedSearch, statusFilter]);
+
+    // 4. Fetch incidents
+    const loadIncidentsData = useCallback(async () => {
+        try {
+            const incRes = await getEquipmentIncidents();
+            setIncidents(incRes || []);
+        } catch (err: any) {
+            console.error('Failed to load incidents', err);
+        }
+    }, []);
+
+    // Load initial reference data once on mount
     useEffect(() => {
-        loadOverviewAndData();
-    }, [loadOverviewAndData]);
+        loadReferenceData();
+    }, [loadReferenceData]);
+
+    // Load stock on filters/search
+    useEffect(() => {
+        loadStockData();
+    }, [loadStockData]);
+
+    // Load custody on filters/search
+    useEffect(() => {
+        loadCustodyData();
+    }, [loadCustodyData]);
+
+    // Load incidents when active tab changes to transfers_incidents
+    useEffect(() => {
+        if (activeTab === 'transfers_incidents') {
+            loadIncidentsData();
+        }
+    }, [activeTab, loadIncidentsData]);
+
+    // Convenience function to refresh everything
+    const loadOverviewAndData = useCallback(async () => {
+        await Promise.all([
+            loadReferenceData(),
+            loadStockData(),
+            loadCustodyData(),
+            loadIncidentsData()
+        ]);
+    }, [loadReferenceData, loadStockData, loadCustodyData, loadIncidentsData]);
 
     // Handle serial lookup
     const handleLookupSerial = async (serialToSearch?: string) => {
@@ -449,11 +542,61 @@ export const SecurityInventoryWorkspace: React.FC = () => {
         }
     };
 
+    // Store edit/delete handlers
+    const handleOpenAddStore = () => {
+        setEditingStoreId(null);
+        setStoreForm({
+            warehouse_id: '',
+            name: '',
+            code: '',
+            store_type: 'MAIN_STORE',
+            site_id: '',
+            is_armory: false,
+            requires_strong_auth: false,
+            notes: ''
+        });
+        setIsConfigureStoreModalOpen(true);
+    };
+
+    const handleEditStore = (store: SecurityStoreProfile) => {
+        setEditingStoreId(store.id);
+        setStoreForm({
+            warehouse_id: store.warehouse,
+            name: store.warehouse_name,
+            code: store.warehouse_code,
+            store_type: store.store_type || 'MAIN_STORE',
+            site_id: store.site || '',
+            is_armory: store.is_armory || false,
+            requires_strong_auth: store.requires_strong_auth || false,
+            notes: store.notes || ''
+        });
+        setIsConfigureStoreModalOpen(true);
+    };
+
+    const handleDeleteStore = async (store: SecurityStoreProfile) => {
+        if (!window.confirm(`Are you sure you want to delete store "${store.warehouse_name}" (${store.warehouse_code})?`)) return;
+        try {
+            await deleteSecurityStore(store.id);
+            useToastStore.getState().success(`Store "${store.warehouse_name}" deleted.`);
+            await loadReferenceData();
+            await loadStockData();
+        } catch (err: any) {
+            alert(err?.response?.data?.error || err.message || 'Failed to delete store.');
+        }
+    };
+
     const handleStoreConfigureSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            await createSecurityStore(storeForm);
+            if (editingStoreId) {
+                await updateSecurityStore({ ...storeForm, store_id: editingStoreId });
+                useToastStore.getState().success('Store / Armory updated successfully.');
+            } else {
+                await createSecurityStore(storeForm);
+                useToastStore.getState().success('Store / Armory configured successfully.');
+            }
             setIsConfigureStoreModalOpen(false);
+            setEditingStoreId(null);
             setStoreForm({
                 warehouse_id: '',
                 name: '',
@@ -464,10 +607,104 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 requires_strong_auth: false,
                 notes: ''
             });
-            useToastStore.getState().success('Store / Armory configured successfully.');
-            await loadOverviewAndData();
+            await loadReferenceData();
+            await loadStockData();
         } catch (err: any) {
             alert(err?.response?.data?.error || err.message || 'Failed to configure store.');
+        }
+    };
+
+    // Item edit/delete handlers
+    const handleOpenEditItem = (item: SecurityStockAvailabilityItem) => {
+        setSelectedItemForEdit(item);
+        setEditItemForm({
+            name: item.item_name,
+            item_code: item.item_code,
+            security_category: item.security_category || 'UNIFORM',
+            cost_price: Number(item.cost_price) || 0,
+            unit_of_measure: item.unit_of_measure || 'pcs',
+            is_controlled: Boolean(item.is_controlled),
+            track_serial_number: Boolean(item.track_serial_number || item.is_serialized),
+            notes: ''
+        });
+        setIsEditItemModalOpen(true);
+    };
+
+    const handleEditItemSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedItemForEdit) return;
+        try {
+            await updateSecurityItem(selectedItemForEdit.item_id, editItemForm);
+            useToastStore.getState().success(`Item "${editItemForm.name}" updated successfully.`);
+            setIsEditItemModalOpen(false);
+            setSelectedItemForEdit(null);
+            await loadStockData();
+            await loadReferenceData();
+        } catch (err: any) {
+            alert(err?.response?.data?.error || err.message || 'Failed to update item.');
+        }
+    };
+
+    const handleDeleteItem = async (item: SecurityStockAvailabilityItem) => {
+        if (!window.confirm(`Are you sure you want to delete item "${item.item_name}" (${item.item_code})?`)) return;
+        try {
+            await deleteSecurityItem(item.item_id);
+            useToastStore.getState().success(`Item "${item.item_name}" deleted.`);
+            await loadStockData();
+            await loadReferenceData();
+        } catch (err: any) {
+            alert(err?.response?.data?.error || err.message || 'Failed to delete item.');
+        }
+    };
+
+    // Custody issue edit/delete handlers
+    const handleDeleteIssue = async (issue: EquipmentIssue) => {
+        if (!window.confirm(`Are you sure you want to cancel / delete this issue record?\n\nItem: ${issue.item_name}\nQuantity: ${issue.quantity}\n\nThe issued quantity will be returned to the store balance.`)) return;
+        try {
+            await deleteEquipmentIssue(issue.id);
+            useToastStore.getState().success('Issue cancelled and stock restored to store.');
+            await loadCustodyData();
+            await loadStockData();
+            await loadReferenceData();
+        } catch (err: any) {
+            alert(err?.response?.data?.error || err.message || 'Failed to cancel issue.');
+        }
+    };
+
+    const handleOpenEditIssue = (issue: EquipmentIssue) => {
+        setSelectedIssueForEdit(issue);
+        setEditIssueForm({
+            notes: issue.notes || '',
+            condition: issue.issue_condition || 'GOOD',
+            expected_return_date: issue.expected_return_date ? issue.expected_return_date.split('T')[0] : ''
+        });
+        setIsEditIssueModalOpen(true);
+    };
+
+    const handleEditIssueSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedIssueForEdit) return;
+        try {
+            await updateEquipmentIssue(selectedIssueForEdit.id, editIssueForm);
+            useToastStore.getState().success('Issue details updated.');
+            setIsEditIssueModalOpen(false);
+            setSelectedIssueForEdit(null);
+            await loadCustodyData();
+        } catch (err: any) {
+            alert(err?.response?.data?.error || err.message || 'Failed to update issue.');
+        }
+    };
+
+    // Incident delete handler
+    const handleDeleteIncident = async (inc: EquipmentIncident) => {
+        if (!window.confirm(`Are you sure you want to delete incident "${inc.incident_number}"?`)) return;
+        try {
+            await deleteEquipmentIncident(inc.id);
+            useToastStore.getState().success('Incident deleted.');
+            await loadIncidentsData();
+            await loadReferenceData();
+        } catch (err: any) {
+            alert(err?.response?.data?.error || err.message || 'Failed to delete incident.');
         }
     };
 
@@ -481,7 +718,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
     const totalDamagedOrLost = (overview?.total_damaged_units || 0) + (overview?.total_lost_units || 0);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '4px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '16px 20px 48px 20px', minHeight: '100%', boxSizing: 'border-box' }}>
             {/* Header & Primary Actions */}
             <div style={{
                 background: 'var(--color-surface, #ffffff)',
@@ -512,7 +749,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
                         <Button
                             variant="secondary"
-                            onClick={() => setIsConfigureStoreModalOpen(true)}
+                            onClick={handleOpenAddStore}
                             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                         >
                             <i className="bx bx-plus"></i> + New Store Location
@@ -824,7 +1061,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                         }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>Registered Store Locations & Armories</h3>
-                                <Button size="sm" variant="primary" onClick={() => setIsConfigureStoreModalOpen(true)}>
+                                <Button size="sm" variant="primary" onClick={handleOpenAddStore}>
                                     <i className="bx bx-plus"></i> + Add Location
                                 </Button>
                             </div>
@@ -859,6 +1096,14 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                                                 <i className="bx bx-user" style={{ marginRight: '4px' }}></i> Custodian: {store.supervisor_name}
                                             </div>
                                         )}
+                                        <div style={{ display: 'flex', gap: '8px', marginTop: '6px', paddingTop: '8px', borderTop: '1px solid var(--color-border, #e5e7eb)' }}>
+                                            <Button size="sm" variant="secondary" onClick={() => handleEditStore(store)} style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}>
+                                                <i className="bx bx-edit" style={{ marginRight: '4px' }}></i> Edit
+                                            </Button>
+                                            <Button size="sm" variant="danger" onClick={() => handleDeleteStore(store)} style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}>
+                                                <i className="bx bx-trash" style={{ marginRight: '4px' }}></i> Delete
+                                            </Button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -990,7 +1235,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                                                     {item.total_managed}
                                                 </td>
                                                 <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                                                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
                                                         <Button
                                                             variant="primary"
                                                             size="sm"
@@ -1010,6 +1255,22 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                                                             }}
                                                         >
                                                             Transfer
+                                                        </Button>
+                                                        <Button
+                                                            variant="secondary"
+                                                            size="sm"
+                                                            onClick={() => handleOpenEditItem(item)}
+                                                            title="Edit Item Details"
+                                                        >
+                                                            <i className="bx bx-edit" style={{ marginRight: '2px' }}></i> Edit
+                                                        </Button>
+                                                        <Button
+                                                            variant="danger"
+                                                            size="sm"
+                                                            onClick={() => handleDeleteItem(item)}
+                                                            title="Delete Item"
+                                                        >
+                                                            <i className="bx bx-trash" style={{ marginRight: '2px' }}></i> Delete
                                                         </Button>
                                                     </div>
                                                 </td>
@@ -1153,37 +1414,55 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                                                 </Badge>
                                             </td>
                                             <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                                                {row.status === 'ISSUED' && (
-                                                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="secondary"
-                                                            onClick={() => {
-                                                                setSelectedIssueForReturn(row);
-                                                                setIsReturnModalOpen(true);
-                                                            }}
-                                                            style={{ color: '#059669', borderColor: '#059669' }}
-                                                        >
-                                                            <i className="bx bx-check" style={{ marginRight: '3px' }}></i> Return
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="danger"
-                                                            onClick={() => {
-                                                                setIncidentForm(prev => ({
-                                                                    ...prev,
-                                                                    issue_id: row.id,
-                                                                    item_id: row.item,
-                                                                    serial_number: row.serial_number || '',
-                                                                    quantity: Number(row.quantity)
-                                                                }));
-                                                                setIsIncidentModalOpen(true);
-                                                            }}
-                                                        >
-                                                            Report Loss
-                                                        </Button>
-                                                    </div>
-                                                )}
+                                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                                    {row.status === 'ISSUED' && (
+                                                        <>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="secondary"
+                                                                onClick={() => {
+                                                                    setSelectedIssueForReturn(row);
+                                                                    setIsReturnModalOpen(true);
+                                                                }}
+                                                                style={{ color: '#059669', borderColor: '#059669' }}
+                                                            >
+                                                                <i className="bx bx-check" style={{ marginRight: '3px' }}></i> Return
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="danger"
+                                                                onClick={() => {
+                                                                    setIncidentForm(prev => ({
+                                                                        ...prev,
+                                                                        issue_id: row.id,
+                                                                        item_id: row.item,
+                                                                        serial_number: row.serial_number || '',
+                                                                        quantity: Number(row.quantity)
+                                                                    }));
+                                                                    setIsIncidentModalOpen(true);
+                                                                }}
+                                                            >
+                                                                Report Loss
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                    <Button
+                                                        size="sm"
+                                                        variant="secondary"
+                                                        onClick={() => handleOpenEditIssue(row)}
+                                                        title="Edit Issue Notes / Condition"
+                                                    >
+                                                        <i className="bx bx-edit" style={{ marginRight: '2px' }}></i> Edit
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="danger"
+                                                        onClick={() => handleDeleteIssue(row)}
+                                                        title="Cancel / Delete Issue (Restores Stock to Store)"
+                                                    >
+                                                        <i className="bx bx-trash" style={{ marginRight: '2px' }}></i> Delete
+                                                    </Button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -1364,18 +1643,28 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                                                         </Badge>
                                                     </td>
                                                     <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                                                        {inc.status !== 'CLOSED' && inc.status !== 'APPROVED_WRITE_OFF' && inc.status !== 'REJECTED' && (
+                                                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                                            {inc.status !== 'CLOSED' && inc.status !== 'APPROVED_WRITE_OFF' && inc.status !== 'REJECTED' && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="secondary"
+                                                                    onClick={() => {
+                                                                        setSelectedIncidentForResolve(inc);
+                                                                        setIsResolveModalOpen(true);
+                                                                    }}
+                                                                >
+                                                                    Resolve
+                                                                </Button>
+                                                            )}
                                                             <Button
                                                                 size="sm"
-                                                                variant="secondary"
-                                                                onClick={() => {
-                                                                    setSelectedIncidentForResolve(inc);
-                                                                    setIsResolveModalOpen(true);
-                                                                }}
+                                                                variant="danger"
+                                                                onClick={() => handleDeleteIncident(inc)}
+                                                                title="Delete Incident"
                                                             >
-                                                                Resolve
+                                                                <i className="bx bx-trash"></i> Delete
                                                             </Button>
-                                                        )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))
@@ -2177,7 +2466,7 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 </div>
             )}
 
-            {/* MODAL 7: Configure Store Location */}
+            {/* MODAL 7: Configure / Edit Store Location */}
             {isConfigureStoreModalOpen && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -2185,31 +2474,35 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                 }}>
                     <div style={{ background: '#ffffff', borderRadius: '12px', width: '500px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Add Store Location or Armory</h3>
+                            <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>
+                                {editingStoreId ? 'Edit Store Location or Armory' : 'Add Store Location or Armory'}
+                            </h3>
                             <button
                                 type="button"
-                                onClick={() => setIsConfigureStoreModalOpen(false)}
+                                onClick={() => { setIsConfigureStoreModalOpen(false); setEditingStoreId(null); }}
                                 style={{ background: 'transparent', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#6b7280' }}
                             >
                                 &times;
                             </button>
                         </div>
                         <form onSubmit={handleStoreConfigureSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                            <div>
-                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Link Existing Warehouse or Create New</label>
-                                <select
-                                    value={storeForm.warehouse_id}
-                                    onChange={e => setStoreForm({ ...storeForm, warehouse_id: e.target.value })}
-                                    style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
-                                >
-                                    <option value="">-- Create New Warehouse / Store --</option>
-                                    {allWarehouses.map(w => (
-                                        <option key={w.id} value={w.id}>{w.name} ({w.code})</option>
-                                    ))}
-                                </select>
-                            </div>
+                            {!editingStoreId && (
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Link Existing Warehouse or Create New</label>
+                                    <select
+                                        value={storeForm.warehouse_id}
+                                        onChange={e => setStoreForm({ ...storeForm, warehouse_id: e.target.value })}
+                                        style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
+                                    >
+                                        <option value="">-- Create New Warehouse / Store --</option>
+                                        {allWarehouses.map(w => (
+                                            <option key={w.id} value={w.id}>{w.name} ({w.code})</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
 
-                            {!storeForm.warehouse_id && (
+                            {(!storeForm.warehouse_id || editingStoreId) && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Store Name *</label>
@@ -2260,8 +2553,190 @@ export const SecurityInventoryWorkspace: React.FC = () => {
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-                                <Button type="button" variant="secondary" onClick={() => setIsConfigureStoreModalOpen(false)}>Cancel</Button>
-                                <Button type="submit" variant="primary">Save Store Location</Button>
+                                <Button type="button" variant="secondary" onClick={() => { setIsConfigureStoreModalOpen(false); setEditingStoreId(null); }}>Cancel</Button>
+                                <Button type="submit" variant="primary">
+                                    {editingStoreId ? 'Update Store Location' : 'Save Store Location'}
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 8: Edit Equipment Item */}
+            {isEditItemModalOpen && selectedItemForEdit && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '16px'
+                }}>
+                    <div style={{ background: '#ffffff', borderRadius: '12px', width: '560px', maxWidth: '95vw', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Edit Equipment Item</h3>
+                                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>Code: {selectedItemForEdit.item_code}</div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsEditItemModalOpen(false)}
+                                style={{ background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#6b7280' }}
+                            >
+                                &times;
+                            </button>
+                        </div>
+                        <form onSubmit={handleEditItemSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Item Name *</label>
+                                <Input
+                                    required
+                                    value={editItemForm.name}
+                                    onChange={e => setEditItemForm({ ...editItemForm, name: e.target.value })}
+                                />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Item Code / SKU *</label>
+                                    <Input
+                                        required
+                                        value={editItemForm.item_code}
+                                        onChange={e => setEditItemForm({ ...editItemForm, item_code: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Security Category *</label>
+                                    <select
+                                        value={editItemForm.security_category}
+                                        onChange={e => setEditItemForm({ ...editItemForm, security_category: e.target.value })}
+                                        style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
+                                    >
+                                        {SECURITY_CATEGORIES.map(c => (
+                                            <option key={c.value} value={c.value}>{c.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Unit Cost Price (PKR)</label>
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={editItemForm.cost_price}
+                                        onChange={e => setEditItemForm({ ...editItemForm, cost_price: parseFloat(e.target.value) || 0 })}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Unit of Measure</label>
+                                    <Input
+                                        placeholder="e.g. pcs, pairs, sets"
+                                        value={editItemForm.unit_of_measure}
+                                        onChange={e => setEditItemForm({ ...editItemForm, unit_of_measure: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={editItemForm.is_controlled}
+                                        onChange={e => setEditItemForm({ ...editItemForm, is_controlled: e.target.checked })}
+                                    />
+                                    <strong>Controlled / Sensitive Security Asset</strong> (Weapons, Ammunition, Restricted Comms)
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={editItemForm.track_serial_number}
+                                        onChange={e => setEditItemForm({ ...editItemForm, track_serial_number: e.target.checked })}
+                                    />
+                                    <strong>Track Individual Serial Numbers</strong> (Individual barcodes / asset tags)
+                                </label>
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Notes / Specifications</label>
+                                <Input
+                                    placeholder="Model, brand, caliber, color, etc."
+                                    value={editItemForm.notes}
+                                    onChange={e => setEditItemForm({ ...editItemForm, notes: e.target.value })}
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                                <Button type="button" variant="secondary" onClick={() => setIsEditItemModalOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button type="submit" variant="primary">
+                                    Save Changes
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 9: Edit Equipment Issue */}
+            {isEditIssueModalOpen && selectedIssueForEdit && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '16px'
+                }}>
+                    <div style={{ background: '#ffffff', borderRadius: '12px', width: '480px', maxWidth: '95vw', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Edit Equipment Issue</h3>
+                                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                                    {selectedIssueForEdit.item_name} (Qty: {selectedIssueForEdit.quantity})
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsEditIssueModalOpen(false)}
+                                style={{ background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#6b7280' }}
+                            >
+                                &times;
+                            </button>
+                        </div>
+                        <form onSubmit={handleEditIssueSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Issue Condition</label>
+                                <select
+                                    value={editIssueForm.condition}
+                                    onChange={e => setEditIssueForm({ ...editIssueForm, condition: e.target.value })}
+                                    style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
+                                >
+                                    <option value="NEW">Brand New</option>
+                                    <option value="GOOD">Good / Serviceable</option>
+                                    <option value="FAIR">Fair / Worn</option>
+                                    <option value="DAMAGED">Damaged</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Expected Return Date</label>
+                                <Input
+                                    type="date"
+                                    value={editIssueForm.expected_return_date}
+                                    onChange={e => setEditIssueForm({ ...editIssueForm, expected_return_date: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '4px' }}>Notes</label>
+                                <Input
+                                    placeholder="Duty shift notes, assignment details..."
+                                    value={editIssueForm.notes}
+                                    onChange={e => setEditIssueForm({ ...editIssueForm, notes: e.target.value })}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                                <Button type="button" variant="secondary" onClick={() => setIsEditIssueModalOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button type="submit" variant="primary">
+                                    Update Issue
+                                </Button>
                             </div>
                         </form>
                     </div>

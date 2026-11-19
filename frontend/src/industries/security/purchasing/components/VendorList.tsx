@@ -21,6 +21,7 @@ export const VendorList: React.FC<VendorListProps> = ({ onSelectVendor }) => {
 
     // Filters
     const [search, setSearch] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
 
@@ -30,22 +31,27 @@ export const VendorList: React.FC<VendorListProps> = ({ onSelectVendor }) => {
     const [showCategoryModal, setShowCategoryModal] = useState(false);
 
     useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(search), 300);
+        return () => clearTimeout(timer);
+    }, [search]);
+
+    useEffect(() => {
+        getVendorCategories().then(setCategories).catch(() => []);
+    }, []);
+
+    useEffect(() => {
         loadData();
-    }, [categoryFilter, statusFilter]);
+    }, [debouncedSearch, categoryFilter, statusFilter]);
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const [vData, cData] = await Promise.all([
-                getVendors({
-                    search: search.trim() || undefined,
-                    category: categoryFilter || undefined,
-                    status: statusFilter || undefined
-                }),
-                getVendorCategories().catch(() => [])
-            ]);
+            const vData = await getVendors({
+                search: debouncedSearch.trim() || undefined,
+                category: categoryFilter || undefined,
+                status: statusFilter || undefined
+            });
             setVendors(vData);
-            setCategories(cData);
         } catch {
             useToastStore.getState().error('Failed to load vendors.');
         } finally {

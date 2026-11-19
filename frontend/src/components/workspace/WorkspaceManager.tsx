@@ -119,6 +119,7 @@ export const WorkspaceManager: React.FC = () => {
                 {/* Tab Layers */}
                 {tabs.map(tab => {
                     const isMusterTab = tab.moduleCode === 'monthly_muster';
+                    const hasInternalFixedLayout = tab.moduleCode === 'attendance_registry' || tab.moduleCode === 'fast_costing';
                     return (
                         <div 
                             key={tab.id} 
@@ -128,7 +129,7 @@ export const WorkspaceManager: React.FC = () => {
                                 height: '100%',
                                 width: '100%',
                                 minHeight: 0,
-                                overflowY: isMusterTab ? 'auto' : 'hidden',
+                                overflowY: hasInternalFixedLayout ? 'hidden' : 'auto',
                                 overflowX: isMusterTab ? 'auto' : 'hidden'
                             }}
                         >

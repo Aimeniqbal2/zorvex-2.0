@@ -336,7 +336,11 @@ export interface SecurityStockAvailabilityItem {
     item_name: string;
     item_code: string;
     category: string;
+    security_category?: string;
+    cost_price?: number;
+    unit_of_measure?: string;
     is_serialized: boolean;
+    track_serial_number?: boolean;
     is_controlled: boolean;
     store_balance: number;
     available_store_stock: number;

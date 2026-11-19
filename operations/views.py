@@ -1720,6 +1720,27 @@ class EquipmentIssueViewSet(BaseSecurityOpsViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    def perform_destroy(self, instance):
+        # Restore stock balance if active issue is deleted/cancelled
+        if instance.status == 'ISSUED' and instance.warehouse_id and instance.item_id:
+            from inventory.models import InventoryBalance
+            bal, _ = InventoryBalance.objects.get_or_create(
+                company_id=instance.company_id,
+                warehouse_id=instance.warehouse_id,
+                item_id=instance.item_id,
+                defaults={'quantity': 0}
+            )
+            bal.quantity += instance.quantity
+            bal.save(update_fields=['quantity'])
+
+            if instance.item_serial:
+                instance.item_serial.status = 'IN_STOCK'
+                instance.item_serial.current_warehouse = instance.warehouse
+                instance.item_serial.current_site = None
+                instance.item_serial.current_employee = None
+                instance.item_serial.save(update_fields=['status', 'current_warehouse', 'current_site', 'current_employee'])
+        instance.delete()
+
 
 class EquipmentIncidentViewSet(BaseSecurityOpsViewSet):
     from .models import EquipmentIncident
@@ -1775,28 +1796,36 @@ class SecurityInventoryViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='overview')
     def overview(self, request):
         company = self._resolve_company(request)
-        from operations.services.security_inventory_service import SecurityInventoryService
-        availability = SecurityInventoryService.get_stock_availability(company.id)
         from operations.models import EquipmentIssue, EquipmentIncident, SecurityStoreProfile, SecurityItemProfile
-        active_emp_issues = EquipmentIssue.objects.filter(company=company, custody_type='EMPLOYEE', status='ISSUED').count()
-        active_site_issues = EquipmentIssue.objects.filter(company=company, custody_type='SITE', status='ISSUED').count()
-        open_incidents = EquipmentIncident.objects.filter(company=company, status__in=['REPORTED', 'UNDER_INVESTIGATION']).count()
+        from inventory.models import Item, InventoryBalance
+        from django.db.models import Sum
+
+        total_items = Item.objects.filter(company=company, is_active=True).count()
         store_count = SecurityStoreProfile.objects.filter(company=company).count()
         controlled_items_count = SecurityItemProfile.objects.filter(company=company, is_controlled=True).count()
 
-        summary = availability.get('summary', {})
-        items = availability.get('items', [])
+        active_emp_issues = EquipmentIssue.objects.filter(company=company, custody_type='EMPLOYEE', status='ISSUED').count()
+        active_site_issues = EquipmentIssue.objects.filter(company=company, custody_type='SITE', status='ISSUED').count()
+        open_incidents = EquipmentIncident.objects.filter(company=company, status__in=['REPORTED', 'UNDER_INVESTIGATION']).count()
+
+        total_store_stock = InventoryBalance.objects.filter(company=company).aggregate(t=Sum('quantity'))['t'] or 0
+        emp_qty = EquipmentIssue.objects.filter(company=company, custody_type='EMPLOYEE', status='ISSUED').aggregate(t=Sum('quantity'))['t'] or 0
+        site_qty = EquipmentIssue.objects.filter(company=company, custody_type='SITE', status='ISSUED').aggregate(t=Sum('quantity'))['t'] or 0
+        lost_qty = EquipmentIssue.objects.filter(company=company, status='LOST').aggregate(t=Sum('quantity'))['t'] or 0
+        damaged_qty = EquipmentIssue.objects.filter(company=company, status='DAMAGED').aggregate(t=Sum('quantity'))['t'] or 0
+
+        total_managed = float(total_store_stock) + float(emp_qty) + float(site_qty)
 
         return Response({
-            'total_items': summary.get('total_items_count', len(items)),
+            'total_items': total_items,
             'total_stores': store_count,
             'active_employee_issues': active_emp_issues,
             'active_site_issues': active_site_issues,
             'open_incidents': open_incidents,
             'controlled_items_count': controlled_items_count,
-            'total_managed_units': summary.get('total_equipment_assets', 0),
-            'total_lost_units': summary.get('total_lost_quantity', 0),
-            'total_damaged_units': summary.get('total_damaged_quantity', 0),
+            'total_managed_units': total_managed,
+            'total_lost_units': float(lost_qty),
+            'total_damaged_units': float(damaged_qty),
         })
 
     @action(detail=False, methods=['get', 'post'], url_path='stores')
@@ -1849,6 +1878,13 @@ class SecurityInventoryViewSet(viewsets.ViewSet):
             )
         else:
             warehouse = Warehouse.objects.get(id=warehouse_id, company=company)
+            if name:
+                warehouse.name = name
+            if code:
+                warehouse.code = code
+            if notes:
+                warehouse.address = notes
+            warehouse.save()
 
         profile, created = SecurityStoreProfile.objects.update_or_create(
             company=company,
@@ -1863,6 +1899,109 @@ class SecurityInventoryViewSet(viewsets.ViewSet):
             }
         )
         return Response(SecurityStoreProfileSerializer(profile).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=False, methods=['delete'], url_path='stores/(?P<store_id>[^/.]+)')
+    def delete_store(self, request, store_id=None):
+        company = self._resolve_company(request)
+        from operations.models import SecurityStoreProfile, EquipmentIssue
+        from inventory.models import InventoryBalance
+
+        profile = SecurityStoreProfile.objects.filter(id=store_id, company=company).first()
+        if not profile:
+            profile = SecurityStoreProfile.objects.filter(warehouse_id=store_id, company=company).first()
+        if not profile:
+            return Response({'error': 'Store location not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        warehouse = profile.warehouse
+        if EquipmentIssue.objects.filter(company=company, warehouse=warehouse, status='ISSUED').exists():
+            return Response(
+                {'error': 'Cannot delete store: Active equipment is currently issued from this store. Return equipment first.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if InventoryBalance.objects.filter(company=company, warehouse=warehouse, quantity__gt=0).exists():
+            return Response(
+                {'error': 'Cannot delete store: Stock balances exist in this store. Please transfer or write off remaining stock first.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        warehouse.is_active = False
+        warehouse.save(update_fields=['is_active'])
+        profile.delete()
+        return Response({'success': True, 'message': 'Store location deleted successfully.'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['patch', 'put', 'delete'], url_path='items/(?P<item_id>[^/.]+)')
+    def item_detail(self, request, item_id=None):
+        company = self._resolve_company(request)
+        from inventory.models import Item, InventoryBalance
+        from operations.models import SecurityItemProfile, EquipmentIssue
+
+        item = Item.objects.filter(id=item_id, company=company).first()
+        if not item:
+            return Response({'error': 'Item not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'DELETE':
+            if EquipmentIssue.objects.filter(company=company, item=item, status='ISSUED').exists():
+                return Response(
+                    {'error': 'Cannot delete item: Units of this item are currently issued to guards or sites. Return all custody first.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if InventoryBalance.objects.filter(company=company, item=item, quantity__gt=0).exists():
+                return Response(
+                    {'error': 'Cannot delete item: Store stock balance is greater than 0. Transfer or write off remaining balance first.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            item.is_active = False
+            item.save(update_fields=['is_active'])
+            return Response({'success': True, 'message': 'Item deleted successfully.'}, status=status.HTTP_200_OK)
+
+        # PATCH / PUT
+        name = request.data.get('name')
+        item_code = request.data.get('item_code') or request.data.get('sku')
+        cost_price = request.data.get('cost_price')
+        unit_of_measure = request.data.get('unit_of_measure')
+        track_serial_number = request.data.get('track_serial_number')
+        category_id = request.data.get('category_id')
+
+        if name:
+            item.name = name
+        if item_code:
+            item.item_code = item_code
+            item.sku = item_code
+        if cost_price is not None:
+            item.cost_price = cost_price
+        if unit_of_measure:
+            item.unit_of_measure = unit_of_measure
+        if track_serial_number is not None:
+            item.track_serial_number = bool(track_serial_number)
+        if category_id:
+            item.category_id = category_id
+        item.save()
+
+        sec_cat = request.data.get('security_category')
+        is_controlled = request.data.get('is_controlled')
+        notes = request.data.get('notes')
+
+        profile, _ = SecurityItemProfile.objects.get_or_create(company=company, item=item)
+        if sec_cat:
+            profile.security_category = sec_cat
+        if is_controlled is not None:
+            profile.is_controlled = bool(is_controlled)
+        if notes is not None:
+            profile.notes = notes
+        profile.save()
+
+        return Response({
+            'id': str(item.id),
+            'name': item.name,
+            'item_code': item.item_code,
+            'cost_price': float(item.cost_price),
+            'unit_of_measure': item.unit_of_measure,
+            'track_serial_number': item.track_serial_number,
+            'security_category': profile.security_category,
+            'is_controlled': profile.is_controlled,
+            'notes': profile.notes
+        }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='stock-availability')
     def stock_availability(self, request):

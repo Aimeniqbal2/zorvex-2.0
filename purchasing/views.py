@@ -621,8 +621,19 @@ class VendorViewSet(BasePurchasingViewSet):
     search_fields = ['name', 'code', 'contact_person', 'phone', 'email', 'tax_number']
     ordering_fields = ['name', 'code', 'created_at', 'rating']
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.action == 'list':
+            context['skip_financial_summary'] = True
+        return context
+
     def get_queryset(self):
         qs = super().get_queryset()
+        from django.db.models import Count, Q
+        qs = qs.annotate(
+            annotated_items_count=Count('vendor_items', filter=Q(vendor_items__is_active=True), distinct=True),
+            annotated_documents_count=Count('documents', distinct=True)
+        )
         category = self.request.query_params.get('category')
         if category:
             qs = qs.filter(category_id=category)

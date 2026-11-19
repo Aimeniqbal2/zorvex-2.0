@@ -224,6 +224,44 @@ export const createSecurityStore = async (data: any): Promise<SecurityStoreProfi
     return response.data;
 };
 
+export const updateSecurityStore = async (data: any): Promise<SecurityStoreProfile> => {
+    const response = await apiClient.post('/api/operations/security-inventory/stores/', data);
+    return response.data;
+};
+
+export const deleteSecurityStore = async (storeId: string): Promise<any> => {
+    const response = await apiClient.delete(`/api/operations/security-inventory/stores/${storeId}/`);
+    return response.data;
+};
+
+export const updateSecurityItem = async (itemId: string, data: any): Promise<any> => {
+    const response = await apiClient.patch(`/api/operations/security-inventory/items/${itemId}/`, data);
+    return response.data;
+};
+
+export const deleteSecurityItem = async (itemId: string): Promise<any> => {
+    const response = await apiClient.delete(`/api/operations/security-inventory/items/${itemId}/`);
+    return response.data;
+};
+
+export const deleteEquipmentIssue = async (id: string): Promise<void> => {
+    await apiClient.delete(`/api/operations/equipment-issues/${id}/`);
+};
+
+export const updateEquipmentIssue = async (id: string, data: any): Promise<EquipmentIssue> => {
+    const response = await apiClient.patch(`/api/operations/equipment-issues/${id}/`, data);
+    return response.data;
+};
+
+export const deleteEquipmentIncident = async (id: string): Promise<void> => {
+    await apiClient.delete(`/api/operations/equipment-incidents/${id}/`);
+};
+
+export const updateEquipmentIncident = async (id: string, data: any): Promise<EquipmentIncident> => {
+    const response = await apiClient.patch(`/api/operations/equipment-incidents/${id}/`, data);
+    return response.data;
+};
+
 export const getSecurityStockAvailability = async (params?: {
     warehouse_id?: string;
     category?: string;
