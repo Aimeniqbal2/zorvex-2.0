@@ -565,6 +565,9 @@ export interface InvoicePreviewContext {
   status_display?: string;
   notes?: string;
   terms_and_conditions?: string;
+  is_temporary_service?: boolean;
+  service_nature?: string;
+  period_display?: string;
   subtotal?: number;
   tax_rate?: number;
   tax_amount?: number;

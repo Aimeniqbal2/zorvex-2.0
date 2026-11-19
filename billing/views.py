@@ -643,6 +643,118 @@ class ClientInvoiceViewSet(TenantModelViewSet):
             )
 
     @staticmethod
+    def _write_temporary_invoice_lines(
+        company,
+        invoice,
+        ts_obj,
+        t_data: dict,
+        site_obj,
+        t_sub,
+        t_tax,
+        t_rate,
+        t_total
+    ):
+        """
+        Creates detailed ClientInvoiceLine rows for TemporaryServiceRequest,
+        expanding into individual staff designations (Guard, Supervisor, etc.)
+        with accurate headcounts, rates, and amounts.
+        """
+        import re
+        from decimal import Decimal
+        from collections import defaultdict
+
+        raw_venue = (ts_obj.site_name if ts_obj else '') or t_data.get('venue', '')
+        clean_venue = re.sub(r'--\s*temporary service.*$', '', raw_venue, flags=re.IGNORECASE).strip()
+        ts_lines = list(ts_obj.lines.all().select_related('designation')) if ts_obj else []
+
+        if ts_lines:
+            rem_tax = Decimal(str(t_tax))
+            total_ts_sub = sum(
+                Decimal(str(tl.total_amount or (tl.required_headcount * tl.billing_rate * tl.days_count) or 0))
+                for tl in ts_lines
+            )
+            for l_idx, tl in enumerate(ts_lines):
+                desig_name = tl.designation.name if tl.designation else (tl.item_name or tl.get_line_type_display())
+                days_str = f" ({tl.days_count} Days)" if (tl.days_count and tl.days_count > 1) else ""
+                line_desc = f"{desig_name} @ {clean_venue}{days_str}" if clean_venue else f"{desig_name}{days_str}"
+
+                headcount = Decimal(str(tl.required_headcount or 1))
+                l_tot = Decimal(str(tl.total_amount or 0)).quantize(Decimal('0.01'))
+                if l_tot <= 0:
+                    l_tot = (headcount * Decimal(str(tl.billing_rate or 0)) * Decimal(str(tl.days_count or 1))).quantize(Decimal('0.01'))
+
+                if l_idx == len(ts_lines) - 1:
+                    l_tax = rem_tax
+                elif total_ts_sub > 0:
+                    l_tax = (Decimal(str(t_tax)) * (l_tot / total_ts_sub)).quantize(Decimal('0.01'))
+                    rem_tax -= l_tax
+                else:
+                    l_tax = Decimal('0.00')
+
+                u_rate = (l_tot / headcount).quantize(Decimal('0.01')) if headcount > 0 else l_tot
+                ClientInvoiceLine.objects.create(
+                    company=company,
+                    invoice=invoice,
+                    line_type='TEMPORARY_SERVICE',
+                    designation=tl.designation,
+                    description=line_desc,
+                    site=site_obj,
+                    quantity=headcount,
+                    unit_rate=u_rate,
+                    line_subtotal=l_tot,
+                    tax_rate=t_rate,
+                    tax_amount=l_tax,
+                    total_amount=l_tot + l_tax
+                )
+        elif ts_obj and ts_obj.assigned_guards.exists():
+            guards_by_desig = defaultdict(int)
+            for ag in ts_obj.assigned_guards.all():
+                d_name = ag.post_designation or (ag.guard.designation.name if (ag.guard and ag.guard.designation) else 'Security Guard (Civil)')
+                guards_by_desig[d_name] += 1
+            total_g = sum(guards_by_desig.values())
+            rem_tax = Decimal(str(t_tax))
+            for g_idx, (d_name, d_cnt) in enumerate(guards_by_desig.items()):
+                headcount = Decimal(str(d_cnt))
+                l_tot = (Decimal(str(t_sub)) * headcount / Decimal(str(total_g))).quantize(Decimal('0.01')) if total_g > 0 else Decimal(str(t_sub))
+                if g_idx == len(guards_by_desig) - 1:
+                    l_tax = rem_tax
+                elif Decimal(str(t_sub)) > 0:
+                    l_tax = (Decimal(str(t_tax)) * (l_tot / Decimal(str(t_sub)))).quantize(Decimal('0.01'))
+                    rem_tax -= l_tax
+                else:
+                    l_tax = Decimal('0.00')
+                u_rate = (l_tot / headcount).quantize(Decimal('0.01')) if headcount > 0 else l_tot
+                line_desc = f"{d_name} @ {clean_venue}" if clean_venue else d_name
+                ClientInvoiceLine.objects.create(
+                    company=company,
+                    invoice=invoice,
+                    line_type='TEMPORARY_SERVICE',
+                    description=line_desc,
+                    site=site_obj,
+                    quantity=headcount,
+                    unit_rate=u_rate,
+                    line_subtotal=l_tot,
+                    tax_rate=t_rate,
+                    tax_amount=l_tax,
+                    total_amount=l_tot + l_tax
+                )
+        else:
+            line_desc = f"Security Personnel (Temporary Service) @ {clean_venue}" if clean_venue else "Security Personnel (Temporary Service)"
+            ClientInvoiceLine.objects.create(
+                company=company,
+                invoice=invoice,
+                line_type='TEMPORARY_SERVICE',
+                description=line_desc,
+                site=site_obj,
+                quantity=Decimal('1.00'),
+                unit_rate=t_sub,
+                line_subtotal=t_sub,
+                tax_rate=t_rate,
+                tax_amount=t_tax,
+                total_amount=t_total
+            )
+
+    @staticmethod
     def _parse_billing_month(company, billing_month_str=None):
         import calendar
         from datetime import date
@@ -1306,9 +1418,57 @@ class ClientInvoiceViewSet(TenantModelViewSet):
 
                 # 2. Temporary Services
                 for t in preview['temporary_services']:
-                    if t.get('existing_invoice_id'):
+                    ts_tid = t.get('temporary_service_id')
+                    existing_inv = inv_by_tsr.get(ts_tid) if ts_tid else None
+                    if not existing_inv and t.get('existing_invoice_id'):
+                        existing_inv = next((inv for inv in existing_invs if str(inv.id) == str(t['existing_invoice_id'])), None)
+
+                    ts_obj = TemporaryServiceRequest.objects.filter(id=ts_tid).first() if ts_tid else None
+
+                    if existing_inv:
+                        if existing_inv.status == ClientInvoiceStatus.DRAFT:
+                            # Auto-heal and refresh existing DRAFT invoice if dates or lines need expansion
+                            if ts_obj and ts_obj.start_datetime:
+                                ts_start_d = ts_obj.start_datetime.date()
+                                ts_end_d = ts_obj.end_datetime.date() if ts_obj.end_datetime else ts_start_d
+                                if existing_inv.period_start != ts_start_d or existing_inv.period_end != ts_end_d:
+                                    existing_inv.period_start = ts_start_d
+                                    existing_inv.period_end = ts_end_d
+                                    existing_inv.save(update_fields=['period_start', 'period_end'])
+
+                            curr_lines = list(existing_inv.lines.filter(is_deleted=False))
+                            has_single_generic = (
+                                len(curr_lines) <= 1 or
+                                any('Temporary Security:' in (ln.description or '') for ln in curr_lines) or
+                                any('-- temporary service' in (ln.description or '').lower() for ln in curr_lines)
+                            )
+                            if has_single_generic and ts_obj:
+                                t_sub = Decimal(str(t.get('subtotal') or 0)).quantize(Decimal('0.01'))
+                                t_tax = Decimal(str(t.get('tax_amount') or 0)).quantize(Decimal('0.01'))
+                                t_total = Decimal(str(t.get('amount') or 0)).quantize(Decimal('0.01'))
+                                if t_sub <= 0:
+                                    t_sub = t_total - t_tax
+                                t_rate = ((t_tax / t_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (t_sub > 0 and t_tax > 0) else Decimal('0.00')
+                                site_obj = site_lookup.get(str(t['site_id'])) if t.get('site_id') else None
+
+                                existing_inv.lines.filter(is_deleted=False).delete()
+                                ClientInvoiceViewSet._write_temporary_invoice_lines(
+                                    company=company,
+                                    invoice=existing_inv,
+                                    ts_obj=ts_obj,
+                                    t_data=t,
+                                    site_obj=site_obj,
+                                    t_sub=t_sub,
+                                    t_tax=t_tax,
+                                    t_rate=t_rate,
+                                    t_total=t_total
+                                )
+                                updated_invoices.append(existing_inv)
+                                continue
+
                         skipped_count += 1
                         continue
+
                     if t.get('status') not in ['APPROVED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED']:
                         continue
                     t_sub = Decimal(str(t.get('subtotal') or 0)).quantize(Decimal('0.01'))
@@ -1325,13 +1485,23 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                     t_rate = ((t_tax / t_sub) * Decimal('100.00')).quantize(Decimal('0.01')) if (t_sub > 0 and t_tax > 0) else Decimal('0.00')
                     fmt_tag = '[FMT:CHEQUE]' if t_tax > 0 else '[FMT:CASH]'
 
+                    if ts_obj and ts_obj.start_datetime:
+                        ts_start_d = ts_obj.start_datetime.date()
+                        ts_end_d = ts_obj.end_datetime.date() if ts_obj.end_datetime else ts_start_d
+                    else:
+                        ts_start_d = p_start
+                        ts_end_d = p_end
+
+                    clean_title = re.sub(r'--\s*temporary service.*$', '', t['title'], flags=re.IGNORECASE).strip()
+                    clean_venue = re.sub(r'--\s*temporary service.*$', '', t['venue'], flags=re.IGNORECASE).strip()
+
                     inv = ClientInvoice.objects.create(
                         company=company,
                         invoice_number=ClientInvoice.generate_next_invoice_number(company),
                         client=client,
                         billing_month=preview['billing_month'],
-                        period_start=p_start,
-                        period_end=p_end,
+                        period_start=ts_start_d,
+                        period_end=ts_end_d,
                         invoice_date=inv_date,
                         due_date=due_date,
                         currency=currency,
@@ -1343,20 +1513,19 @@ class ClientInvoiceViewSet(TenantModelViewSet):
                         status=initial_status,
                         issued_at=timezone.now() if initial_status == ClientInvoiceStatus.ISSUED else None,
                         issued_by=request.user if initial_status == ClientInvoiceStatus.ISSUED else None,
-                        notes=f"Temporary Event Service: {t['title']} ({t['venue']}) [TSR:{t['temporary_service_id']}] {fmt_tag}"
+                        notes=f"Temporary Event Service: {clean_title} ({clean_venue}) [TSR:{t['temporary_service_id']}] [TEMPORARY_SERVICE] {fmt_tag}"
                     )
-                    ClientInvoiceLine.objects.create(
+
+                    ClientInvoiceViewSet._write_temporary_invoice_lines(
                         company=company,
                         invoice=inv,
-                        line_type='TEMPORARY_SERVICE',
-                        description=f"Temporary Security: {t['title']} @ {t['venue']} ({t['date_str']})",
-                        site=site_obj,
-                        quantity=Decimal('1.00'),
-                        unit_rate=t_sub,
-                        line_subtotal=t_sub,
-                        tax_rate=t_rate,
-                        tax_amount=t_tax,
-                        total_amount=t_total
+                        ts_obj=ts_obj,
+                        t_data=t,
+                        site_obj=site_obj,
+                        t_sub=t_sub,
+                        t_tax=t_tax,
+                        t_rate=t_rate,
+                        t_total=t_total
                     )
                     created_invoices.append(inv)
 

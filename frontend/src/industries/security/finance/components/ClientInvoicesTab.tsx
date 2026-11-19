@@ -850,6 +850,11 @@ export const ClientInvoicesTab: React.FC = () => {
             >
               <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e293b' }}>
                 Invoice Preview — {previewContext?.invoice?.invoice_number || previewContext?.invoice_number || ''}
+                {previewContext?.is_temporary_service && (
+                  <span style={{ marginLeft: '8px', fontSize: '12px', color: '#1d4ed8', fontWeight: 600 }}>
+                    (Temporary Services)
+                  </span>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>

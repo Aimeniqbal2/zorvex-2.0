@@ -271,6 +271,204 @@ class InvoiceGeneratorService:
         sales_tax_basis = 'MANUAL'
         nominal_tax_rate = Decimal('0.00')
         prop_ver = None
+
+        # Check if this invoice is for Temporary Security Services
+        is_temporary_service = False
+        m_tsr = re.search(r'\[TSR:([^\]]+)\]', invoice.notes or '')
+        if m_tsr:
+            is_temporary_service = True
+        elif any(getattr(l, 'line_type', None) == 'TEMPORARY_SERVICE' for l in lines):
+            is_temporary_service = True
+        elif invoice.contract is None and (
+            'temporary' in (invoice.notes or '').lower() or
+            'temporary' in (getattr(client, 'name', '') or '').lower()
+        ):
+            is_temporary_service = True
+
+        ts_obj = None
+        if is_temporary_service:
+            try:
+                from operations.models import TemporaryServiceRequest
+                if m_tsr:
+                    ts_obj = TemporaryServiceRequest.objects.filter(id=m_tsr.group(1), company=company).first()
+                if not ts_obj and client:
+                    ts_obj = TemporaryServiceRequest.objects.filter(company=company, crm_entity=client).order_by('-created_at').first()
+            except Exception:
+                ts_obj = None
+
+        # Calculate exact Invoice Period display string
+        period_display = ""
+        if is_temporary_service:
+            if ts_obj and ts_obj.start_datetime:
+                ts_start = ts_obj.start_datetime.date()
+                ts_end = ts_obj.end_datetime.date() if ts_obj.end_datetime else ts_start
+                # Sync invoice period in database if it was previously set to full month
+                if invoice.period_start != ts_start or invoice.period_end != ts_end:
+                    invoice.period_start = ts_start
+                    invoice.period_end = ts_end
+                    try:
+                        invoice.save(update_fields=['period_start', 'period_end'])
+                    except Exception:
+                        pass
+                if ts_start == ts_end:
+                    period_display = ts_start.strftime("%B %d, %Y")
+                else:
+                    period_display = f"{ts_start.strftime('%B %d, %Y')} to {ts_end.strftime('%B %d, %Y')}"
+            elif invoice.period_start and invoice.period_end:
+                if invoice.period_start == invoice.period_end:
+                    period_display = invoice.period_start.strftime("%B %d, %Y")
+                else:
+                    period_display = f"{invoice.period_start.strftime('%B %d, %Y')} to {invoice.period_end.strftime('%B %d, %Y')}"
+        elif invoice.period_start and invoice.period_end:
+            if invoice.period_start == invoice.period_end:
+                period_display = invoice.period_start.strftime("%B %d, %Y")
+            else:
+                period_display = f"{invoice.period_start.strftime('%B %d, %Y')} to {invoice.period_end.strftime('%B %d, %Y')}"
+
+        # 1. Expand Temporary Service lines into individual staff designations
+        if is_temporary_service:
+            from collections import defaultdict
+            clean_venue = re.sub(r'--\s*temporary service.*$', '', ts_obj.site_name or (ts_obj.operational_site.name if (ts_obj and ts_obj.operational_site) else (ts_obj.title if ts_obj else '')), flags=re.IGNORECASE).strip()
+            if not clean_venue and client:
+                clean_venue = re.sub(r'--\s*temporary service.*$', '', client.name, flags=re.IGNORECASE).strip()
+
+            has_single_generic_line = (
+                len(flat_lines) <= 1 or
+                any('Temporary Security:' in (l.get('description') or '') for l in flat_lines) or
+                any('-- temporary service' in (l.get('description') or '').lower() for l in flat_lines)
+            )
+
+            ts_lines = list(ts_obj.lines.all().select_related('designation')) if ts_obj else []
+            if ts_lines and has_single_generic_line:
+                tax_amt_curr = Decimal(str(invoice.tax_amount or 0))
+                total_temp_sub = sum(
+                    Decimal(str(tl.total_amount or (tl.required_headcount * tl.billing_rate * tl.days_count) or 0))
+                    for tl in ts_lines
+                )
+                rem_tax = tax_amt_curr
+                expanded_temp_lines = []
+                running_qty = Decimal('0.00')
+
+                for t_idx, tl in enumerate(ts_lines):
+                    desig_name = tl.designation.name if tl.designation else (tl.item_name or tl.get_line_type_display())
+                    days_str = f" ({tl.days_count} Days)" if (tl.days_count and tl.days_count > 1) else ""
+                    line_desc = f"{desig_name} @ {clean_venue}{days_str}" if clean_venue else f"{desig_name}{days_str}"
+
+                    headcount = Decimal(str(tl.required_headcount or 1))
+                    running_qty += headcount
+                    l_tot = Decimal(str(tl.total_amount or 0)).quantize(Decimal('0.01'))
+                    if l_tot <= 0:
+                        l_tot = (headcount * Decimal(str(tl.billing_rate or 0)) * Decimal(str(tl.days_count or 1))).quantize(Decimal('0.01'))
+
+                    if t_idx == len(ts_lines) - 1:
+                        l_tax = rem_tax
+                    elif total_temp_sub > 0:
+                        l_tax = (tax_amt_curr * (l_tot / total_temp_sub)).quantize(Decimal('0.01'))
+                        rem_tax -= l_tax
+                    else:
+                        l_tax = Decimal('0.00')
+
+                    u_rate = (l_tot / headcount).quantize(Decimal('0.01')) if headcount > 0 else l_tot
+                    eff_rate = ((l_tax / l_tot) * Decimal('100.00')).quantize(Decimal('0.01')) if l_tot > 0 and l_tax > 0 else Decimal('0.00')
+
+                    expanded_temp_lines.append({
+                        'id': f"tsl-{tl.id}",
+                        'line_type': 'TEMPORARY_SERVICE',
+                        'line_type_display': tl.get_line_type_display() if hasattr(tl, 'get_line_type_display') else 'Temporary Service',
+                        'description': line_desc,
+                        'site_name': clean_venue or 'Temporary Event Venue',
+                        'designation': tl.designation.name if tl.designation else None,
+                        'billing_unit': 'DAILY' if (tl.days_count and tl.days_count > 0) else 'EVENT',
+                        'quantity': float(headcount),
+                        'unit_price': float(u_rate),
+                        'unit_rate': float(u_rate),
+                        'line_subtotal': float(l_tot),
+                        'subtotal': float(l_tot),
+                        'tax_rate': float(eff_rate),
+                        'tax_amount': float(l_tax),
+                        'total_amount': float(l_tot + l_tax),
+                    })
+
+                if expanded_temp_lines:
+                    flat_lines = expanded_temp_lines
+                    total_guard_qty = running_qty
+
+                    # If invoice had only 1 dummy line, sync into DB for DRAFT invoices
+                    if invoice.lines.filter(is_deleted=False).count() <= 1 and invoice.status == ClientInvoiceStatus.DRAFT:
+                        try:
+                            invoice.lines.filter(is_deleted=False).delete()
+                            for el in expanded_temp_lines:
+                                ClientInvoiceLine.objects.create(
+                                    company=company,
+                                    invoice=invoice,
+                                    line_type='TEMPORARY_SERVICE',
+                                    description=el['description'],
+                                    quantity=Decimal(str(el['quantity'])),
+                                    unit_rate=Decimal(str(el['unit_rate'])),
+                                    line_subtotal=Decimal(str(el['line_subtotal'])),
+                                    tax_rate=Decimal(str(el['tax_rate'])),
+                                    tax_amount=Decimal(str(el['tax_amount'])),
+                                    total_amount=Decimal(str(el['total_amount'])),
+                                )
+                        except Exception as sync_e:
+                            logger.warning("Could not sync ClientInvoiceLine for TSR in DB: %s", sync_e)
+
+            elif not ts_lines and ts_obj and ts_obj.assigned_guards.exists() and has_single_generic_line:
+                guards_by_desig = defaultdict(int)
+                for ag in ts_obj.assigned_guards.all():
+                    d_name = ag.post_designation or (ag.guard.designation.name if (ag.guard and ag.guard.designation) else 'Security Guard (Civil)')
+                    guards_by_desig[d_name] += 1
+
+                total_sub = Decimal(str(invoice.subtotal or ts_obj.grand_total or 0))
+                total_guards = sum(guards_by_desig.values())
+                tax_amt_curr = Decimal(str(invoice.tax_amount or 0))
+                rem_tax = tax_amt_curr
+                expanded_temp_lines = []
+                running_qty = Decimal('0.00')
+
+                for g_idx, (d_name, d_cnt) in enumerate(guards_by_desig.items()):
+                    headcount = Decimal(str(d_cnt))
+                    running_qty += headcount
+                    l_tot = (total_sub * headcount / Decimal(str(total_guards))).quantize(Decimal('0.01')) if total_guards > 0 else total_sub
+                    if g_idx == len(guards_by_desig) - 1:
+                        l_tax = rem_tax
+                    elif total_sub > 0:
+                        l_tax = (tax_amt_curr * (l_tot / total_sub)).quantize(Decimal('0.01'))
+                        rem_tax -= l_tax
+                    else:
+                        l_tax = Decimal('0.00')
+                    u_rate = (l_tot / headcount).quantize(Decimal('0.01')) if headcount > 0 else l_tot
+                    eff_rate = ((l_tax / l_tot) * Decimal('100.00')).quantize(Decimal('0.01')) if l_tot > 0 and l_tax > 0 else Decimal('0.00')
+
+                    line_desc = f"{d_name} @ {clean_venue}" if clean_venue else d_name
+                    expanded_temp_lines.append({
+                        'id': f"guard-{d_name}",
+                        'line_type': 'TEMPORARY_SERVICE',
+                        'line_type_display': 'Temporary Security Guard',
+                        'description': line_desc,
+                        'site_name': clean_venue or 'Temporary Event Venue',
+                        'designation': d_name,
+                        'billing_unit': 'EVENT',
+                        'quantity': float(headcount),
+                        'unit_price': float(u_rate),
+                        'unit_rate': float(u_rate),
+                        'line_subtotal': float(l_tot),
+                        'subtotal': float(l_tot),
+                        'tax_rate': float(eff_rate),
+                        'tax_amount': float(l_tax),
+                        'total_amount': float(l_tot + l_tax),
+                    })
+                if expanded_temp_lines:
+                    flat_lines = expanded_temp_lines
+                    total_guard_qty = running_qty
+
+            elif has_single_generic_line and flat_lines:
+                for fl in flat_lines:
+                    orig_desc = fl.get('description') or ''
+                    if 'temporary security:' in orig_desc.lower() or 'temporary service @' in orig_desc.lower():
+                        fl['description'] = f"Security Personnel (Temporary Event Service) @ {clean_venue}" if clean_venue else "Security Personnel (Temporary Event Service)"
+
+        # 2. Permanent Invoices: Lookup CRM ProposalVersion details for Service Charges & Sales Tax breakdown
         try:
             from security_crm.models import ProposalServiceLine, SecurityProposal
             if client and primary_site:
@@ -455,9 +653,12 @@ class InvoiceGeneratorService:
             'calculation_mode': calculation_mode,
         }
 
+        raw_client_name = client.name if client else (getattr(contract, 'client_name', '') or 'Unknown Client')
+        clean_client_name = re.sub(r'--\s*temporary service.*$', '', raw_client_name, flags=re.IGNORECASE).strip() if is_temporary_service else raw_client_name
+
         client_payload = {
             'id': str(client.id) if client else None,
-            'name': client.name if client else (getattr(contract, 'client_name', '') or 'Unknown Client'),
+            'name': clean_client_name,
             'trade_name': getattr(client, 'display_name', '') if client else '',
             'ntn': (getattr(client, 'tax_number', '') or getattr(client, 'registration_number', '') or '') if client else '',
             'strn': getattr(client, 'registration_number', '') if client else '',
@@ -487,6 +688,9 @@ class InvoiceGeneratorService:
             'billing_month': invoice_payload['billing_month'],
             'period_start': invoice_payload['period_start'],
             'period_end': invoice_payload['period_end'],
+            'period_display': period_display,
+            'is_temporary_service': is_temporary_service,
+            'service_nature': 'Temporary Security Service' if is_temporary_service else 'Permanent Monthly Security Service',
             'currency': invoice_payload['currency'],
             'payment_terms': invoice_payload['payment_terms'],
             'status': invoice.status,
@@ -555,7 +759,8 @@ class InvoiceGeneratorService:
         # Format date dd-mm-yyyy and month label like "September - 2026"
         inv_date_str = context['invoice_date']
         inv_month_str = context['billing_month']
-        period_str = f"{context['period_start']} to {context['period_end']}" if context['period_start'] else ''
+        is_temp = context.get('is_temporary_service', False)
+        period_str = context.get('period_display') or (f"{context['period_start']} to {context['period_end']}" if context['period_start'] else '')
 
         header_html = ""
         if tpl.get('show_header'):
@@ -687,11 +892,34 @@ class InvoiceGeneratorService:
             </div>
             """
 
+        default_title = tpl.get('title')
+        if not default_title or default_title in ('SALES TAX INVOICE', 'INVOICE'):
+            display_title = ("SALES TAX INVOICE (TEMPORARY SERVICES)" if mode == 'CHEQUE' else "INVOICE (TEMPORARY SERVICES)") if is_temp else ("SALES TAX INVOICE" if mode == 'CHEQUE' else "INVOICE")
+        else:
+            display_title = f"{default_title} (TEMPORARY SERVICES)" if is_temp and '(TEMPORARY' not in default_title.upper() else default_title
+
+        service_type_row = (
+            '<tr><td style="padding: 2px 6px; font-weight: 600;">Service Type</td><td>: &nbsp;<strong style="color: #1e40af;">Temporary Security Service</strong></td></tr>'
+            if is_temp else ''
+        )
+
         title_style = (
             "font-size: 20px; font-weight: 800; font-style: italic; text-decoration: underline; text-align: center; margin: 8px 0 14px 0;"
             if mode == 'CHEQUE'
             else "font-size: 26px; font-weight: 800; text-decoration: underline; text-align: center; border: 2px solid #0f172a; padding: 10px; margin-bottom: 16px;"
         )
+
+        if is_temp:
+            title_block = f"""
+            <div style="{title_style}">{esc(display_title)}</div>
+            <div style="text-align: center; margin-top: -8px; margin-bottom: 14px;">
+                <span style="display: inline-block; padding: 2px 10px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;">
+                    Temporary Security Services
+                </span>
+            </div>
+            """
+        else:
+            title_block = f'<div style="{title_style}">{esc(display_title)}</div>'
 
         ntn_box = ""
         if tpl.get('show_tax_numbers'):
@@ -716,12 +944,12 @@ class InvoiceGeneratorService:
         <html>
         <head>
             <meta charset="utf-8"/>
-            <title>{esc(tpl.get('title', 'INVOICE'))} {esc(invoice.invoice_number)}</title>
+            <title>{esc(display_title)} {esc(invoice.invoice_number)}</title>
         </head>
         <body style="font-family: Georgia, 'Times New Roman', serif; background: #ffffff; color: #0f172a; margin: 0; padding: 24px;">
             <div style="max-width: 780px; margin: 0 auto;">
                 {header_html}
-                <div style="{title_style}">{esc(tpl.get('title', 'INVOICE'))}</div>
+                {title_block}
 
                 <table style="width: 100%; margin-bottom: 16px; font-size: 13px;">
                     <tr>
@@ -732,6 +960,7 @@ class InvoiceGeneratorService:
                                 {contract_row}
                                 <tr><td style="padding: 2px 6px; font-weight: 600;">{esc(tpl.get('customer_label', 'Customer Name'))}</td><td>: &nbsp;<strong>{esc(client['name'])}</strong></td></tr>
                                 {cust_ntn_row}
+                                {service_type_row}
                                 <tr><td style="padding: 2px 6px; font-weight: 600;">{esc(tpl.get('month_label', 'Invoice Month'))}</td><td>: &nbsp;<strong>{esc(inv_month_str)}</strong></td></tr>
                                 <tr><td style="padding: 2px 6px; font-weight: 600;">{esc(tpl.get('period_label', 'Invoice Period'))}</td><td>: &nbsp;<strong>{esc(period_str)}</strong></td></tr>
                             </table>

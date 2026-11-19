@@ -92,10 +92,26 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
   const bankName = tpl.bank_name || context.bank_details?.bank_name || '';
   const bankIban = tpl.bank_iban || context.bank_details?.iban || '';
 
+  const isTemporary =
+    Boolean(context.is_temporary_service) ||
+    (inv.notes || '').includes('[TSR:') ||
+    (inv.notes || '').includes('[TEMPORARY_SERVICE]') ||
+    (inv.notes || '').toLowerCase().includes('temporary event service') ||
+    (inv.notes || '').toLowerCase().includes('temporary security') ||
+    (client.name || '').toLowerCase().includes('temporary service') ||
+    lines.some((l) => l.line_type === 'TEMPORARY_SERVICE');
+
   const periodText =
-    inv.period_start && inv.period_end
-      ? `${formatLongDate(inv.period_start)} to ${formatLongDate(inv.period_end)}`
-      : '-';
+    context.period_display ||
+    (inv.period_start && inv.period_end
+      ? inv.period_start === inv.period_end
+        ? formatLongDate(inv.period_start)
+        : `${formatLongDate(inv.period_start)} to ${formatLongDate(inv.period_end)}`
+      : '-');
+
+  const displayCustomerName = isTemporary && client.name
+    ? client.name.replace(/--\s*temporary service.*$/i, '').trim()
+    : client.name;
 
   const contractCode = context.contract?.contract_number || inv.contract_code || '-';
   const showScBreakdown = mode === 'CHEQUE' && tpl.show_service_charges_row && sc.has_breakdown;
@@ -200,18 +216,41 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
 
       {/* Title Box (Image 3 = Boxed Bold Underlined INVOICE; Image 4 = Bold Italic Underlined SALES TAX INVOICE) */}
       {mode === 'CHEQUE' ? (
-        <div
-          style={{
-            textAlign: 'center',
-            fontSize: '20px',
-            fontWeight: 800,
-            fontStyle: 'italic',
-            textDecoration: 'underline',
-            margin: '6px 0 14px 0',
-            letterSpacing: '0.5px',
-          }}
-        >
-          {tpl.title || 'SALES TAX INVOICE'}
+        <div style={{ textAlign: 'center', margin: '6px 0 14px 0' }}>
+          <div
+            style={{
+              fontSize: '20px',
+              fontWeight: 800,
+              fontStyle: 'italic',
+              textDecoration: 'underline',
+              letterSpacing: '0.5px',
+            }}
+          >
+            {isTemporary
+              ? (tpl.title ? `${tpl.title} (TEMPORARY SERVICES)` : 'SALES TAX INVOICE (TEMPORARY SERVICES)')
+              : (tpl.title || 'SALES TAX INVOICE')}
+          </div>
+          {isTemporary && (
+            <div style={{ marginTop: '4px' }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  background: '#eff6ff',
+                  color: '#1d4ed8',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '4px',
+                  padding: '2px 10px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  letterSpacing: '0.6px',
+                  textTransform: 'uppercase',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                }}
+              >
+                Temporary Security Services
+              </span>
+            </div>
+          )}
         </div>
       ) : (
         <div
@@ -231,8 +270,24 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
               letterSpacing: '1px',
             }}
           >
-            {tpl.title || 'INVOICE'}
+            {isTemporary
+              ? (tpl.title ? `${tpl.title} (TEMPORARY SERVICES)` : 'INVOICE (TEMPORARY SERVICES)')
+              : (tpl.title || 'INVOICE')}
           </span>
+          {isTemporary && (
+            <div
+              style={{
+                marginTop: '6px',
+                fontSize: '12px',
+                fontWeight: 700,
+                color: '#1d4ed8',
+                letterSpacing: '0.6px',
+                textTransform: 'uppercase',
+              }}
+            >
+              Temporary Security Services
+            </div>
+          )}
         </div>
       )}
 
@@ -272,13 +327,22 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
             <tr>
               <td style={{ padding: '2px 10px 2px 0' }}>{tpl.customer_label || 'Customer Name'}</td>
               <td style={{ padding: '2px 8px' }}>:</td>
-              <td style={{ padding: '2px 0', fontWeight: 700 }}>{client.name}</td>
+              <td style={{ padding: '2px 0', fontWeight: 700 }}>{displayCustomerName}</td>
             </tr>
             {tpl.show_customer_ntn && (
               <tr>
                 <td style={{ padding: '2px 10px 2px 0' }}>{tpl.customer_ntn_label || 'Customer NTN #'}</td>
                 <td style={{ padding: '2px 8px' }}>:</td>
                 <td style={{ padding: '2px 0', fontWeight: 700 }}>{client.ntn || '-'}</td>
+              </tr>
+            )}
+            {isTemporary && (
+              <tr>
+                <td style={{ padding: '2px 10px 2px 0' }}>Service Type</td>
+                <td style={{ padding: '2px 8px' }}>:</td>
+                <td style={{ padding: '2px 0', fontWeight: 700, color: '#1e40af' }}>
+                  Temporary Security Service
+                </td>
               </tr>
             )}
             <tr>
@@ -365,9 +429,16 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
                   lineBaseRate = unitR;
                   lineBaseAmt = Number(ln.line_subtotal || 0);
                 }
-                const cleanDesc = (ln.description || '')
+                const rawDesc = ln.description || '';
+                let cleanDesc = rawDesc
                   .replace(/\s*\(CRM Rate[^)]*\)/gi, '')
+                  .replace(/--\s*temporary service/gi, '')
                   .trim();
+                const tempMatch = cleanDesc.match(/^Temporary Security:\s*(.*?)\s*@\s*(.*?)(?:\s*\(\d{4}-\d{2}-\d{2}\))?$/i);
+                if (tempMatch) {
+                  const venueClean = tempMatch[2].replace(/--\s*temporary service/gi, '').trim();
+                  cleanDesc = `Security Personnel (Temporary Service) @ ${venueClean}`;
+                }
                 return (
                   <tr key={ln.id || idx}>
                     <td style={{ border: '1px solid #0f172a', padding: '6px 8px', textAlign: 'center' }}>{idx + 1}</td>
@@ -397,9 +468,16 @@ export const InvoiceDocumentSheet: React.FC<InvoiceDocumentSheetProps> = ({
             </>
           ) : (
             lines.map((ln, idx) => {
-              const cleanDesc = (ln.description || '')
+              const rawDesc = ln.description || '';
+              let cleanDesc = rawDesc
                 .replace(/\s*\(CRM Rate[^)]*\)/gi, '')
+                .replace(/--\s*temporary service/gi, '')
                 .trim();
+              const tempMatch = cleanDesc.match(/^Temporary Security:\s*(.*?)\s*@\s*(.*?)(?:\s*\(\d{4}-\d{2}-\d{2}\))?$/i);
+              if (tempMatch) {
+                const venueClean = tempMatch[2].replace(/--\s*temporary service/gi, '').trim();
+                cleanDesc = `Security Personnel (Temporary Service) @ ${venueClean}`;
+              }
               return (
                 <tr key={ln.id || idx}>
                   <td style={{ border: '1px solid #0f172a', padding: '7px 8px', textAlign: 'center' }}>{idx + 1}</td>
